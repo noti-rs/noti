@@ -2,7 +2,7 @@ use std::{fmt::Display, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Notification {
     pub id: u32,
     pub name: String,
