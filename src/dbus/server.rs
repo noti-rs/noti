@@ -1,4 +1,4 @@
-use crate::notification::{Notification, Notifications, Urgency};
+use crate::notification::{Notification, Urgency};
 use std::{
     collections::HashMap,
     future::pending,
@@ -20,6 +20,31 @@ enum Method {
 struct Handler {
     count: u32,
     sender: Sender<Method>,
+}
+
+trait Notifications {
+    /// CloseNotification method
+    async fn close_notification(&self, id: u32) -> Result<()>;
+
+    /// GetCapabilities method
+    async fn get_capabilities(&self) -> Result<Vec<String>>;
+
+    /// GetServerInformation method
+    async fn get_server_information(&self) -> Result<(String, String, String, String)>;
+
+    /// Notify method
+    #[allow(clippy::too_many_arguments)]
+    async fn notify(
+        &mut self,
+        app_name: &str,
+        replaces_id: u32,
+        app_icon: &str,
+        summary: &str,
+        body: &str,
+        actions: Vec<&str>,
+        hints: HashMap<&str, Value<'_>>,
+        expire_timeout: i32,
+    ) -> Result<u32>;
 }
 
 // NOTE: https://specifications.freedesktop.org/notification-spec/notification-spec-latest.html
@@ -71,8 +96,8 @@ impl Notifications for Handler {
 
         let notification = Notification {
             id,
-            name: app_name.to_string(),
-            icon: app_icon.to_string(),
+            app_name: app_name.to_string(),
+            app_icon: app_icon.to_string(),
             is_read: false,
             urgency,
             summary: summary.to_string(),
