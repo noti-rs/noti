@@ -10,6 +10,7 @@ use zbus::{connection, fdo::Result, interface, zvariant::Value, Connection};
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
 
+#[derive(Debug)]
 pub struct Server {
     connection: Connection,
 }

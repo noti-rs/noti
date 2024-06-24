@@ -47,6 +47,17 @@ impl From<u32> for Urgency {
     }
 }
 
+impl From<&str> for Urgency {
+    fn from(value: &str) -> Self {
+        match value.to_lowercase().as_str() {
+            "low" => Self::Low,
+            "normal" => Self::Normal,
+            "critical" => Self::Critical,
+            _ => Self::default(),
+        }
+    }
+}
+
 impl Default for Urgency {
     fn default() -> Self {
         Self::Normal
