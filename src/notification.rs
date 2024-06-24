@@ -1,7 +1,6 @@
-use std::{collections::HashMap, fmt::Display, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use zbus::{fdo::Result, proxy, zvariant::Value};
+use std::{fmt::Display, time::Duration};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Notification {

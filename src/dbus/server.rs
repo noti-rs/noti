@@ -37,11 +37,11 @@ trait Notifications {
     #[allow(clippy::too_many_arguments)]
     async fn notify(
         &mut self,
-        app_name: &str,
+        app_name: String,
         replaces_id: u32,
-        app_icon: &str,
-        summary: &str,
-        body: &str,
+        app_icon: String,
+        summary: String,
+        body: String,
         actions: Vec<&str>,
         hints: HashMap<&str, Value<'_>>,
         expire_timeout: i32,
@@ -53,11 +53,11 @@ trait Notifications {
 impl Notifications for Handler {
     async fn notify(
         &mut self,
-        app_name: &str,
+        app_name: String,
         replaces_id: u32,
-        app_icon: &str,
-        summary: &str,
-        body: &str,
+        app_icon: String,
+        summary: String,
+        body: String,
         _actions: Vec<&str>,
         hints: HashMap<&str, Value<'_>>,
         expire_timeout: i32,
@@ -89,7 +89,8 @@ impl Notifications for Handler {
                 urgency = Urgency::from(val.to_owned());
             };
         };
-        // TODO: parse hints
+
+        // TODO: parse other hints
         // TODO: handle image data
         // TODO: handle desktop entry
 
@@ -97,14 +98,14 @@ impl Notifications for Handler {
 
         let notification = Notification {
             id,
-            app_name: app_name.to_string(),
-            app_icon: app_icon.to_string(),
-            is_read: false,
+            app_name,
+            app_icon,
             urgency,
-            summary: summary.to_string(),
-            body: body.to_string(),
+            summary,
+            body,
             expire_timeout,
             created_at,
+            is_read: false,
         };
 
         self.sender
@@ -126,7 +127,7 @@ impl Notifications for Handler {
 
     async fn get_server_information(&self) -> Result<(String, String, String, String)> {
         let name = String::from(env!("CARGO_PKG_NAME"));
-        let vendor = String::from(env!("CARGO_PKG_NAME"));
+        let vendor = String::from(env!("CARGO_PKG_AUTHORS"));
         let version = String::from(env!("CARGO_PKG_VERSION"));
         let specification_version = String::from("1.2");
 
@@ -188,7 +189,6 @@ pub async fn run() -> Result<()> {
 
     // TODO: signals handling
 
-    // Do other things or go to wait forever
     pending::<()>().await;
     Ok(())
 }
