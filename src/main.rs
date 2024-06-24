@@ -1,7 +1,7 @@
 use std::{error::Error, sync::Arc};
 use tokio::sync::mpsc;
 
-use dbus::server::Server;
+use dbus::{client::Client, server::Server};
 use notification::Action;
 
 mod dbus;
@@ -10,10 +10,23 @@ mod notification;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut server = Server::init().await?;
+    let mut client = Client::init().await?;
     let (sender, receiver) = mpsc::channel(5);
     let receiver_clone = Arc::new(tokio::sync::Mutex::new(receiver));
 
     server.setup_handler(sender).await?;
+
+    client
+        .notify(
+            "Noti".into(),
+            1,
+            "".into(),
+            "Noti is up!".into(),
+            "".into(),
+            1,
+            2000,
+        )
+        .await?;
 
     loop {
         let receiver = Arc::clone(&receiver_clone);
