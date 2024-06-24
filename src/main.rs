@@ -9,12 +9,12 @@ mod notification;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut server = Server::init().await?;
-    let mut client = Client::init().await?;
-
     let (sender, mut receiver) = mpsc::channel(5);
 
-    server.setup_handler(sender).await?;
+    let mut _server = Server::init(sender).await?;
+    let mut client = Client::init().await?;
+
+    // server.setup_handler(sender).await?;
     client
         .notify(
             "Noti".into(),
@@ -49,8 +49,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
+    // TODO: handle signals
+
     pending::<()>().await;
 
-    // TODO: handle signals
     Ok(())
 }

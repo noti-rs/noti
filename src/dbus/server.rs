@@ -10,7 +10,6 @@ use zbus::{connection, fdo::Result, interface, zvariant::Value, Connection};
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
 
-#[derive(Debug)]
 pub struct Server {
     connection: Connection,
 }
@@ -149,22 +148,14 @@ impl Notifications for Handler {
 }
 
 impl Server {
-    pub async fn init() -> Result<Self> {
+    pub async fn init(sender: Sender<Action>) -> Result<Self> {
+        let handler = Handler::init(sender);
         let connection = connection::Builder::session()?
             .name(NOTIFICATIONS_NAME)?
+            .serve_at(NOTIFICATIONS_PATH, handler)?
             .build()
             .await?;
 
         Ok(Self { connection })
-    }
-
-    pub async fn setup_handler(&mut self, sender: Sender<Action>) -> Result<()> {
-        let handler = Handler::init(sender);
-        self.connection
-            .object_server()
-            .at(NOTIFICATIONS_PATH, handler)
-            .await?;
-
-        Ok(())
     }
 }
