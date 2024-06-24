@@ -22,6 +22,7 @@ struct Handler {
     sender: Sender<Method>,
 }
 
+// generated via zbus-xmlgen
 trait Notifications {
     /// CloseNotification method
     async fn close_notification(&self, id: u32) -> Result<()>;
