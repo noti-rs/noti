@@ -1,45 +1,48 @@
-use crate::notification::{Notification, Urgency};
+use crate::notification::{Notification, Notifications, Urgency};
 use std::{
     collections::HashMap,
-    error::Error,
     future::pending,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::mpsc::{self, Sender};
-use zbus::{connection, interface, zvariant::Value};
+use zbus::{connection, fdo::Result, interface, zvariant::Value};
 
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
 
 enum Method {
-    CloseNotification { notification_id: u32 },
+    CloseNotification { id: u32 },
     Notify { notification: Notification },
     GetCapabilities,
     GetServerInformation,
 }
 
-struct NotificationHandler {
+struct Handler {
     count: u32,
     sender: Sender<Method>,
 }
 
+// NOTE: https://specifications.freedesktop.org/notification-spec/notification-spec-latest.html
 #[interface(name = "org.freedesktop.Notifications")]
-impl NotificationHandler {
-    #[dbus_interface(name = "Notify")]
+impl Notifications for Handler {
     async fn notify(
         &mut self,
-        app_name: String,
+        app_name: &str,
         replaces_id: u32,
-        app_icon: String,
-        summary: String,
-        body: String,
-        _actions: Vec<String>,
-        _hints: HashMap<String, Value<'_>>,
+        app_icon: &str,
+        summary: &str,
+        body: &str,
+        _actions: Vec<&str>,
+        hints: HashMap<&str, Value<'_>>,
         expire_timeout: i32,
-    ) {
-        self.count += 1;
+    ) -> Result<u32> {
+        let id = if replaces_id == 0 {
+            self.count += 1;
+            self.count
+        } else {
+            replaces_id
+        };
 
-        dbg!(expire_timeout);
         let expire_timeout = if expire_timeout != -1 {
             match expire_timeout.try_into() {
                 Ok(v) => Some(Duration::from_millis(v)),
@@ -54,17 +57,26 @@ impl NotificationHandler {
             .unwrap()
             .as_secs();
 
-        // TODO: 1. parse urgency
-        // TODO: 2. parse actions & hints
+        let mut urgency = Urgency::default();
+        if let Some(value) = hints.get("urgency") {
+            if let Value::U32(val) = value {
+                urgency = Urgency::from(val.to_owned());
+            };
+        };
+        // TODO: parse hints
+        // TODO: handle image data
+        // TODO: handle desktop entry
+
+        // TODO: handle actions
 
         let notification = Notification {
-            id: replaces_id,
-            name: app_name,
-            icon: app_icon,
+            id,
+            name: app_name.to_string(),
+            icon: app_icon.to_string(),
             is_read: false,
-            urgency: Urgency::default(),
-            summary,
-            body,
+            urgency,
+            summary: summary.to_string(),
+            body: body.to_string(),
             expire_timeout,
             created_at,
         };
@@ -73,23 +85,21 @@ impl NotificationHandler {
             .send(Method::Notify { notification })
             .await
             .unwrap();
+
+        Ok(id)
     }
 
-    #[dbus_interface(name = "CloseNotification")]
-    async fn close_notification(&mut self, id: u32) {
+    async fn close_notification(&self, id: u32) -> Result<()> {
         self.sender
-            .send(Method::CloseNotification {
-                notification_id: id,
-            })
+            .send(Method::CloseNotification { id })
             .await
             .unwrap();
+
+        Ok(())
     }
 
-    #[dbus_interface(name = "GetServerInformation")]
-    async fn get_server_information(
-        &mut self,
-    ) -> zbus::fdo::Result<(String, String, String, String)> {
-        let name = String::from("Notification Daemon");
+    async fn get_server_information(&self) -> Result<(String, String, String, String)> {
+        let name = String::from(env!("CARGO_PKG_NAME"));
         let vendor = String::from(env!("CARGO_PKG_NAME"));
         let version = String::from(env!("CARGO_PKG_VERSION"));
         let specification_version = String::from("1.2");
@@ -101,21 +111,18 @@ impl NotificationHandler {
         Ok((name, vendor, version, specification_version))
     }
 
-    #[dbus_interface(name = "GetCapabilities")]
-    async fn get_capabilities(&mut self) -> zbus::fdo::Result<Vec<&str>> {
-        // https://specifications.freedesktop.org/notification-spec/notification-spec-latest.html#protocol
-
+    async fn get_capabilities(&self) -> Result<Vec<String>> {
         let capabilities = vec![
-            "action-icons",
-            "actions",
-            "body",
-            "body-hyperlinks",
-            "body-images",
-            "body-markup",
-            "icon-multi",
-            "icon-static",
-            "persistence",
-            "sound",
+            // String::from("action-icons"),
+            // String::from("actions"),
+            String::from("body"),
+            // String::from("body-hyperlinks"),
+            // String::from("body-images"),
+            // String::from("body-markup"),
+            // String::from("icon-multi"),
+            // String::from("icon-static"),
+            // String::from("persistence"),
+            // String::from("sound"),
         ];
 
         self.sender.send(Method::GetCapabilities).await.unwrap();
@@ -123,10 +130,10 @@ impl NotificationHandler {
     }
 }
 
-pub async fn run() -> Result<(), Box<dyn Error>> {
+pub async fn run() -> Result<()> {
     let (method_sender, mut method_receiver) = mpsc::channel(5);
 
-    let handler = NotificationHandler {
+    let handler = Handler {
         count: 0,
         sender: method_sender,
     };
@@ -142,15 +149,18 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             match method {
                 Method::Notify { notification } => {
                     dbg!(notification);
+                    println!("");
                 }
-                Method::CloseNotification { notification_id } => {
-                    dbg!(notification_id);
+                Method::CloseNotification { id } => {
+                    dbg!(id);
                 }
                 Method::GetCapabilities => (),
                 Method::GetServerInformation => (),
             }
         }
     });
+
+    // TODO: signals handling
 
     // Do other things or go to wait forever
     pending::<()>().await;

@@ -29,8 +29,8 @@ impl Display for Urgency {
     }
 }
 
-impl From<u64> for Urgency {
-    fn from(value: u64) -> Self {
+impl From<u32> for Urgency {
+    fn from(value: u32) -> Self {
         match value {
             0 => Self::Low,
             1 => Self::Normal,
