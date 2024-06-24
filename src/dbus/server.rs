@@ -1,28 +1,31 @@
-use crate::notification::{Notification, Urgency};
+use crate::notification::{Action, Notification, Urgency};
 use std::{
     collections::HashMap,
     future::pending,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::mpsc::{self, Sender};
-use zbus::{connection, fdo::Result, interface, zvariant::Value};
+use zbus::{connection, fdo::Result, interface, zvariant::Value, Connection};
 
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
 
-enum Method {
-    CloseNotification { id: u32 },
-    Notify { notification: Notification },
-    GetCapabilities,
-    GetServerInformation,
+pub struct Server {
+    connection: Connection,
 }
 
 struct Handler {
     count: u32,
-    sender: Sender<Method>,
+    sender: Sender<Action>,
 }
 
-// generated via zbus-xmlgen
+impl Handler {
+    fn init(sender: Sender<Action>) -> Self {
+        Self { count: 0, sender }
+    }
+}
+
+/// Represents org.freedesktop.Notifications DBus interface
 trait Notifications {
     /// CloseNotification method
     async fn close_notification(&self, id: u32) -> Result<()>;
@@ -48,7 +51,6 @@ trait Notifications {
     ) -> Result<u32>;
 }
 
-// NOTE: https://specifications.freedesktop.org/notification-spec/notification-spec-latest.html
 #[interface(name = "org.freedesktop.Notifications")]
 impl Notifications for Handler {
     async fn notify(
@@ -108,19 +110,12 @@ impl Notifications for Handler {
             is_read: false,
         };
 
-        self.sender
-            .send(Method::Notify { notification })
-            .await
-            .unwrap();
-
+        self.sender.send(Action::Show(notification)).await.unwrap();
         Ok(id)
     }
 
     async fn close_notification(&self, id: u32) -> Result<()> {
-        self.sender
-            .send(Method::CloseNotification { id })
-            .await
-            .unwrap();
+        self.sender.send(Action::Close(Some(id))).await.unwrap();
 
         Ok(())
     }
@@ -131,10 +126,6 @@ impl Notifications for Handler {
         let version = String::from(env!("CARGO_PKG_VERSION"));
         let specification_version = String::from("1.2");
 
-        self.sender
-            .send(Method::GetServerInformation)
-            .await
-            .unwrap();
         Ok((name, vendor, version, specification_version))
     }
 
@@ -152,43 +143,27 @@ impl Notifications for Handler {
             // String::from("sound"),
         ];
 
-        self.sender.send(Method::GetCapabilities).await.unwrap();
         Ok(capabilities)
     }
 }
 
-pub async fn run() -> Result<()> {
-    let (method_sender, mut method_receiver) = mpsc::channel(5);
+impl Server {
+    pub async fn init() -> Result<Self> {
+        let connection = connection::Builder::session()?
+            .name(NOTIFICATIONS_NAME)?
+            .build()
+            .await?;
 
-    let handler = Handler {
-        count: 0,
-        sender: method_sender,
-    };
+        Ok(Self { connection })
+    }
 
-    let _conn = connection::Builder::session()?
-        .name(NOTIFICATIONS_NAME)?
-        .serve_at(NOTIFICATIONS_PATH, handler)?
-        .build()
-        .await?;
+    pub async fn setup_handler(&mut self, sender: Sender<Action>) -> Result<()> {
+        let handler = Handler::init(sender);
+        self.connection
+            .object_server()
+            .at(NOTIFICATIONS_PATH, handler)
+            .await?;
 
-    tokio::spawn(async move {
-        while let Some(method) = method_receiver.recv().await {
-            match method {
-                Method::Notify { notification } => {
-                    dbg!(notification);
-                    println!("");
-                }
-                Method::CloseNotification { id } => {
-                    dbg!(id);
-                }
-                Method::GetCapabilities => (),
-                Method::GetServerInformation => (),
-            }
-        }
-    });
-
-    // TODO: signals handling
-
-    pending::<()>().await;
-    Ok(())
+        Ok(())
+    }
 }

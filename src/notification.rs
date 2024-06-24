@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, time::Duration};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Notification {
     pub id: u32,
     pub app_name: String,
@@ -15,7 +15,15 @@ pub struct Notification {
     pub created_at: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone)]
+pub enum Action {
+    Show(Notification),
+    ShowLast,
+    Close(Option<u32>),
+    CloseAll,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum Urgency {
     Low,
     Normal,
