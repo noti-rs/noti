@@ -1,6 +1,5 @@
-
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, time::Duration};
+use std::{default, fmt::Display, time::Duration};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Notification {
@@ -9,13 +8,20 @@ pub struct Notification {
     pub app_icon: String,
     pub summary: String,
     pub body: String,
-    pub expire_timeout: Option<Duration>,
+    pub expire_timeout: Timeout,
     pub urgency: Urgency,
     pub is_read: bool,
     pub created_at: u64,
 }
 
-#[derive(Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
+pub enum Timeout {
+    Millis(u32),
+    Never,
+    #[default]
+    Configurable,
+}
+
 pub enum Action {
     Show(Notification),
     ShowLast,
@@ -23,9 +29,15 @@ pub enum Action {
     CloseAll,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub enum Signal {
+    ActionInvoked { notification_id: u32 },
+    NotificationClosed { notification_id: u32, reason: u32 },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
 pub enum Urgency {
     Low,
+    #[default]
     Normal,
     Critical,
 }
@@ -55,11 +67,5 @@ impl From<&str> for Urgency {
             "critical" => Self::Critical,
             _ => Self::default(),
         }
-    }
-}
-
-impl Default for Urgency {
-    fn default() -> Self {
-        Self::Normal
     }
 }

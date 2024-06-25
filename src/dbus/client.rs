@@ -1,5 +1,3 @@
-use crate::notification::Notification;
-use clap::{Arg, Command};
 use std::collections::HashMap;
 use std::u32;
 use zbus::fdo::Result;

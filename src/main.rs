@@ -1,20 +1,20 @@
-use std::{error::Error, future::pending, sync::Arc};
-use tokio::sync::mpsc;
-
 use dbus::{client::Client, server::Server};
-use notification::Action;
+use notification::{Action, Signal};
+use std::{error::Error, future::pending};
+use tokio::sync::mpsc;
 
 mod dbus;
 mod notification;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let (sender, mut receiver) = mpsc::channel(5);
+    let (action_tx, mut action_rx) = mpsc::channel(5);
+    let (signal_tx, mut signal_rx) = mpsc::unbounded_channel();
 
-    let mut _server = Server::init(sender).await?;
+    // NOTE: sig_sender here - is a temporary solution
+    let server = Server::init(action_tx, signal_tx).await?;
     let mut client = Client::init().await?;
 
-    // server.setup_handler(sender).await?;
     client
         .notify(
             "Noti".into(),
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await?;
 
     tokio::spawn(async move {
-        while let Some(act) = receiver.recv().await {
+        while let Some(act) = action_rx.recv().await {
             match act {
                 Action::Show(notification) => {
                     dbg!(notification);
@@ -49,9 +49,48 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
+    tokio::spawn(async move {
+        while let Some(sig) = signal_rx.recv().await {
+            match sig {
+                Signal::ActionInvoked { notification_id } => {
+                    server
+                        .connection
+                        .emit_signal(
+                            None::<()>,
+                            "/org/freedesktop/Notifications",
+                            "org.freedesktop.Notifications",
+                            "ActionInvoked",
+                            &(notification_id),
+                        )
+                        .await
+                        .unwrap();
+
+                    dbg!(notification_id);
+                }
+                Signal::NotificationClosed {
+                    notification_id,
+                    reason,
+                } => {
+                    server
+                        .connection
+                        .emit_signal(
+                            None::<()>,
+                            "/org/freedesktop/Notifications",
+                            "org.freedesktop.Notifications",
+                            "NotificationClosed",
+                            &(notification_id, reason),
+                        )
+                        .await
+                        .unwrap();
+
+                    dbg!(notification_id, reason);
+                }
+            }
+        }
+    });
+
     // TODO: handle signals
 
     pending::<()>().await;
-
-    Ok(())
+    unreachable!()
 }

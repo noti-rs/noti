@@ -1,58 +1,30 @@
-use crate::notification::{Action, Notification, Urgency};
+use crate::notification::{Action, Notification, Signal, Timeout, Urgency};
+use core::panic;
 use std::{
     collections::HashMap,
-    future::pending,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::mpsc::{self, Sender};
-use zbus::{connection, fdo::Result, interface, zvariant::Value, Connection};
+use tokio::sync::mpsc::{Sender, UnboundedSender};
+use zbus::{
+    connection, fdo::Result, interface, object_server::SignalContext, zvariant::Value, Connection,
+};
 
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
-
 pub struct Server {
-    connection: Connection,
+    pub connection: Connection,
 }
 
 struct Handler {
     count: u32,
     sender: Sender<Action>,
-}
 
-impl Handler {
-    fn init(sender: Sender<Action>) -> Self {
-        Self { count: 0, sender }
-    }
-}
-
-/// Represents org.freedesktop.Notifications DBus interface
-trait Notifications {
-    /// CloseNotification method
-    async fn close_notification(&self, id: u32) -> Result<()>;
-
-    /// GetCapabilities method
-    async fn get_capabilities(&self) -> Result<Vec<String>>;
-
-    /// GetServerInformation method
-    async fn get_server_information(&self) -> Result<(String, String, String, String)>;
-
-    /// Notify method
-    #[allow(clippy::too_many_arguments)]
-    async fn notify(
-        &mut self,
-        app_name: String,
-        replaces_id: u32,
-        app_icon: String,
-        summary: String,
-        body: String,
-        actions: Vec<&str>,
-        hints: HashMap<&str, Value<'_>>,
-        expire_timeout: i32,
-    ) -> Result<u32>;
+    // temporary
+    sig_sender: UnboundedSender<Signal>,
 }
 
 #[interface(name = "org.freedesktop.Notifications")]
-impl Notifications for Handler {
+impl Handler {
     async fn notify(
         &mut self,
         app_name: String,
@@ -71,13 +43,11 @@ impl Notifications for Handler {
             replaces_id
         };
 
-        let expire_timeout = if expire_timeout != -1 {
-            match expire_timeout.try_into() {
-                Ok(v) => Some(Duration::from_millis(v)),
-                Err(_) => None,
-            }
-        } else {
-            None
+        let expire_timeout = match expire_timeout {
+            t if t < -1 => todo!(),
+            -1 => Timeout::Never,
+            0 => Timeout::Configurable,
+            t => Timeout::Millis(t as u32),
         };
 
         let created_at = SystemTime::now()
@@ -85,11 +55,10 @@ impl Notifications for Handler {
             .unwrap()
             .as_secs();
 
-        let mut urgency = Urgency::default();
-        if let Some(value) = hints.get("urgency") {
-            if let Value::U32(val) = value {
-                urgency = Urgency::from(val.to_owned());
-            };
+        let urgency = if let Some(Value::U32(val)) = hints.get("urgency") {
+            Urgency::from(val.to_owned())
+        } else {
+            Default::default()
         };
 
         // TODO: parse other hints
@@ -116,7 +85,6 @@ impl Notifications for Handler {
 
     async fn close_notification(&self, id: u32) -> Result<()> {
         self.sender.send(Action::Close(Some(id))).await.unwrap();
-
         Ok(())
     }
 
@@ -145,11 +113,39 @@ impl Notifications for Handler {
 
         Ok(capabilities)
     }
+
+    async fn trigger_action_invoked_sig(&self) -> Result<()> {
+        self.sig_sender
+            .send(Signal::ActionInvoked { notification_id: 0 })
+            .unwrap();
+        Ok(())
+    }
+
+    async fn trigger_notification_closed_sig(&self) -> Result<()> {
+        self.sig_sender
+            .send(Signal::NotificationClosed {
+                notification_id: 0,
+                reason: 1,
+            })
+            .unwrap();
+        Ok(())
+    }
+
+    #[zbus(signal)]
+    async fn action_invoked(ctxt: &SignalContext<'_>) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn notification_closed(ctxt: &SignalContext<'_>) -> zbus::Result<()>;
 }
 
 impl Server {
-    pub async fn init(sender: Sender<Action>) -> Result<Self> {
-        let handler = Handler::init(sender);
+    pub async fn init(sender: Sender<Action>, sig_sender: UnboundedSender<Signal>) -> Result<Self> {
+        let handler = Handler {
+            count: 0,
+            sender,
+            sig_sender,
+        };
+
         let connection = connection::Builder::session()?
             .name(NOTIFICATIONS_NAME)?
             .serve_at(NOTIFICATIONS_PATH, handler)?
