@@ -9,12 +9,12 @@ use zbus::{proxy, zvariant::Value, Connection};
 )]
 trait Notifications {
     async fn notify(
-        &mut self,
-        app_name: String,
+        &self,
+        app_name: &str,
         replaces_id: u32,
-        app_icon: String,
-        summary: String,
-        body: String,
+        app_icon: &str,
+        summary: &str,
+        body: &str,
         actions: Vec<&str>,
         hints: HashMap<&str, Value<'_>>,
         expire_timeout: i32,
@@ -32,16 +32,16 @@ impl Client {
     }
 
     pub async fn notify(
-        &mut self,
-        app_name: String,
+        &self,
+        app_name: &str,
         replaces_id: u32,
-        app_icon: String,
-        summary: String,
-        body: String,
+        app_icon: &str,
+        summary: &str,
+        body: &str,
         urgency: u32,
         expire_timeout: i32,
     ) -> Result<u32> {
-        let mut proxy = NotificationsProxy::new(&self.connection).await?;
+        let proxy = NotificationsProxy::new(&self.connection).await?;
 
         let mut hints = HashMap::new();
         hints.insert("urgency", Value::from(urgency));

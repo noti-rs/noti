@@ -1,6 +1,7 @@
+use ::image::{ImageBuffer, Rgb};
 use dbus::{client::Client, server::Server};
 use notification::{Action, Signal};
-use std::{error::Error, future::pending};
+use std::{error::Error, future::pending, path::Path};
 use tokio::sync::mpsc;
 
 mod dbus;
@@ -9,32 +10,44 @@ mod notification;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let (action_tx, mut action_rx) = mpsc::channel(5);
-    let (signal_tx, mut signal_rx) = mpsc::unbounded_channel();
 
-    // NOTE: sig_sender here - is a temporary solution
-    let server = Server::init(action_tx, signal_tx).await?;
-    let mut client = Client::init().await?;
+    let server = Server::init(action_tx).await?;
+    let client = Client::init().await?;
 
+    // startup notification
     client
-        .notify(
-            "Noti".into(),
-            1,
-            "".into(),
-            "Noti is up!".into(),
-            "".into(),
-            1,
-            2000,
-        )
+        .notify("Noti", 1, "", "Noti is up!", "", 1, 2000)
         .await?;
 
     tokio::spawn(async move {
         while let Some(act) = action_rx.recv().await {
             match act {
                 Action::Show(notification) => {
-                    dbg!(notification);
+                    if let Some(image_data) = &notification.image_data {
+                        let width = image_data.width as u32;
+                        let height = image_data.height as u32;
+
+                        dbg!(&width, &height);
+
+                        let buffer: ImageBuffer<Rgb<u8>, Vec<u8>> =
+                            ImageBuffer::from_vec(width, height, image_data.data.to_vec())
+                                .expect("failed to create image buffer");
+
+                        let file_path = Path::new("output.png");
+                        buffer.save(file_path).expect("failed to save image");
+
+                        println!("umage saved to {}", file_path.display());
+                    };
                 }
                 Action::Close(Some(id)) => {
                     dbg!(id);
+                    server
+                        .emit_signal(Signal::NotificationClosed {
+                            notification_id: id,
+                            reason: 0,
+                        })
+                        .await
+                        .unwrap();
                 }
                 Action::Close(None) => {
                     todo!("close last");
@@ -48,48 +61,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     });
-
-    tokio::spawn(async move {
-        while let Some(sig) = signal_rx.recv().await {
-            match sig {
-                Signal::ActionInvoked { notification_id } => {
-                    server
-                        .connection
-                        .emit_signal(
-                            None::<()>,
-                            "/org/freedesktop/Notifications",
-                            "org.freedesktop.Notifications",
-                            "ActionInvoked",
-                            &(notification_id),
-                        )
-                        .await
-                        .unwrap();
-
-                    dbg!(notification_id);
-                }
-                Signal::NotificationClosed {
-                    notification_id,
-                    reason,
-                } => {
-                    server
-                        .connection
-                        .emit_signal(
-                            None::<()>,
-                            "/org/freedesktop/Notifications",
-                            "org.freedesktop.Notifications",
-                            "NotificationClosed",
-                            &(notification_id, reason),
-                        )
-                        .await
-                        .unwrap();
-
-                    dbg!(notification_id, reason);
-                }
-            }
-        }
-    });
-
-    // TODO: handle signals
 
     pending::<()>().await;
     unreachable!()

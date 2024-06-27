@@ -1,26 +1,72 @@
-use crate::notification::{Action, Notification, Signal, Timeout, Urgency};
-use core::panic;
+use crate::notification::{Action, ImageData, Notification, Signal, Timeout, Urgency};
 use std::{
     collections::HashMap,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::mpsc::{Sender, UnboundedSender};
+use tokio::sync::mpsc::Sender;
 use zbus::{
-    connection, fdo::Result, interface, object_server::SignalContext, zvariant::Value, Connection,
+    connection,
+    fdo::Result,
+    interface,
+    object_server::SignalContext,
+    zvariant::{Array, Value},
+    Connection,
 };
 
-const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
-const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
+pub const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
+pub const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
+
 pub struct Server {
-    pub connection: Connection,
+    connection: Connection,
+}
+
+impl Server {
+    pub async fn init(sender: Sender<Action>) -> Result<Self> {
+        let handler = Handler { count: 0, sender };
+
+        let connection = connection::Builder::session()?
+            .name(NOTIFICATIONS_NAME)?
+            .serve_at(NOTIFICATIONS_PATH, handler)?
+            .build()
+            .await?;
+
+        Ok(Self { connection })
+    }
+
+    pub async fn emit_signal(&self, signal: Signal) -> zbus::Result<()> {
+        match signal {
+            Signal::NotificationClosed {
+                notification_id,
+                reason,
+            } => {
+                self.connection
+                    .emit_signal(
+                        None::<()>,
+                        NOTIFICATIONS_PATH,
+                        NOTIFICATIONS_NAME,
+                        "NotificationClosed",
+                        &(notification_id, reason),
+                    )
+                    .await
+            }
+            Signal::ActionInvoked { notification_id } => {
+                self.connection
+                    .emit_signal(
+                        None::<()>,
+                        NOTIFICATIONS_PATH,
+                        NOTIFICATIONS_NAME,
+                        "ActionInvoked",
+                        &(notification_id),
+                    )
+                    .await
+            }
+        }
+    }
 }
 
 struct Handler {
     count: u32,
     sender: Sender<Action>,
-
-    // temporary
-    sig_sender: UnboundedSender<Signal>,
 }
 
 #[interface(name = "org.freedesktop.Notifications")]
@@ -61,8 +107,53 @@ impl Handler {
             Default::default()
         };
 
+        let image_data = ["image-data", "image_data", "icon-data", "icon_data"]
+            .iter()
+            .find_map(|&name| hints.get(name))
+            .and_then(|hint| {
+                zbus::zvariant::Structure::try_from(hint)
+                    .ok()
+                    .and_then(|image_structure| {
+                        let fields = image_structure.fields();
+                        if fields.len() < 7 {
+                            return None;
+                        }
+
+                        let image_raw = match Array::try_from(&fields[6]) {
+                            Ok(array) => array,
+                            Err(_) => return None,
+                        };
+
+                        let width = i32::try_from(&fields[0]).ok()?;
+                        let height = i32::try_from(&fields[1]).ok()?;
+                        let rowstride = i32::try_from(&fields[2]).ok()?;
+                        let has_alpha = bool::try_from(&fields[3]).ok()?;
+                        let bits_per_sample = i32::try_from(&fields[4]).ok()?;
+                        let channels = i32::try_from(&fields[5]).ok()?;
+
+                        let data = image_raw
+                            .iter()
+                            .map(|value| u8::try_from(value).expect("expected u8"))
+                            .collect::<Vec<_>>();
+
+                        Some(ImageData {
+                            width,
+                            height,
+                            rowstride,
+                            has_alpha,
+                            bits_per_sample,
+                            channels,
+                            data,
+                        })
+                    })
+            });
+
+        let image_path = match hints.get("image-path") {
+            Some(path) => Some(zbus::zvariant::Str::try_from(path).unwrap().to_string()),
+            None => None,
+        };
+
         // TODO: parse other hints
-        // TODO: handle image data
         // TODO: handle desktop entry
 
         // TODO: handle actions
@@ -76,6 +167,8 @@ impl Handler {
             body,
             expire_timeout,
             created_at,
+            image_data,
+            image_path,
             is_read: false,
         };
 
@@ -85,6 +178,7 @@ impl Handler {
 
     async fn close_notification(&self, id: u32) -> Result<()> {
         self.sender.send(Action::Close(Some(id))).await.unwrap();
+
         Ok(())
     }
 
@@ -114,44 +208,9 @@ impl Handler {
         Ok(capabilities)
     }
 
-    async fn trigger_action_invoked_sig(&self) -> Result<()> {
-        self.sig_sender
-            .send(Signal::ActionInvoked { notification_id: 0 })
-            .unwrap();
-        Ok(())
-    }
-
-    async fn trigger_notification_closed_sig(&self) -> Result<()> {
-        self.sig_sender
-            .send(Signal::NotificationClosed {
-                notification_id: 0,
-                reason: 1,
-            })
-            .unwrap();
-        Ok(())
-    }
+    #[zbus(signal)]
+    async fn action_invoked(ctx: &SignalContext<'_>) -> zbus::Result<()>;
 
     #[zbus(signal)]
-    async fn action_invoked(ctxt: &SignalContext<'_>) -> zbus::Result<()>;
-
-    #[zbus(signal)]
-    async fn notification_closed(ctxt: &SignalContext<'_>) -> zbus::Result<()>;
-}
-
-impl Server {
-    pub async fn init(sender: Sender<Action>, sig_sender: UnboundedSender<Signal>) -> Result<Self> {
-        let handler = Handler {
-            count: 0,
-            sender,
-            sig_sender,
-        };
-
-        let connection = connection::Builder::session()?
-            .name(NOTIFICATIONS_NAME)?
-            .serve_at(NOTIFICATIONS_PATH, handler)?
-            .build()
-            .await?;
-
-        Ok(Self { connection })
-    }
+    async fn notification_closed(ctx: &SignalContext<'_>) -> zbus::Result<()>;
 }

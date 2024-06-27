@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{default, fmt::Display, time::Duration};
+use std::fmt::Display;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Notification {
@@ -10,16 +10,34 @@ pub struct Notification {
     pub body: String,
     pub expire_timeout: Timeout,
     pub urgency: Urgency,
+    pub image_data: Option<ImageData>,
+    pub image_path: Option<String>,
     pub is_read: bool,
     pub created_at: u64,
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone)]
-pub enum Timeout {
-    Millis(u32),
-    Never,
-    #[default]
-    Configurable,
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ImageData {
+    // Width of image in pixels
+    pub width: i32,
+
+    // Height of image in pixels
+    pub height: i32,
+
+    // Distance in bytes between row starts
+    pub rowstride: i32,
+
+    // Whether the image has an alpha channel
+    pub has_alpha: bool,
+
+    // Must always be 8
+    pub bits_per_sample: i32,
+
+    // If has_alpha is TRUE, must be 4, otherwise 3
+    pub channels: i32,
+
+    // The image data, in RGB byte order
+    pub data: Vec<u8>,
 }
 
 pub enum Action {
@@ -32,6 +50,14 @@ pub enum Action {
 pub enum Signal {
     ActionInvoked { notification_id: u32 },
     NotificationClosed { notification_id: u32, reason: u32 },
+}
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
+pub enum Timeout {
+    Millis(u32),
+    Never,
+    #[default]
+    Configurable,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
