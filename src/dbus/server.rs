@@ -4,7 +4,7 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 use zbus::{
     connection,
     fdo::Result,
@@ -23,7 +23,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn init(sender: Sender<Action>) -> Result<Self> {
+    pub async fn init(sender: UnboundedSender<Action>) -> Result<Self> {
         let handler = Handler { sender };
 
         let connection = connection::Builder::session()?
@@ -72,7 +72,7 @@ impl Server {
 }
 
 struct Handler {
-    sender: Sender<Action>,
+    sender: UnboundedSender<Action>,
 }
 
 #[interface(name = "org.freedesktop.Notifications")]
@@ -177,19 +177,19 @@ impl Handler {
             is_read: false,
         };
 
-        self.sender.send(Action::Show(notification)).await.unwrap();
+        self.sender.send(Action::Show(notification)).unwrap();
         Ok(id)
     }
 
     async fn close_notification(&self, id: u32) -> Result<()> {
-        self.sender.send(Action::Close(Some(id))).await.unwrap();
+        self.sender.send(Action::Close(Some(id))).unwrap();
 
         Ok(())
     }
 
     // NOTE: temporary
     async fn close_last_notification(&self) -> Result<()> {
-        self.sender.send(Action::Close(None)).await.unwrap();
+        self.sender.send(Action::Close(None)).unwrap();
 
         Ok(())
     }
