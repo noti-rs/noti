@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Notification {
     pub id: u32,
     pub app_name: String,
@@ -16,27 +16,7 @@ pub struct Notification {
     pub created_at: u64,
 }
 
-impl std::fmt::Debug for Notification {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Notification")
-            .field("id", &self.id)
-            .field("app_name", &self.app_name)
-            .field("app_icon", &self.app_icon)
-            .field("summary", &self.summary)
-            .field("body", &self.body)
-            .field("expire_timeout", &self.expire_timeout)
-            .field("urgency", &self.urgency)
-            .field(
-                "image_data",
-                &self.image_data.as_ref().map(|_data| "Vec<u8> [ ... ]"),
-            )
-            .field("image_path", &self.image_path)
-            .field("is_read", &self.is_read)
-            .field("created_at", &self.created_at)
-            .finish()
-    }
-}
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ImageData {
     // Width of image in pixels
     pub width: i32,
@@ -58,6 +38,20 @@ pub struct ImageData {
 
     // The image data, in RGB byte order
     pub data: Vec<u8>,
+}
+
+impl std::fmt::Debug for ImageData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageData")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("rowstride", &self.rowstride)
+            .field("has_alpha", &self.has_alpha)
+            .field("bits_per_sample", &self.bits_per_sample)
+            .field("channels", &self.channels)
+            .field("data", &"Vec<u8> [...]")
+            .finish()
+    }
 }
 
 pub enum Action {
