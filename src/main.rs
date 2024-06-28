@@ -5,7 +5,6 @@ use tokio::sync::mpsc;
 
 mod dbus;
 mod notification;
-mod utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
