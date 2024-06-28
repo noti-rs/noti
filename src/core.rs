@@ -1,16 +1,13 @@
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
-    data::{
-        aliases::Result,
-        dbus::{Action, ClosingReason, Signal},
-    },
+    data::{aliases::Result, dbus::Action},
     dbus::server::Server,
 };
 
 pub async fn run() -> Result<()> {
     let (sender, mut receiver) = unbounded_channel();
-    let server = Server::init(sender).await?;
+    let _server = Server::init(sender).await?;
 
     std::hint::spin_loop();
 
@@ -31,25 +28,9 @@ pub async fn run() -> Result<()> {
                 }
                 Action::Close(Some(id)) => {
                     dbg!(id);
-
-                    server
-                        .emit_signal(Signal::NotificationClosed {
-                            notification_id: id,
-                            reason: ClosingReason::CallCloseNotification,
-                        })
-                        .await
-                        .unwrap();
                 }
                 Action::Close(None) => {
                     dbg!("close last");
-
-                    server
-                        .emit_signal(Signal::NotificationClosed {
-                            notification_id: 0,
-                            reason: ClosingReason::CallCloseNotification,
-                        })
-                        .await
-                        .unwrap();
                 }
                 Action::ShowLast => {
                     todo!("show last");

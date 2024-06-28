@@ -1,5 +1,5 @@
 use crate::data::{
-    dbus::{Action, Signal},
+    dbus::{Action, ClosingReason, Signal},
     notification::{ImageData, Notification, Timeout, Urgency},
 };
 use std::{
@@ -8,7 +8,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::mpsc::UnboundedSender;
-use zbus::{connection, fdo::Result, interface, zvariant::Value, Connection};
+use zbus::{
+    connection, fdo::Result, interface, object_server::SignalContext, zvariant::Value, Connection,
+};
 
 static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -145,14 +147,24 @@ impl Handler {
         Ok(id)
     }
 
-    async fn close_notification(&self, id: u32) -> Result<()> {
+    async fn close_notification(
+        &self,
+        id: u32,
+        #[zbus(signal_context)] ctxt: SignalContext<'_>,
+    ) -> Result<()> {
+        Self::notification_closed(&ctxt, id, ClosingReason::CallCloseNotification.into()).await?;
         self.sender.send(Action::Close(Some(id))).unwrap();
 
         Ok(())
     }
 
     // NOTE: temporary
-    async fn close_last_notification(&self) -> Result<()> {
+    async fn close_last_notification(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalContext<'_>,
+    ) -> Result<()> {
+        //WARNING: temporary id value
+        Self::notification_closed(&ctxt, 0, ClosingReason::CallCloseNotification.into()).await?;
         self.sender.send(Action::Close(None)).unwrap();
 
         Ok(())
@@ -183,4 +195,18 @@ impl Handler {
 
         Ok(capabilities)
     }
+
+    #[zbus(signal)]
+    async fn action_invoked(
+        ctxt: &SignalContext<'_>,
+        id: u32,
+        action_key: &str,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn notification_closed(
+        ctxt: &SignalContext<'_>,
+        id: u32,
+        reason: u32,
+    ) -> zbus::Result<()>;
 }
