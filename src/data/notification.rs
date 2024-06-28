@@ -54,18 +54,6 @@ impl std::fmt::Debug for ImageData {
     }
 }
 
-pub enum Action {
-    Show(Notification),
-    ShowLast,
-    Close(Option<u32>),
-    CloseAll,
-}
-
-pub enum Signal {
-    ActionInvoked { notification_id: u32 },
-    NotificationClosed { notification_id: u32, reason: u32 },
-}
-
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub enum Timeout {
     Millis(u32),

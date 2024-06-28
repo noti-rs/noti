@@ -1,4 +1,7 @@
-use crate::notification::{Action, ImageData, Notification, Signal, Timeout, Urgency};
+use crate::data::{
+    dbus::{Action, Signal},
+    notification::{ImageData, Notification, Timeout, Urgency},
+};
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicU32, Ordering},

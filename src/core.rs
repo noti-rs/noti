@@ -1,11 +1,12 @@
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
+    data::{
+        aliases::Result,
+        dbus::{Action, Signal},
+    },
     dbus::server::Server,
-    notification::{Action, Signal},
 };
-
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub async fn run() -> Result<()> {
     let (sender, mut receiver) = unbounded_channel();

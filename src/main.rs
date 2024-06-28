@@ -1,9 +1,11 @@
 mod core;
+mod data;
 mod dbus;
-mod notification;
+
+use data::aliases::Result;
 
 #[tokio::main]
-async fn main() -> core::Result<()> {
+async fn main() -> Result<()> {
     // let client = Client::init().await?;
     //
     // // startup notification
