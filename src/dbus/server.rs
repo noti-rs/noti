@@ -1,6 +1,7 @@
 use crate::notification::{Action, ImageData, Notification, Signal, Timeout, Urgency};
 use std::{
     collections::HashMap,
+    sync::atomic::{AtomicU32, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::mpsc::Sender;
@@ -8,7 +9,6 @@ use zbus::{
     connection,
     fdo::Result,
     interface,
-    object_server::SignalContext,
     zvariant::{Array, Value},
     Connection,
 };
@@ -16,13 +16,15 @@ use zbus::{
 pub const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 pub const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
 
+static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
+
 pub struct Server {
     connection: Connection,
 }
 
 impl Server {
     pub async fn init(sender: Sender<Action>) -> Result<Self> {
-        let handler = Handler { count: 0, sender };
+        let handler = Handler { sender };
 
         let connection = connection::Builder::session()?
             .name(NOTIFICATIONS_NAME)?
@@ -39,13 +41,18 @@ impl Server {
                 notification_id,
                 reason,
             } => {
+                let id = match notification_id {
+                    0 => UNIQUE_ID.load(Ordering::Relaxed),
+                    _ => notification_id,
+                };
+
                 self.connection
                     .emit_signal(
                         None::<()>,
                         NOTIFICATIONS_PATH,
                         NOTIFICATIONS_NAME,
                         "NotificationClosed",
-                        &(notification_id, reason),
+                        &(id, reason),
                     )
                     .await
             }
@@ -65,7 +72,6 @@ impl Server {
 }
 
 struct Handler {
-    count: u32,
     sender: Sender<Action>,
 }
 
@@ -83,8 +89,7 @@ impl Handler {
         expire_timeout: i32,
     ) -> Result<u32> {
         let id = if replaces_id == 0 {
-            self.count += 1;
-            self.count
+            UNIQUE_ID.fetch_add(1, Ordering::Relaxed)
         } else {
             replaces_id
         };
@@ -182,6 +187,13 @@ impl Handler {
         Ok(())
     }
 
+    // NOTE: temporary
+    async fn close_last_notification(&self) -> Result<()> {
+        self.sender.send(Action::Close(None)).await.unwrap();
+
+        Ok(())
+    }
+
     async fn get_server_information(&self) -> Result<(String, String, String, String)> {
         let name = String::from(env!("CARGO_PKG_NAME"));
         let vendor = String::from(env!("CARGO_PKG_AUTHORS"));
@@ -207,10 +219,4 @@ impl Handler {
 
         Ok(capabilities)
     }
-
-    #[zbus(signal)]
-    async fn action_invoked(ctx: &SignalContext<'_>) -> zbus::Result<()>;
-
-    #[zbus(signal)]
-    async fn notification_closed(ctx: &SignalContext<'_>) -> zbus::Result<()>;
 }

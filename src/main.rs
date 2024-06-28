@@ -1,11 +1,11 @@
-use ::image::{ImageBuffer, Rgb};
 use dbus::{client::Client, server::Server};
 use notification::{Action, Signal};
-use std::{error::Error, future::pending, path::Path};
+use std::{error::Error, future::pending};
 use tokio::sync::mpsc;
 
 mod dbus;
 mod notification;
+mod utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // startup notification
     client
-        .notify("Noti", 1, "", "Noti is up!", "", 1, 2000)
+        .notify(None, None, "Noti is up!", None, Some(1), Some(2000))
         .await?;
 
     tokio::spawn(async move {
@@ -24,23 +24,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
             match act {
                 Action::Show(notification) => {
                     if let Some(image_data) = &notification.image_data {
-                        let width = image_data.width as u32;
-                        let height = image_data.height as u32;
-
-                        dbg!(&width, &height);
-
-                        let buffer: ImageBuffer<Rgb<u8>, Vec<u8>> =
-                            ImageBuffer::from_vec(width, height, image_data.data.to_vec())
-                                .expect("failed to create image buffer");
-
-                        let file_path = Path::new("output.png");
-                        buffer.save(file_path).expect("failed to save image");
-
-                        println!("umage saved to {}", file_path.display());
+                        println!("image_data ok");
+                        // utils::save_image(image_data);
                     };
+
+                    if let Some(image_path) = &notification.image_path {
+                        dbg!(image_path);
+                    }
+
+                    dbg!(&notification);
                 }
                 Action::Close(Some(id)) => {
                     dbg!(id);
+
                     server
                         .emit_signal(Signal::NotificationClosed {
                             notification_id: id,
@@ -50,7 +46,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .unwrap();
                 }
                 Action::Close(None) => {
-                    todo!("close last");
+                    dbg!("close last");
+
+                    server
+                        .emit_signal(Signal::NotificationClosed {
+                            notification_id: 0,
+                            reason: 0,
+                        })
+                        .await
+                        .unwrap();
                 }
                 Action::ShowLast => {
                     todo!("show last");

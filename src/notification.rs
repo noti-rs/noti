@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Notification {
     pub id: u32,
     pub app_name: String,
@@ -16,6 +16,26 @@ pub struct Notification {
     pub created_at: u64,
 }
 
+impl std::fmt::Debug for Notification {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Notification")
+            .field("id", &self.id)
+            .field("app_name", &self.app_name)
+            .field("app_icon", &self.app_icon)
+            .field("summary", &self.summary)
+            .field("body", &self.body)
+            .field("expire_timeout", &self.expire_timeout)
+            .field("urgency", &self.urgency)
+            .field(
+                "image_data",
+                &self.image_data.as_ref().map(|_data| "Vec<u8> [ ... ]"),
+            )
+            .field("image_path", &self.image_path)
+            .field("is_read", &self.is_read)
+            .field("created_at", &self.created_at)
+            .finish()
+    }
+}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ImageData {
     // Width of image in pixels
@@ -58,6 +78,12 @@ pub enum Timeout {
     Never,
     #[default]
     Configurable,
+}
+
+impl Display for Timeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", format!("{self:?}"))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
