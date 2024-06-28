@@ -10,6 +10,7 @@ pub enum Action {
 pub enum Signal {
     ActionInvoked {
         notification_id: u32,
+        action_key: String,
     },
     NotificationClosed {
         notification_id: u32,

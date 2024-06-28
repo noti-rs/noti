@@ -8,13 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::mpsc::UnboundedSender;
-use zbus::{
-    connection,
-    fdo::Result,
-    interface,
-    zvariant::Value,
-    Connection,
-};
+use zbus::{connection, fdo::Result, interface, zvariant::Value, Connection};
 
 static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -59,14 +53,17 @@ impl Server {
                     )
                     .await
             }
-            Signal::ActionInvoked { notification_id } => {
+            Signal::ActionInvoked {
+                notification_id,
+                action_key,
+            } => {
                 self.connection
                     .emit_signal(
                         None::<()>,
                         Self::NOTIFICATIONS_PATH,
                         Self::NOTIFICATIONS_NAME,
                         "ActionInvoked",
-                        &(notification_id),
+                        &(notification_id, action_key),
                     )
                     .await
             }
