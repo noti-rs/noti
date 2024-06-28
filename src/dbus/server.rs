@@ -9,7 +9,12 @@ use std::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 use zbus::{
-    connection, fdo::Result, interface, object_server::SignalContext, zvariant::Value, Connection,
+    connection,
+    fdo::Result,
+    interface,
+    object_server::SignalContext,
+    zvariant::Value,
+    Connection,
 };
 
 static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
@@ -35,6 +40,7 @@ impl Server {
     }
 
     pub async fn emit_signal(&self, signal: Signal) -> zbus::Result<()> {
+        let ctxt = SignalContext::new(&self.connection, Self::NOTIFICATIONS_PATH)?;
         match signal {
             Signal::NotificationClosed {
                 notification_id,
@@ -45,30 +51,12 @@ impl Server {
                     _ => notification_id,
                 };
 
-                self.connection
-                    .emit_signal(
-                        None::<()>,
-                        Self::NOTIFICATIONS_PATH,
-                        Self::NOTIFICATIONS_NAME,
-                        "NotificationClosed",
-                        &(id, u32::from(reason)),
-                    )
-                    .await
+                Handler::notification_closed(&ctxt, id, u32::from(reason)).await
             }
             Signal::ActionInvoked {
                 notification_id,
                 action_key,
-            } => {
-                self.connection
-                    .emit_signal(
-                        None::<()>,
-                        Self::NOTIFICATIONS_PATH,
-                        Self::NOTIFICATIONS_NAME,
-                        "ActionInvoked",
-                        &(notification_id, action_key),
-                    )
-                    .await
-            }
+            } => Handler::action_invoked(&ctxt, notification_id, &action_key).await,
         }
     }
 }
