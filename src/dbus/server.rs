@@ -55,7 +55,7 @@ impl Server {
                         Self::NOTIFICATIONS_PATH,
                         Self::NOTIFICATIONS_NAME,
                         "NotificationClosed",
-                        &(id, reason),
+                        &(id, u32::from(reason)),
                     )
                     .await
             }

@@ -3,7 +3,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use crate::{
     data::{
         aliases::Result,
-        dbus::{Action, Signal},
+        dbus::{Action, ClosingReason, Signal},
     },
     dbus::server::Server,
 };
@@ -35,7 +35,7 @@ pub async fn run() -> Result<()> {
                     server
                         .emit_signal(Signal::NotificationClosed {
                             notification_id: id,
-                            reason: 0,
+                            reason: ClosingReason::CallCloseNotification,
                         })
                         .await
                         .unwrap();
@@ -46,7 +46,7 @@ pub async fn run() -> Result<()> {
                     server
                         .emit_signal(Signal::NotificationClosed {
                             notification_id: 0,
-                            reason: 0,
+                            reason: ClosingReason::CallCloseNotification,
                         })
                         .await
                         .unwrap();
