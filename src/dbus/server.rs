@@ -13,9 +13,6 @@ use zbus::{
     Connection,
 };
 
-pub const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
-pub const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
-
 static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
 
 pub struct Server {
@@ -23,12 +20,15 @@ pub struct Server {
 }
 
 impl Server {
+    const NOTIFICATIONS_PATH: &'static str = "/org/freedesktop/Notifications";
+    const NOTIFICATIONS_NAME: &'static str = "org.freedesktop.Notifications";
+
     pub async fn init(sender: UnboundedSender<Action>) -> Result<Self> {
         let handler = Handler { sender };
 
         let connection = connection::Builder::session()?
-            .name(NOTIFICATIONS_NAME)?
-            .serve_at(NOTIFICATIONS_PATH, handler)?
+            .name(Self::NOTIFICATIONS_NAME)?
+            .serve_at(Self::NOTIFICATIONS_PATH, handler)?
             .build()
             .await?;
 
@@ -49,8 +49,8 @@ impl Server {
                 self.connection
                     .emit_signal(
                         None::<()>,
-                        NOTIFICATIONS_PATH,
-                        NOTIFICATIONS_NAME,
+                        Self::NOTIFICATIONS_PATH,
+                        Self::NOTIFICATIONS_NAME,
                         "NotificationClosed",
                         &(id, reason),
                     )
@@ -60,8 +60,8 @@ impl Server {
                 self.connection
                     .emit_signal(
                         None::<()>,
-                        NOTIFICATIONS_PATH,
-                        NOTIFICATIONS_NAME,
+                        Self::NOTIFICATIONS_PATH,
+                        Self::NOTIFICATIONS_NAME,
                         "ActionInvoked",
                         &(notification_id),
                     )
