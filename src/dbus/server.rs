@@ -1,6 +1,7 @@
 use crate::data::{
     dbus::{Action, ClosingReason, Signal},
-    notification::{ImageData, Notification, Timeout, Urgency},
+    image::ImageData,
+    notification::{Notification, Timeout, Urgency},
 };
 use std::{
     collections::HashMap,
@@ -9,12 +10,7 @@ use std::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 use zbus::{
-    connection,
-    fdo::Result,
-    interface,
-    object_server::SignalContext,
-    zvariant::Value,
-    Connection,
+    connection, fdo::Result, interface, object_server::SignalContext, zvariant::Value, Connection,
 };
 
 static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
