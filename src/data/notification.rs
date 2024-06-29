@@ -1,7 +1,7 @@
 use super::image::ImageData;
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
-use zbus::zvariant::Str;
+use std::{collections::HashMap, fmt::Display};
+use zbus::zvariant::{Str, Value};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Notification {
@@ -11,13 +11,64 @@ pub struct Notification {
     pub summary: String,
     pub body: String,
     pub expire_timeout: Timeout,
+    pub hints: Hints,
+    pub is_read: bool,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Hints {
     pub urgency: Urgency,
     pub category: Category,
     pub desktop_entry: Option<String>,
     pub image_data: Option<ImageData>,
     pub image_path: Option<String>,
-    pub is_read: bool,
-    pub created_at: u64,
+    pub resident: Option<bool>,
+}
+
+impl From<&HashMap<&str, Value<'_>>> for Hints {
+    fn from(hints: &HashMap<&str, Value>) -> Self {
+        let urgency = if let Some(Value::U32(val)) = hints.get("urgency") {
+            Urgency::from(val.to_owned())
+        } else {
+            Default::default()
+        };
+
+        let category = if let Some(Value::Str(val)) = hints.get("category") {
+            Category::from(val.to_owned())
+        } else {
+            Default::default()
+        };
+
+        let image_data = ["image-data", "image_data", "icon-data", "icon_data"]
+            .iter()
+            .find_map(|&name| hints.get(name))
+            .and_then(ImageData::from_hint);
+
+        let image_path = hints
+            .get("image-path")
+            .and_then(|path| zbus::zvariant::Str::try_from(path).ok())
+            .map(|path| path.to_string());
+
+        let desktop_entry = hints
+            .get("desktop_entry")
+            .and_then(|entry| zbus::zvariant::Str::try_from(entry).ok())
+            .map(|entry| entry.to_string());
+
+        let resident = match hints.get("resident") {
+            Some(path) => Some(bool::try_from(path).unwrap()),
+            None => None,
+        };
+
+        Hints {
+            urgency,
+            category,
+            image_data,
+            image_path,
+            desktop_entry,
+            resident,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -1,7 +1,7 @@
 use crate::data::{
     dbus::{Action, ClosingReason, Signal},
     image::ImageData,
-    notification::{Category, Notification, Timeout, Urgency},
+    notification::{Category, Hints, Notification, Timeout, Urgency},
 };
 use std::{
     collections::HashMap,
@@ -92,35 +92,7 @@ impl Handler {
             .unwrap()
             .as_secs();
 
-        let urgency = if let Some(Value::U32(val)) = hints.get("urgency") {
-            Urgency::from(val.to_owned())
-        } else {
-            Default::default()
-        };
-
-        let category = if let Some(Value::Str(val)) = hints.get("category") {
-            Category::from(val.to_owned())
-        } else {
-            Default::default()
-        };
-
-        let image_data = ["image-data", "image_data", "icon-data", "icon_data"]
-            .iter()
-            .find_map(|&name| hints.get(name))
-            .and_then(ImageData::from_hint);
-
-        let image_path = match hints.get("image-path") {
-            Some(path) => Some(zbus::zvariant::Str::try_from(path).unwrap().to_string()),
-            None => None,
-        };
-
-        let desktop_entry = match hints.get("desktop_entry") {
-            Some(path) => Some(zbus::zvariant::Str::try_from(path).unwrap().to_string()),
-            None => None,
-        };
-
-        // TODO: parse other hints
-        // TODO: handle desktop entry
+        let hints = Hints::from(&hints);
 
         // TODO: handle actions
 
@@ -130,13 +102,9 @@ impl Handler {
             app_icon,
             summary,
             body,
-            urgency,
-            category,
-            desktop_entry,
+            hints,
             expire_timeout,
             created_at,
-            image_data,
-            image_path,
             is_read: false,
         };
 
