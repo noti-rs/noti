@@ -1,6 +1,7 @@
 mod core;
 mod data;
 mod dbus;
+mod render;
 
 use data::aliases::Result;
 
