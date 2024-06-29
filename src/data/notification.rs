@@ -45,18 +45,18 @@ impl From<&HashMap<&str, Value<'_>>> for Hints {
             .find_map(|&name| hints.get(name))
             .and_then(ImageData::from_hint);
 
-        let image_path = hints
-            .get("image-path")
-            .and_then(|path| zbus::zvariant::Str::try_from(path).ok())
-            .map(|path| path.to_string());
+        let image_path = match hints.get("image-path") {
+            Some(path) => Some(zbus::zvariant::Str::try_from(path).unwrap().to_string()),
+            None => None,
+        };
 
-        let desktop_entry = hints
-            .get("desktop_entry")
-            .and_then(|entry| zbus::zvariant::Str::try_from(entry).ok())
-            .map(|entry| entry.to_string());
+        let desktop_entry = match hints.get("desktop_entry") {
+            Some(val) => Some(zbus::zvariant::Str::try_from(val).unwrap().to_string()),
+            None => None,
+        };
 
         let resident = match hints.get("resident") {
-            Some(path) => Some(bool::try_from(path).unwrap()),
+            Some(val) => Some(bool::try_from(val).unwrap()),
             None => None,
         };
 
