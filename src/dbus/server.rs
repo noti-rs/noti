@@ -1,7 +1,7 @@
 use crate::data::{
     dbus::{Action, ClosingReason, Signal},
     image::ImageData,
-    notification::{Notification, Timeout, Urgency},
+    notification::{Category, Notification, Timeout, Urgency},
 };
 use std::{
     collections::HashMap,
@@ -98,6 +98,12 @@ impl Handler {
             Default::default()
         };
 
+        let category = if let Some(Value::Str(val)) = hints.get("category") {
+            Category::from(val.to_owned())
+        } else {
+            Default::default()
+        };
+
         let image_data = ["image-data", "image_data", "icon-data", "icon_data"]
             .iter()
             .find_map(|&name| hints.get(name))
@@ -117,9 +123,10 @@ impl Handler {
             id,
             app_name,
             app_icon,
-            urgency,
             summary,
             body,
+            urgency,
+            category,
             expire_timeout,
             created_at,
             image_data,
