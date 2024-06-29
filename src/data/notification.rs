@@ -13,6 +13,7 @@ pub struct Notification {
     pub expire_timeout: Timeout,
     pub urgency: Urgency,
     pub category: Category,
+    pub desktop_entry: Option<String>,
     pub image_data: Option<ImageData>,
     pub image_path: Option<String>,
     pub is_read: bool,

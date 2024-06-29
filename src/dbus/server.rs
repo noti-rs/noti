@@ -114,6 +114,11 @@ impl Handler {
             None => None,
         };
 
+        let desktop_entry = match hints.get("desktop_entry") {
+            Some(path) => Some(zbus::zvariant::Str::try_from(path).unwrap().to_string()),
+            None => None,
+        };
+
         // TODO: parse other hints
         // TODO: handle desktop entry
 
@@ -127,6 +132,7 @@ impl Handler {
             body,
             urgency,
             category,
+            desktop_entry,
             expire_timeout,
             created_at,
             image_data,
