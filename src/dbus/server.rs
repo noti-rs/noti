@@ -1,7 +1,6 @@
 use crate::data::{
     dbus::{Action, ClosingReason, Signal},
-    image::ImageData,
-    notification::{Category, Hints, Notification, Timeout, Urgency},
+    notification::{Hints, Notification, Timeout},
 };
 use std::{
     collections::HashMap,

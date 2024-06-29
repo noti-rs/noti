@@ -24,6 +24,17 @@ pub struct Hints {
     pub image_data: Option<ImageData>,
     pub image_path: Option<String>,
     pub resident: Option<bool>,
+    pub sound_file: Option<String>,
+    pub sound_name: Option<String>,
+    pub supress_sound: Option<bool>,
+    pub transient: Option<bool>,
+    pub coordinates: Option<Coordinates>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Coordinates {
+    pub x: i32,
+    pub y: i32,
 }
 
 impl From<&HashMap<&str, Value<'_>>> for Hints {
@@ -60,6 +71,29 @@ impl From<&HashMap<&str, Value<'_>>> for Hints {
             None => None,
         };
 
+        let sound_file = match hints.get("sound-file") {
+            Some(path) => Some(zbus::zvariant::Str::try_from(path).unwrap().to_string()),
+            None => None,
+        };
+
+        // NOTE: http://0pointer.de/public/sound-naming-spec.html
+        let sound_name = match hints.get("sound-name") {
+            Some(name) => Some(zbus::zvariant::Str::try_from(name).unwrap().to_string()),
+            None => None,
+        };
+
+        let supress_sound = match hints.get("supress-sound") {
+            Some(val) => Some(bool::try_from(val).unwrap()),
+            None => None,
+        };
+
+        let transient = match hints.get("transient") {
+            Some(val) => Some(bool::try_from(val).unwrap()),
+            None => None,
+        };
+
+        let coordinates = Coordinates::from_hints(&hints);
+
         Hints {
             urgency,
             category,
@@ -67,6 +101,23 @@ impl From<&HashMap<&str, Value<'_>>> for Hints {
             image_path,
             desktop_entry,
             resident,
+            sound_file,
+            sound_name,
+            supress_sound,
+            transient,
+            coordinates,
+        }
+    }
+}
+
+impl Coordinates {
+    fn from_hints(hints: &HashMap<&str, Value>) -> Option<Self> {
+        let x = hints.get("x").and_then(|val| i32::try_from(val).ok());
+        let y = hints.get("y").and_then(|val| i32::try_from(val).ok());
+
+        match (x, y) {
+            (Some(x), Some(y)) => Some(Self { x, y }),
+            _ => None,
         }
     }
 }
