@@ -6,6 +6,8 @@ use crate::data::{
     aliases::Result, internal_messages::InternalChannel, notification_layer::NotificationLayer,
 };
 
+mod font;
+
 struct Renderer {
     connection: Connection,
     layers: Vec<NotificationLayer>,
