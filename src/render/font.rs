@@ -1,5 +1,9 @@
 use derive_more::Display;
-use std::{collections::HashMap, ops::BitOr, sync::Arc};
+use std::{
+    collections::HashMap,
+    ops::{Add, Sub},
+    sync::Arc,
+};
 
 use ab_glyph::FontArc;
 
@@ -13,7 +17,7 @@ struct Font {
     data: FontArc,
 }
 
-#[derive(Hash, Display)]
+#[derive(Debug, Display, Hash, PartialEq, Eq)]
 enum FontStyle {
     #[display(fmt = "Bold")]
     Bold,
@@ -49,10 +53,10 @@ enum FontStyle {
     MediumItalic,
 }
 
-impl BitOr for FontStyle {
+impl Add for FontStyle {
     type Output = FontStyle;
 
-    fn bitor(self, rhs: Self) -> Self::Output {
+    fn add(self, rhs: Self) -> Self::Output {
         match self {
             Self::Bold => match rhs {
                 Self::Regular | Self::Bold => Self::Bold,
@@ -153,6 +157,110 @@ impl BitOr for FontStyle {
                     Self::MediumItalic
                 }
                 other => panic!("Incorrect combination of {} and {other}", self),
+            },
+        }
+    }
+}
+
+impl Sub for FontStyle {
+    type Output = FontStyle;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        match self {
+            FontStyle::Bold => match rhs {
+                FontStyle::Regular => Self::Bold,
+                FontStyle::Bold => Self::Regular,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::Italic => match rhs {
+                FontStyle::Regular => Self::Italic,
+                FontStyle::Italic => Self::Regular,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::BoldItalic => match rhs {
+                FontStyle::Bold => Self::Italic,
+                FontStyle::Italic => Self::Bold,
+                FontStyle::BoldItalic => Self::Regular,
+                FontStyle::Regular => Self::BoldItalic,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::ExtraBold => match rhs {
+                FontStyle::Bold => Self::Bold,
+                FontStyle::ExtraBold => Self::Regular,
+                FontStyle::Regular => Self::ExtraBold,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::ExtraLight => match rhs {
+                FontStyle::Regular => Self::ExtraLight,
+                FontStyle::ExtraLight => Self::Regular,
+                FontStyle::Light => Self::Light,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::ExtraLightItalic => match rhs {
+                FontStyle::ExtraLight => Self::Italic,
+                FontStyle::ExtraLightItalic => Self::Regular,
+                FontStyle::LightItalic => Self::Light,
+                FontStyle::Regular => Self::ExtraLightItalic,
+                FontStyle::Light => Self::LightItalic,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::ExtraBoldItalic => match rhs {
+                FontStyle::Bold => Self::BoldItalic,
+                FontStyle::Italic => Self::ExtraBold,
+                FontStyle::BoldItalic => Self::Bold,
+                FontStyle::ExtraBold => Self::Italic,
+                FontStyle::ExtraBoldItalic => Self::Regular,
+                FontStyle::Regular => Self::ExtraBoldItalic,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::LightItalic => match rhs {
+                FontStyle::Italic => Self::Light,
+                FontStyle::LightItalic => Self::Regular,
+                FontStyle::Regular => Self::LightItalic,
+                FontStyle::Light => Self::Italic,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::Thin => match rhs {
+                FontStyle::Thin => Self::Regular,
+                FontStyle::Regular => Self::Thin,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::ThinItalic => match rhs {
+                FontStyle::Thin => Self::Italic,
+                FontStyle::ThinItalic => Self::Regular,
+                FontStyle::Regular => Self::ThinItalic,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::SemiBold => match rhs {
+                FontStyle::SemiBold => Self::Regular,
+                FontStyle::Regular => Self::SemiBold,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::SemiBoldItalic => match rhs {
+                FontStyle::SemiBold => Self::Italic,
+                FontStyle::SemiBoldItalic => Self::Regular,
+                FontStyle::Regular => Self::SemiBoldItalic,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::Medium => match rhs {
+                FontStyle::Medium => Self::Regular,
+                FontStyle::Regular => Self::Medium,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::Regular => match rhs {
+                FontStyle::Regular => Self::Regular,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::Light => match rhs {
+                FontStyle::Regular => Self::Light,
+                FontStyle::Light => Self::Regular,
+                other => panic!("Incorrect substraction from {} by {other}", self),
+            },
+            FontStyle::MediumItalic => match rhs {
+                FontStyle::Regular => Self::MediumItalic,
+                FontStyle::Medium => Self::Italic,
+                FontStyle::MediumItalic => Self::Regular,
+                other => panic!("Incorrect substraction from {} by {other}", self),
             },
         }
     }
