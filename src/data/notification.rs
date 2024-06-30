@@ -1,7 +1,7 @@
 use super::image::ImageData;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
-use zbus::zvariant::{Str, Value};
+use zbus::zvariant::Value;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Notification {
@@ -26,72 +26,44 @@ pub struct Hints {
     pub resident: Option<bool>,
     pub sound_file: Option<String>,
     pub sound_name: Option<String>,
-    pub supress_sound: Option<bool>,
+    pub suppress_sound: Option<bool>,
     pub transient: Option<bool>,
     pub coordinates: Option<Coordinates>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Coordinates {
-    pub x: i32,
-    pub y: i32,
+impl Hints {
+    fn get_hint_value<'a, T>(hints: &'a HashMap<&'a str, Value<'a>>, key: &str) -> Option<T>
+    where
+        T: TryFrom<&'a Value<'a>>,
+    {
+        hints.get(key).and_then(|val| T::try_from(val).ok())
+    }
 }
 
 impl From<&HashMap<&str, Value<'_>>> for Hints {
     fn from(hints: &HashMap<&str, Value>) -> Self {
-        let urgency = if let Some(Value::U32(val)) = hints.get("urgency") {
-            Urgency::from(val.to_owned())
-        } else {
-            Default::default()
-        };
+        let urgency = hints
+            .get("urgency")
+            .and_then(Urgency::from_hint)
+            .unwrap_or_default();
 
-        let category = if let Some(Value::Str(val)) = hints.get("category") {
-            Category::from(val.to_owned())
-        } else {
-            Default::default()
-        };
+        let category = hints
+            .get("category")
+            .and_then(Category::from_hint)
+            .unwrap_or_default();
 
         let image_data = ["image-data", "image_data", "icon-data", "icon_data"]
             .iter()
             .find_map(|&name| hints.get(name))
             .and_then(ImageData::from_hint);
 
-        let image_path = match hints.get("image-path") {
-            Some(path) => Some(zbus::zvariant::Str::try_from(path).unwrap().to_string()),
-            None => None,
-        };
-
-        let desktop_entry = match hints.get("desktop_entry") {
-            Some(val) => Some(zbus::zvariant::Str::try_from(val).unwrap().to_string()),
-            None => None,
-        };
-
-        let resident = match hints.get("resident") {
-            Some(val) => Some(bool::try_from(val).unwrap()),
-            None => None,
-        };
-
-        let sound_file = match hints.get("sound-file") {
-            Some(path) => Some(zbus::zvariant::Str::try_from(path).unwrap().to_string()),
-            None => None,
-        };
-
-        // NOTE: http://0pointer.de/public/sound-naming-spec.html
-        let sound_name = match hints.get("sound-name") {
-            Some(name) => Some(zbus::zvariant::Str::try_from(name).unwrap().to_string()),
-            None => None,
-        };
-
-        let supress_sound = match hints.get("supress-sound") {
-            Some(val) => Some(bool::try_from(val).unwrap()),
-            None => None,
-        };
-
-        let transient = match hints.get("transient") {
-            Some(val) => Some(bool::try_from(val).unwrap()),
-            None => None,
-        };
-
+        let image_path = Self::get_hint_value(hints, "image-path");
+        let desktop_entry = Self::get_hint_value(hints, "desktop-entry");
+        let sound_file = Self::get_hint_value(hints, "sound-file");
+        let sound_name = Self::get_hint_value(hints, "sound-name"); // NOTE: http://0pointer.de/public/sound-naming-spec.html
+        let resident = Self::get_hint_value(hints, "resident");
+        let suppress_sound = Self::get_hint_value(hints, "suppress-sound");
+        let transient = Self::get_hint_value(hints, "transient");
         let coordinates = Coordinates::from_hints(&hints);
 
         Hints {
@@ -103,11 +75,17 @@ impl From<&HashMap<&str, Value<'_>>> for Hints {
             resident,
             sound_file,
             sound_name,
-            supress_sound,
+            suppress_sound,
             transient,
             coordinates,
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Coordinates {
+    pub x: i32,
+    pub y: i32,
 }
 
 impl Coordinates {
@@ -134,9 +112,17 @@ pub enum Category {
     None,
 }
 
-impl From<Str<'_>> for Category {
-    fn from(value: Str<'_>) -> Self {
-        match value.as_str() {
+impl Category {
+    pub fn from_hint(hint: &Value<'_>) -> Option<Category> {
+        String::try_from(hint)
+            .ok()
+            .and_then(|s| Some(Self::from(s.as_str())))
+    }
+}
+
+impl From<&str> for Category {
+    fn from(value: &str) -> Self {
+        match value {
             "device" => Self::Device(None),
             "device.added" => Self::Device(Some(CategoryEvent::Added)),
             "device.removed" => Self::Device(Some(CategoryEvent::Removed)),
@@ -197,6 +183,14 @@ pub enum Urgency {
     #[default]
     Normal,
     Critical,
+}
+
+impl Urgency {
+    pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
+        u32::try_from(hint)
+            .ok()
+            .and_then(|val| Some(Self::from(val)))
+    }
 }
 
 impl Display for Urgency {
