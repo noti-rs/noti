@@ -4,4 +4,3 @@ pub mod image;
 pub mod notification;
 pub mod text;
 pub mod internal_messages;
-pub mod notification_layer;

@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use smithay_client_toolkit::reexports::client::Connection;
 
-use crate::data::{
-    aliases::Result, internal_messages::InternalChannel, notification_layer::NotificationLayer,
-};
+use crate::data::{aliases::Result, internal_messages::InternalChannel};
+use crate::render::layer::NotificationLayer;
 
 mod font;
+mod layer;
 
 struct Renderer {
     connection: Connection,
