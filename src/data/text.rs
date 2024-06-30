@@ -27,6 +27,7 @@ struct Parser {
 impl Parser {
     fn new(input: String) -> Self {
         let input_static: &'static str = Box::leak(input.into_boxed_str());
+
         Self {
             input: input_static.to_string(),
             body: String::new(),
@@ -48,7 +49,11 @@ impl Parser {
         }
 
         self.close_unmatched_tags();
-        self.entities.sort_by(|a, b| a.offset.cmp(&b.offset));
+        self.entities.sort_by(|a, b| {
+            a.offset
+                .cmp(&b.offset)
+                .then_with(|| a.length.cmp(&b.length))
+        });
 
         Text {
             body: self.body,
@@ -69,7 +74,7 @@ impl Parser {
 
         if let Some(parsed_tag) = Tag::parse(&tag) {
             if parsed_tag.is_closing {
-                self.handle_closing_tag(parsed_tag);
+                self.handle_closing_tag();
             } else if parsed_tag.is_self_closing {
                 self.handle_self_closing_tag(parsed_tag);
             } else {
@@ -78,7 +83,7 @@ impl Parser {
         }
     }
 
-    fn handle_closing_tag(&mut self, tag: Tag) {
+    fn handle_closing_tag(&mut self) {
         if let Some((start_tag, start_pos)) = self.stack.pop() {
             let length = self.pos - start_pos;
             self.entities.push(Entity {
@@ -410,6 +415,30 @@ mod tests {
                         alt: Some("some cool image".to_string()),
                     },
                 },],
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_stupid_tags() {
+        let input = String::from("<b><i> hi </b></i>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from(" hi "),
+                entities: vec![
+                    Entity {
+                        offset: 0,
+                        length: 4,
+                        kind: EntityKind::Italic
+                    },
+                    Entity {
+                        offset: 0,
+                        length: 4,
+                        kind: EntityKind::Bold
+                    },
+                ],
             }
         )
     }
