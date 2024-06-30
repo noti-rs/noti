@@ -94,7 +94,6 @@ impl Handler {
 
         let hints = Hints::from(&hints);
 
-        let summary = Text::parse(summary);
         let body = Text::parse(body);
 
         // TODO: handle actions

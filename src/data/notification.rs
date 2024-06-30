@@ -8,7 +8,7 @@ pub struct Notification {
     pub id: u32,
     pub app_name: String,
     pub app_icon: String,
-    pub summary: Text,
+    pub summary: String,
     pub body: Text,
     pub expire_timeout: Timeout,
     pub hints: Hints,
