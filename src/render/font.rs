@@ -21,7 +21,7 @@ struct Font {
 enum FontStyle {
     #[display(fmt = "Bold")]
     Bold,
-    #[display(fmt = "Itali")]
+    #[display(fmt = "Italic")]
     Italic,
     #[display(fmt = "BoldItalic")]
     BoldItalic,
