@@ -281,9 +281,29 @@ fn add_font_styles() {
         FontStyle::Bold + FontStyle::Italic + FontStyle::ExtraBoldItalic,
         FontStyle::ExtraBoldItalic
     );
+    assert_eq!(
+        FontStyle::ExtraBoldItalic + FontStyle::ExtraBoldItalic,
+        FontStyle::ExtraBoldItalic
+    );
+    assert_eq!(
+        FontStyle::ExtraBold + FontStyle::ExtraBoldItalic,
+        FontStyle::ExtraBoldItalic
+    );
     assert_eq!(FontStyle::Light + FontStyle::Italic, FontStyle::LightItalic);
     assert_eq!(
         FontStyle::Light + FontStyle::Italic + FontStyle::ExtraLight,
+        FontStyle::ExtraLightItalic
+    );
+    assert_eq!(
+        FontStyle::ExtraLightItalic + FontStyle::ExtraLight,
+        FontStyle::ExtraLightItalic
+    );
+    assert_eq!(
+        FontStyle::LightItalic + FontStyle::ExtraLight,
+        FontStyle::ExtraLightItalic
+    );
+    assert_eq!(
+        FontStyle::Italic + FontStyle::ExtraLight,
         FontStyle::ExtraLightItalic
     );
     assert_eq!(
@@ -301,6 +321,7 @@ fn add_font_styles() {
     );
     assert_eq!(FontStyle::Thin + FontStyle::Italic, FontStyle::ThinItalic);
     assert_eq!(FontStyle::Thin + FontStyle::Regular, FontStyle::Thin);
+    assert_eq!(FontStyle::Thin + FontStyle::Thin, FontStyle::Thin);
     assert_eq!(FontStyle::Regular + FontStyle::Regular, FontStyle::Regular);
     assert_eq!(
         FontStyle::ExtraLightItalic + FontStyle::ExtraLightItalic,
@@ -330,15 +351,17 @@ fn sub_font_styles() {
         FontStyle::ExtraBoldItalic - FontStyle::Italic - FontStyle::ExtraBold,
         FontStyle::Regular
     );
+    assert_eq!(
+        FontStyle::ExtraBoldItalic - FontStyle::Italic,
+        FontStyle::ExtraBold,
+    );
     assert_eq!(FontStyle::LightItalic - FontStyle::Italic, FontStyle::Light);
     assert_eq!(
         FontStyle::ExtraLightItalic - FontStyle::Italic - FontStyle::ExtraLight,
         FontStyle::Regular
     );
-    assert_eq!(
-        FontStyle::ExtraLight - FontStyle::Light,
-        FontStyle::Light
-    );
+    assert_eq!(FontStyle::ExtraLight - FontStyle::Light, FontStyle::Light);
+    assert_eq!(FontStyle::ExtraLight - FontStyle::Light - FontStyle::Light, FontStyle::Regular);
     assert_eq!(FontStyle::Medium - FontStyle::Regular, FontStyle::Medium);
     assert_eq!(
         FontStyle::MediumItalic - FontStyle::Italic,
@@ -349,16 +372,14 @@ fn sub_font_styles() {
         FontStyle::Bold
     );
     assert_eq!(FontStyle::ThinItalic - FontStyle::Italic, FontStyle::Thin);
+    assert_eq!(FontStyle::ThinItalic - FontStyle::ThinItalic, FontStyle::Regular);
     assert_eq!(FontStyle::Thin - FontStyle::Regular, FontStyle::Thin);
     assert_eq!(FontStyle::Regular - FontStyle::Regular, FontStyle::Regular);
     assert_eq!(
         FontStyle::ExtraLightItalic - FontStyle::ExtraLightItalic,
         FontStyle::Regular
     );
-    assert_eq!(
-        FontStyle::BoldItalic - FontStyle::Bold,
-        FontStyle::Italic
-    );
+    assert_eq!(FontStyle::BoldItalic - FontStyle::Bold, FontStyle::Italic);
 }
 
 #[test]
