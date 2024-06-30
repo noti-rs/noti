@@ -19,12 +19,6 @@ pub trait Notifications {
         hints: HashMap<&str, Value<'_>>,
         expire_timeout: i32,
     ) -> Result<u32>;
-
-    #[zbus(signal)]
-    fn action_invoked(&self, id: u32, action_key: &str) -> zbus::Result<()>;
-
-    #[zbus(signal)]
-    fn notification_closed(&self, id: u32, reason: u32) -> zbus::Result<()>;
 }
 
 pub struct Client {

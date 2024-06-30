@@ -1,6 +1,6 @@
 use crate::data::{
     dbus::{Action, ClosingReason, Signal},
-    notification::{ImageData, Notification, Timeout, Urgency},
+    notification::{Hints, Notification, Timeout},
 };
 use std::{
     collections::HashMap,
@@ -9,12 +9,7 @@ use std::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 use zbus::{
-    connection,
-    fdo::Result,
-    interface,
-    object_server::SignalContext,
-    zvariant::Value,
-    Connection,
+    connection, fdo::Result, interface, object_server::SignalContext, zvariant::Value, Connection,
 };
 
 static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
@@ -96,24 +91,7 @@ impl Handler {
             .unwrap()
             .as_secs();
 
-        let urgency = if let Some(Value::U32(val)) = hints.get("urgency") {
-            Urgency::from(val.to_owned())
-        } else {
-            Default::default()
-        };
-
-        let image_data = ["image-data", "image_data", "icon-data", "icon_data"]
-            .iter()
-            .find_map(|&name| hints.get(name))
-            .and_then(ImageData::from_hint);
-
-        let image_path = match hints.get("image-path") {
-            Some(path) => Some(zbus::zvariant::Str::try_from(path).unwrap().to_string()),
-            None => None,
-        };
-
-        // TODO: parse other hints
-        // TODO: handle desktop entry
+        let hints = Hints::from(&hints);
 
         // TODO: handle actions
 
@@ -121,13 +99,11 @@ impl Handler {
             id,
             app_name,
             app_icon,
-            urgency,
             summary,
             body,
+            hints,
             expire_timeout,
             created_at,
-            image_data,
-            image_path,
             is_read: false,
         };
 

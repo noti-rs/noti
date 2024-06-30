@@ -1,6 +1,7 @@
+use super::image::ImageData;
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
-use zbus::zvariant::{Array, Structure, Value};
+use std::{collections::HashMap, fmt::Display};
+use zbus::zvariant::Value;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Notification {
@@ -10,91 +11,157 @@ pub struct Notification {
     pub summary: String,
     pub body: String,
     pub expire_timeout: Timeout,
-    pub urgency: Urgency,
-    pub image_data: Option<ImageData>,
-    pub image_path: Option<String>,
+    pub hints: Hints,
     pub is_read: bool,
     pub created_at: u64,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ImageData {
-    // Width of image in pixels
-    pub width: i32,
-
-    // Height of image in pixels
-    pub height: i32,
-
-    // Distance in bytes between row starts
-    pub rowstride: i32,
-
-    // Whether the image has an alpha channel
-    pub has_alpha: bool,
-
-    // Must always be 8
-    pub bits_per_sample: i32,
-
-    // If has_alpha is TRUE, must be 4, otherwise 3
-    pub channels: i32,
-
-    // The image data, in RGB byte order
-    pub data: Vec<u8>,
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Hints {
+    pub urgency: Urgency,
+    pub category: Category,
+    pub desktop_entry: Option<String>,
+    pub image_data: Option<ImageData>,
+    pub image_path: Option<String>,
+    pub resident: Option<bool>,
+    pub sound_file: Option<String>,
+    pub sound_name: Option<String>,
+    pub suppress_sound: Option<bool>,
+    pub transient: Option<bool>,
+    pub coordinates: Option<Coordinates>,
 }
 
-impl ImageData {
-    pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
-        Structure::try_from(hint)
-            .ok()
-            .and_then(Self::from_structure)
+impl Hints {
+    fn get_hint_value<'a, T>(hints: &'a HashMap<&'a str, Value<'a>>, key: &str) -> Option<T>
+    where
+        T: TryFrom<&'a Value<'a>>,
+    {
+        hints.get(key).and_then(|val| T::try_from(val).ok())
     }
+}
 
-    fn from_structure(image_structure: Structure) -> Option<Self> {
-        let fields = image_structure.fields();
-        if fields.len() < 7 {
-            return None;
-        }
+impl From<&HashMap<&str, Value<'_>>> for Hints {
+    fn from(hints: &HashMap<&str, Value>) -> Self {
+        let urgency = hints
+            .get("urgency")
+            .and_then(Urgency::from_hint)
+            .unwrap_or_default();
 
-        let image_raw = match Array::try_from(&fields[6]) {
-            Ok(array) => array,
-            Err(_) => return None,
-        };
+        let category = hints
+            .get("category")
+            .and_then(Category::from_hint)
+            .unwrap_or_default();
 
-        let width = i32::try_from(&fields[0]).ok()?;
-        let height = i32::try_from(&fields[1]).ok()?;
-        let rowstride = i32::try_from(&fields[2]).ok()?;
-        let has_alpha = bool::try_from(&fields[3]).ok()?;
-        let bits_per_sample = i32::try_from(&fields[4]).ok()?;
-        let channels = i32::try_from(&fields[5]).ok()?;
-
-        let data = image_raw
+        let image_data = ["image-data", "image_data", "icon-data", "icon_data"]
             .iter()
-            .map(|value| u8::try_from(value).expect("expected u8"))
-            .collect::<Vec<_>>();
+            .find_map(|&name| hints.get(name))
+            .and_then(ImageData::from_hint);
 
-        Some(ImageData {
-            width,
-            height,
-            rowstride,
-            has_alpha,
-            bits_per_sample,
-            channels,
-            data,
-        })
+        let image_path = Self::get_hint_value(hints, "image-path");
+        let desktop_entry = Self::get_hint_value(hints, "desktop-entry");
+        let sound_file = Self::get_hint_value(hints, "sound-file");
+        let sound_name = Self::get_hint_value(hints, "sound-name"); // NOTE: http://0pointer.de/public/sound-naming-spec.html
+        let resident = Self::get_hint_value(hints, "resident");
+        let suppress_sound = Self::get_hint_value(hints, "suppress-sound");
+        let transient = Self::get_hint_value(hints, "transient");
+        let coordinates = Coordinates::from_hints(&hints);
+
+        Hints {
+            urgency,
+            category,
+            image_data,
+            image_path,
+            desktop_entry,
+            resident,
+            sound_file,
+            sound_name,
+            suppress_sound,
+            transient,
+            coordinates,
+        }
     }
 }
 
-impl std::fmt::Debug for ImageData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ImageData")
-            .field("width", &self.width)
-            .field("height", &self.height)
-            .field("rowstride", &self.rowstride)
-            .field("has_alpha", &self.has_alpha)
-            .field("bits_per_sample", &self.bits_per_sample)
-            .field("channels", &self.channels)
-            .field("data", &"Vec<u8> [...]")
-            .finish()
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Coordinates {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl Coordinates {
+    fn from_hints(hints: &HashMap<&str, Value>) -> Option<Self> {
+        let x = hints.get("x").and_then(|val| i32::try_from(val).ok());
+        let y = hints.get("y").and_then(|val| i32::try_from(val).ok());
+
+        match (x, y) {
+            (Some(x), Some(y)) => Some(Self { x, y }),
+            _ => None,
+        }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum Category {
+    Device(CategoryEvent),
+    Email(CategoryEvent),
+    InstantMessage(CategoryEvent),
+    Network(CategoryEvent),
+    Presence(CategoryEvent),
+    Transfer(CategoryEvent),
+    #[default]
+    None,
+}
+
+impl Category {
+    pub fn from_hint(hint: &Value<'_>) -> Option<Category> {
+        String::try_from(hint)
+            .ok()
+            .and_then(|s| Some(Self::from(s.as_str())))
+    }
+}
+
+impl From<&str> for Category {
+    fn from(value: &str) -> Self {
+        match value {
+            "device" => Self::Device(CategoryEvent::Generic),
+            "device.added" => Self::Device(CategoryEvent::Added),
+            "device.removed" => Self::Device(CategoryEvent::Removed),
+            "device.error" => Self::Device(CategoryEvent::Error),
+            "email" => Self::Email(CategoryEvent::Generic),
+            "email.arrived" => Self::Email(CategoryEvent::Arrived),
+            "email.bounced" => Self::Email(CategoryEvent::Bounced),
+            "im" => Self::InstantMessage(CategoryEvent::Generic),
+            "im.received" => Self::InstantMessage(CategoryEvent::Received),
+            "im.error" => Self::InstantMessage(CategoryEvent::Error),
+            "network" => Self::Network(CategoryEvent::Generic),
+            "network.connected" => Self::Network(CategoryEvent::Connected),
+            "network.disconnected" => Self::Network(CategoryEvent::Disconnected),
+            "network.error" => Self::Network(CategoryEvent::Error),
+            "presence" => Self::Presence(CategoryEvent::Generic),
+            "presence.online" => Self::Presence(CategoryEvent::Online),
+            "presence.offline" => Self::Presence(CategoryEvent::Offline),
+            "transfer" => Self::Transfer(CategoryEvent::Generic),
+            "transfer.complete" => Self::Transfer(CategoryEvent::Complete),
+            "transfer.error" => Self::Transfer(CategoryEvent::Error),
+            _ => Self::None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CategoryEvent {
+    Generic,
+    Added,
+    Removed,
+    Arrived,
+    Bounced,
+    Received,
+    Error,
+    Connected,
+    Disconnected,
+    Offline,
+    Online,
+    Complete,
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
@@ -117,6 +184,14 @@ pub enum Urgency {
     #[default]
     Normal,
     Critical,
+}
+
+impl Urgency {
+    pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
+        u32::try_from(hint)
+            .ok()
+            .and_then(|val| Some(Self::from(val)))
+    }
 }
 
 impl Display for Urgency {

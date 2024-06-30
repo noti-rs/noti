@@ -1,3 +1,4 @@
-pub mod notification;
-pub mod dbus;
 pub mod aliases;
+pub mod dbus;
+pub mod image;
+pub mod notification;

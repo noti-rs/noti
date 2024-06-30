@@ -9,18 +9,16 @@ pub async fn run() -> Result<()> {
     let (sender, mut receiver) = unbounded_channel();
     let _server = Server::init(sender).await?;
 
-    std::hint::spin_loop();
-
     loop {
         while let Ok(action) = receiver.try_recv() {
             match action {
                 Action::Show(notification) => {
-                    if let Some(image_data) = &notification.image_data {
+                    if let Some(image_data) = &notification.hints.image_data {
                         println!("image_data ok");
                         // utils::save_image(image_data);
                     };
 
-                    if let Some(image_path) = &notification.image_path {
+                    if let Some(image_path) = &notification.hints.image_path {
                         dbg!(image_path);
                     }
 
@@ -40,5 +38,7 @@ pub async fn run() -> Result<()> {
                 }
             }
         }
+
+        std::hint::spin_loop();
     }
 }
