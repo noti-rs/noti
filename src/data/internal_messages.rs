@@ -26,8 +26,8 @@ impl InternalChannel {
         Ok(())
     }
 
-    pub fn try_recv_from_renderer(&self) -> Result<ServerMessage> {
-        Ok(self.renderer_receiver.try_recv()?)
+    pub fn try_recv_from_renderer(&self) -> Result<RendererMessage> {
+        Ok(self.server_receiver.try_recv()?)
     }
 
     pub fn send_to_renderer(&self, server_message: ServerMessage) -> Result<()> {
@@ -35,8 +35,8 @@ impl InternalChannel {
         Ok(())
     }
 
-    pub fn try_recv_from_server(&self) -> Result<RendererMessage> {
-        Ok(self.server_receiver.try_recv()?)
+    pub fn try_recv_from_server(&self) -> Result<ServerMessage> {
+        Ok(self.renderer_receiver.try_recv()?)
     }
 }
 
