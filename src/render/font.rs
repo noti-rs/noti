@@ -265,3 +265,100 @@ impl Sub for FontStyle {
         }
     }
 }
+
+#[test]
+fn add_font_styles() {
+    assert_eq!(FontStyle::Bold + FontStyle::Italic, FontStyle::BoldItalic);
+    assert_eq!(
+        FontStyle::Bold + FontStyle::Italic + FontStyle::Regular,
+        FontStyle::BoldItalic
+    );
+    assert_eq!(
+        FontStyle::Bold + FontStyle::Italic + FontStyle::ExtraBoldItalic,
+        FontStyle::ExtraBoldItalic
+    );
+    assert_eq!(FontStyle::Light + FontStyle::Italic, FontStyle::LightItalic);
+    assert_eq!(
+        FontStyle::Light + FontStyle::Italic + FontStyle::ExtraLight,
+        FontStyle::ExtraLightItalic
+    );
+    assert_eq!(
+        FontStyle::Light + FontStyle::ExtraLight,
+        FontStyle::ExtraLight
+    );
+    assert_eq!(FontStyle::Medium + FontStyle::Regular, FontStyle::Medium);
+    assert_eq!(
+        FontStyle::Medium + FontStyle::Italic,
+        FontStyle::MediumItalic
+    );
+    assert_eq!(
+        FontStyle::ExtraBoldItalic + FontStyle::Italic + FontStyle::Regular + FontStyle::Bold,
+        FontStyle::ExtraBoldItalic
+    );
+    assert_eq!(FontStyle::Thin + FontStyle::Italic, FontStyle::ThinItalic);
+    assert_eq!(FontStyle::Thin + FontStyle::Regular, FontStyle::Thin);
+    assert_eq!(FontStyle::Regular + FontStyle::Regular, FontStyle::Regular);
+    assert_eq!(
+        FontStyle::ExtraLightItalic + FontStyle::ExtraLightItalic,
+        FontStyle::ExtraLightItalic
+    );
+    assert_eq!(
+        FontStyle::BoldItalic + FontStyle::Bold,
+        FontStyle::BoldItalic
+    );
+    assert_eq!(FontStyle::SemiBold + FontStyle::Bold, FontStyle::SemiBold);
+}
+
+#[test]
+#[should_panic]
+fn panicky_add_font_style() {
+    let _ = FontStyle::Bold + FontStyle::Thin;
+}
+
+#[test]
+fn sub_font_styles() {
+    assert_eq!(FontStyle::BoldItalic - FontStyle::Italic, FontStyle::Bold);
+    assert_eq!(
+        FontStyle::BoldItalic - FontStyle::Italic - FontStyle::Regular,
+        FontStyle::Bold
+    );
+    assert_eq!(
+        FontStyle::ExtraBoldItalic - FontStyle::Italic - FontStyle::ExtraBold,
+        FontStyle::Regular
+    );
+    assert_eq!(FontStyle::LightItalic - FontStyle::Italic, FontStyle::Light);
+    assert_eq!(
+        FontStyle::ExtraLightItalic - FontStyle::Italic - FontStyle::ExtraLight,
+        FontStyle::Regular
+    );
+    assert_eq!(
+        FontStyle::ExtraLight - FontStyle::Light,
+        FontStyle::Light
+    );
+    assert_eq!(FontStyle::Medium - FontStyle::Regular, FontStyle::Medium);
+    assert_eq!(
+        FontStyle::MediumItalic - FontStyle::Italic,
+        FontStyle::Medium
+    );
+    assert_eq!(
+        FontStyle::ExtraBoldItalic - FontStyle::Italic - FontStyle::Regular - FontStyle::Bold,
+        FontStyle::Bold
+    );
+    assert_eq!(FontStyle::ThinItalic - FontStyle::Italic, FontStyle::Thin);
+    assert_eq!(FontStyle::Thin - FontStyle::Regular, FontStyle::Thin);
+    assert_eq!(FontStyle::Regular - FontStyle::Regular, FontStyle::Regular);
+    assert_eq!(
+        FontStyle::ExtraLightItalic - FontStyle::ExtraLightItalic,
+        FontStyle::Regular
+    );
+    assert_eq!(
+        FontStyle::BoldItalic - FontStyle::Bold,
+        FontStyle::Italic
+    );
+}
+
+#[test]
+#[should_panic]
+fn panicky_sub_font_style() {
+    let _ = FontStyle::Bold - FontStyle::Thin;
+}
