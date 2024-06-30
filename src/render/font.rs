@@ -19,20 +19,20 @@ struct Font {
 
 #[derive(Debug, Display, Hash, PartialEq, Eq)]
 enum FontStyle {
+    #[display(fmt = "Regular")]
+    Regular,
     #[display(fmt = "Bold")]
     Bold,
     #[display(fmt = "Italic")]
     Italic,
     #[display(fmt = "BoldItalic")]
     BoldItalic,
-    #[display(fmt = "ExtraBold")]
-    ExtraBold,
-    #[display(fmt = "ExtraLight")]
-    ExtraLight,
-    #[display(fmt = "ExtraLightItalic")]
-    ExtraLightItalic,
-    #[display(fmt = "ExtraBoldItalic")]
-    ExtraBoldItalic,
+    #[display(fmt = "Medium")]
+    Medium,
+    #[display(fmt = "MediumItalic")]
+    MediumItalic,
+    #[display(fmt = "Light")]
+    Light,
     #[display(fmt = "LightItalic")]
     LightItalic,
     #[display(fmt = "Thin")]
@@ -43,14 +43,14 @@ enum FontStyle {
     SemiBold,
     #[display(fmt = "SemiBoldItalic")]
     SemiBoldItalic,
-    #[display(fmt = "Medium")]
-    Medium,
-    #[display(fmt = "Regular")]
-    Regular,
-    #[display(fmt = "Light")]
-    Light,
-    #[display(fmt = "MediumItalic")]
-    MediumItalic,
+    #[display(fmt = "ExtraBold")]
+    ExtraBold,
+    #[display(fmt = "ExtraLight")]
+    ExtraLight,
+    #[display(fmt = "ExtraBoldItalic")]
+    ExtraBoldItalic,
+    #[display(fmt = "ExtraLightItalic")]
+    ExtraLightItalic,
 }
 
 impl Add for FontStyle {
@@ -361,7 +361,10 @@ fn sub_font_styles() {
         FontStyle::Regular
     );
     assert_eq!(FontStyle::ExtraLight - FontStyle::Light, FontStyle::Light);
-    assert_eq!(FontStyle::ExtraLight - FontStyle::Light - FontStyle::Light, FontStyle::Regular);
+    assert_eq!(
+        FontStyle::ExtraLight - FontStyle::Light - FontStyle::Light,
+        FontStyle::Regular
+    );
     assert_eq!(FontStyle::Medium - FontStyle::Regular, FontStyle::Medium);
     assert_eq!(
         FontStyle::MediumItalic - FontStyle::Italic,
@@ -372,7 +375,10 @@ fn sub_font_styles() {
         FontStyle::Bold
     );
     assert_eq!(FontStyle::ThinItalic - FontStyle::Italic, FontStyle::Thin);
-    assert_eq!(FontStyle::ThinItalic - FontStyle::ThinItalic, FontStyle::Regular);
+    assert_eq!(
+        FontStyle::ThinItalic - FontStyle::ThinItalic,
+        FontStyle::Regular
+    );
     assert_eq!(FontStyle::Thin - FontStyle::Regular, FontStyle::Thin);
     assert_eq!(FontStyle::Regular - FontStyle::Regular, FontStyle::Regular);
     assert_eq!(
