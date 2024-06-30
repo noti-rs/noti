@@ -1,6 +1,7 @@
 use crate::data::{
     dbus::{Action, ClosingReason, Signal},
     notification::{Hints, Notification, Timeout},
+    text::Text,
 };
 use std::{
     collections::HashMap,
@@ -92,6 +93,9 @@ impl Handler {
             .as_secs();
 
         let hints = Hints::from(&hints);
+
+        let summary = Text::parse(summary);
+        let body = Text::parse(body);
 
         // TODO: handle actions
 
