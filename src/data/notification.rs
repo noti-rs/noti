@@ -102,12 +102,12 @@ impl Coordinates {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum Category {
-    Device(Option<CategoryEvent>),
-    Email(Option<CategoryEvent>),
-    Im(Option<CategoryEvent>),
-    Network(Option<CategoryEvent>),
-    Presence(Option<CategoryEvent>),
-    Transfer(Option<CategoryEvent>),
+    Device(CategoryEvent),
+    Email(CategoryEvent),
+    Im(CategoryEvent),
+    Network(CategoryEvent),
+    Presence(CategoryEvent),
+    Transfer(CategoryEvent),
     #[default]
     None,
 }
@@ -123,26 +123,26 @@ impl Category {
 impl From<&str> for Category {
     fn from(value: &str) -> Self {
         match value {
-            "device" => Self::Device(None),
-            "device.added" => Self::Device(Some(CategoryEvent::Added)),
-            "device.removed" => Self::Device(Some(CategoryEvent::Removed)),
-            "device.error" => Self::Device(Some(CategoryEvent::Error)),
-            "email" => Self::Device(None),
-            "email.arrived" => Self::Device(Some(CategoryEvent::Arrived)),
-            "email.bounced" => Self::Device(Some(CategoryEvent::Bounced)),
-            "im" => Self::Device(None),
-            "im.received" => Self::Device(Some(CategoryEvent::Received)),
-            "im.error" => Self::Device(Some(CategoryEvent::Error)),
-            "network" => Self::Device(None),
-            "network.connected" => Self::Device(Some(CategoryEvent::Connected)),
-            "network.disconnected" => Self::Device(Some(CategoryEvent::Disconnected)),
-            "network.error" => Self::Device(Some(CategoryEvent::Error)),
-            "presence" => Self::Device(None),
-            "presence.online" => Self::Device(Some(CategoryEvent::Online)),
-            "presence.offline" => Self::Device(Some(CategoryEvent::Offline)),
-            "transfer" => Self::Device(None),
-            "transfer.complete" => Self::Device(Some(CategoryEvent::Complete)),
-            "transfer.error" => Self::Device(Some(CategoryEvent::Error)),
+            "device" => Self::Device(CategoryEvent::Generic),
+            "device.added" => Self::Device(CategoryEvent::Added),
+            "device.removed" => Self::Device(CategoryEvent::Removed),
+            "device.error" => Self::Device(CategoryEvent::Error),
+            "email" => Self::Email(CategoryEvent::Generic),
+            "email.arrived" => Self::Email(CategoryEvent::Arrived),
+            "email.bounced" => Self::Email(CategoryEvent::Bounced),
+            "im" => Self::Im(CategoryEvent::Generic),
+            "im.received" => Self::Im(CategoryEvent::Received),
+            "im.error" => Self::Im(CategoryEvent::Error),
+            "network" => Self::Network(CategoryEvent::Generic),
+            "network.connected" => Self::Network(CategoryEvent::Connected),
+            "network.disconnected" => Self::Network(CategoryEvent::Disconnected),
+            "network.error" => Self::Network(CategoryEvent::Error),
+            "presence" => Self::Presence(CategoryEvent::Generic),
+            "presence.online" => Self::Presence(CategoryEvent::Online),
+            "presence.offline" => Self::Presence(CategoryEvent::Offline),
+            "transfer" => Self::Transfer(CategoryEvent::Generic),
+            "transfer.complete" => Self::Transfer(CategoryEvent::Complete),
+            "transfer.error" => Self::Transfer(CategoryEvent::Error),
             _ => Self::None,
         }
     }
@@ -150,6 +150,7 @@ impl From<&str> for Category {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CategoryEvent {
+    Generic,
     Added,
     Removed,
     Arrived,
