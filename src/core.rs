@@ -9,8 +9,6 @@ pub async fn run() -> Result<()> {
     let (sender, mut receiver) = unbounded_channel();
     let _server = Server::init(sender).await?;
 
-    std::hint::spin_loop();
-
     loop {
         while let Ok(action) = receiver.try_recv() {
             match action {
@@ -40,5 +38,7 @@ pub async fn run() -> Result<()> {
                 }
             }
         }
+
+        std::hint::spin_loop();
     }
 }
