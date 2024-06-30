@@ -89,7 +89,7 @@ impl Add for FontStyle {
                 other => panic!("Incorrect combination of {} and {other}", self),
             },
             Self::ExtraLight => match rhs {
-                Self::Regular | Self::ExtraLight => Self::ExtraLight,
+                Self::Regular | Self::Light | Self::ExtraLight => Self::ExtraLight,
                 Self::Italic | Self::ExtraLightItalic | Self::LightItalic => Self::ExtraLightItalic,
                 other => panic!("Incorrect combination of {} and {other}", self),
             },
@@ -141,7 +141,7 @@ impl Add for FontStyle {
             },
             Self::Medium => match rhs {
                 Self::Regular | Self::Medium => Self::Medium,
-                Self::MediumItalic => Self::MediumItalic,
+                Self::Italic | Self::MediumItalic => Self::MediumItalic,
                 other => panic!("Incorrect combination of {} and {other}", self),
             },
             Self::Regular => rhs,
@@ -197,6 +197,7 @@ impl Sub for FontStyle {
                 other => panic!("Incorrect substraction from {} by {other}", self),
             },
             FontStyle::ExtraLightItalic => match rhs {
+                FontStyle::Italic => Self::ExtraLight,
                 FontStyle::ExtraLight => Self::Italic,
                 FontStyle::ExtraLightItalic => Self::Regular,
                 FontStyle::LightItalic => Self::Light,
@@ -226,6 +227,7 @@ impl Sub for FontStyle {
                 other => panic!("Incorrect substraction from {} by {other}", self),
             },
             FontStyle::ThinItalic => match rhs {
+                FontStyle::Italic => Self::Thin,
                 FontStyle::Thin => Self::Italic,
                 FontStyle::ThinItalic => Self::Regular,
                 FontStyle::Regular => Self::ThinItalic,
@@ -237,6 +239,7 @@ impl Sub for FontStyle {
                 other => panic!("Incorrect substraction from {} by {other}", self),
             },
             FontStyle::SemiBoldItalic => match rhs {
+                FontStyle::Italic => Self::SemiBold,
                 FontStyle::SemiBold => Self::Italic,
                 FontStyle::SemiBoldItalic => Self::Regular,
                 FontStyle::Regular => Self::SemiBoldItalic,
@@ -258,6 +261,7 @@ impl Sub for FontStyle {
             },
             FontStyle::MediumItalic => match rhs {
                 FontStyle::Regular => Self::MediumItalic,
+                FontStyle::Italic => Self::Medium,
                 FontStyle::Medium => Self::Italic,
                 FontStyle::MediumItalic => Self::Regular,
                 other => panic!("Incorrect substraction from {} by {other}", self),
