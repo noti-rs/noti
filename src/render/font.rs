@@ -2,13 +2,47 @@ use derive_more::Display;
 use std::{
     collections::HashMap,
     ops::{Add, Sub},
+    process::Command,
     sync::Arc,
 };
 
 use ab_glyph::FontArc;
 
+use crate::data::aliases::Result;
+
 struct FontCollection {
     map: HashMap<FontStyle, Font>,
+}
+
+impl FontCollection {
+    fn load_by_font_name(font_name: String) -> Result<Self> {
+        let process_result = Command::new(format!(
+            "fc-list {font_name} --format \"%{{file}}:%{{style}}\""
+        ))
+        .spawn()?
+        .wait_with_output()?;
+
+        let output: String = process_result
+            .stdout
+            .into_iter()
+            .map(|data| data as char)
+            .collect();
+
+        let map = output
+            .split("\n")
+            .map(|line| {
+                let (filepath, styles) = line
+                    .split_once(":")
+                    .expect("Must be the colon delimiter in --format when calling fc-list");
+                Font::try_read(filepath, styles).expect("Can't read the font file")
+            })
+            .fold(HashMap::new(), |mut acc, font| {
+                acc.insert(font.style.clone(), font);
+                acc
+            });
+
+        Ok(Self { map })
+    }
 }
 
 struct Font {
@@ -17,7 +51,25 @@ struct Font {
     data: FontArc,
 }
 
-#[derive(Debug, Display, Hash, PartialEq, Eq)]
+impl Font {
+    fn try_read(filepath: &str, styles: &str) -> Result<Self> {
+        let style = FontStyle::from(
+            styles
+                .split_once(",")
+                .map(|(important_style, _)| important_style)
+                .unwrap_or(styles),
+        );
+        let bytes = std::fs::read(filepath)?;
+        let data = FontArc::try_from_vec(bytes)?;
+        Ok(Self {
+            style,
+            data,
+            path: Arc::from(filepath),
+        })
+    }
+}
+
+#[derive(Debug, Display, Hash, PartialEq, Eq, Clone)]
 enum FontStyle {
     #[display(fmt = "Regular")]
     Regular,
@@ -51,6 +103,30 @@ enum FontStyle {
     ExtraBoldItalic,
     #[display(fmt = "ExtraLightItalic")]
     ExtraLightItalic,
+}
+
+impl From<&str> for FontStyle {
+    fn from(value: &str) -> Self {
+        match value {
+            "Regular" => Self::Regular,
+            "Bold" => Self::Bold,
+            "Italic" => Self::Italic,
+            "Bold Italic" => Self::BoldItalic,
+            "Medium" => Self::Medium,
+            "Medium Italic" => Self::MediumItalic,
+            "SemiBold" => Self::SemiBold,
+            "SemiBold Italic" => Self::SemiBoldItalic,
+            "Light" => Self::Light,
+            "Light Italic" => Self::LightItalic,
+            "Thin" => Self::Thin,
+            "Thin Italic" => Self::ThinItalic,
+            "ExtraBold" => Self::ExtraBold,
+            "ExtraBold Italic" => Self::ExtraBoldItalic,
+            "ExtraLight" => Self::ExtraLight,
+            "ExtraLight Italic" => Self::ExtraLightItalic,
+            other => panic!("Invalid style: {other}"),
+        }
+    }
 }
 
 impl Add for FontStyle {
