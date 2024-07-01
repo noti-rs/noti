@@ -11,6 +11,9 @@ derive_more = "0.99.18"
 image = "0.25.1"
 regex = "1.10.5"
 serde = "1.0.203"
-smithay-client-toolkit = "0.19.1"
+tempfile = "3.10.1"
 tokio = { version = "1.38.0", features = ["full"] }
+wayland-client = "0.31.3"
+wayland-protocols = { version = "0.32.1", features = ["client", "wayland-client"] }
+wayland-protocols-wlr = { version = "0.3.1", features = ["client", "wayland-client"] }
 zbus = "4.3.0"
