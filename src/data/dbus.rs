@@ -2,7 +2,7 @@ use super::notification::Notification;
 
 pub enum Action {
     Show(Notification),
-    ShowLast,
+    ShowLast, // NOTE: consider removing this
     Close(Option<u32>),
     CloseAll,
 }
