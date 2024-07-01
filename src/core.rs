@@ -12,8 +12,7 @@ pub async fn run() -> Result<()> {
     let (sender, mut receiver) = unbounded_channel();
     let _server = Server::init(sender).await?;
 
-    let mut renderer = Renderer::init()?;
-    let internal_channel = renderer.clone_channel();
+    let (server_internal_channel, mut renderer) = Renderer::init()?;
 
     thread::spawn(move || renderer.run());
 
@@ -21,7 +20,7 @@ pub async fn run() -> Result<()> {
         while let Ok(action) = receiver.try_recv() {
             match action {
                 Action::Show(notification) => {
-                    internal_channel.lock().unwrap().send_to_renderer(
+                    server_internal_channel.send_to_renderer(
                         crate::data::internal_messages::ServerMessage::ShowNotification(
                             notification,
                         ),
