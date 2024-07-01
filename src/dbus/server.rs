@@ -1,6 +1,6 @@
 use crate::data::{
     dbus::{Action, ClosingReason, Signal},
-    notification::{Hints, Notification, Timeout},
+    notification::{Hints, Notification, NotificationAction, Timeout},
     text::Text,
 };
 use std::{
@@ -70,33 +70,21 @@ impl Handler {
         app_icon: String,
         summary: String,
         body: String,
-        _actions: Vec<&str>,
+        actions: Vec<&str>,
         hints: HashMap<&str, Value<'_>>,
         expire_timeout: i32,
     ) -> Result<u32> {
-        let id = if replaces_id == 0 {
-            UNIQUE_ID.fetch_add(1, Ordering::Relaxed)
-        } else {
-            replaces_id
+        let id = match replaces_id {
+            0 => UNIQUE_ID.load(Ordering::Relaxed),
+            _ => replaces_id,
         };
 
-        let expire_timeout = match expire_timeout {
-            t if t < -1 => todo!(),
-            -1 => Timeout::Never,
-            0 => Timeout::Configurable,
-            t => Timeout::Millis(t as u32),
-        };
-
-        let created_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
+        #[rustfmt::skip]
+        let created_at = SystemTime::now() .duration_since(UNIX_EPOCH) .unwrap() .as_secs();
         let hints = Hints::from(&hints);
-
+        let actions = NotificationAction::from_vec(&actions);
         let body = Text::parse(body);
-
-        // TODO: handle actions
+        let expire_timeout = Timeout::from(expire_timeout);
 
         let notification = Notification {
             id,
@@ -105,6 +93,7 @@ impl Handler {
             summary,
             body,
             hints,
+            actions,
             expire_timeout,
             created_at,
             is_read: false,
@@ -148,16 +137,16 @@ impl Handler {
 
     async fn get_capabilities(&self) -> Result<Vec<String>> {
         let capabilities = vec![
-            // String::from("action-icons"),
-            // String::from("actions"),
+            String::from("action-icons"),
+            String::from("actions"),
             String::from("body"),
-            // String::from("body-hyperlinks"),
-            // String::from("body-images"),
-            // String::from("body-markup"),
-            // String::from("icon-multi"),
-            // String::from("icon-static"),
-            // String::from("persistence"),
-            // String::from("sound"),
+            String::from("body-hyperlinks"),
+            String::from("body-images"),
+            String::from("body-markup"),
+            String::from("icon-multi"),
+            String::from("icon-static"),
+            String::from("persistence"),
+            String::from("sound"),
         ];
 
         Ok(capabilities)

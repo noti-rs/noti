@@ -12,6 +12,7 @@ pub struct Notification {
     pub body: Text,
     pub expire_timeout: Timeout,
     pub hints: Hints,
+    pub actions: Vec<NotificationAction>,
     pub is_read: bool,
     pub created_at: u64,
 }
@@ -79,6 +80,29 @@ impl From<&HashMap<&str, Value<'_>>> for Hints {
             transient,
             coordinates,
         }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NotificationAction {
+    action_key: String,
+    localized_string: String,
+}
+
+impl NotificationAction {
+    pub fn from_vec(vec: &Vec<&str>) -> Vec<Self> {
+        let mut actions: Vec<Self> = Vec::new();
+
+        if vec.len() >= 2 {
+            for chunk in vec.chunks(2) {
+                actions.push(Self {
+                    action_key: chunk[0].into(),
+                    localized_string: chunk[1].into(),
+                });
+            }
+        }
+
+        actions
     }
 }
 
@@ -170,6 +194,17 @@ pub enum Timeout {
     Never,
     #[default]
     Configurable,
+}
+
+impl From<i32> for Timeout {
+    fn from(value: i32) -> Self {
+        match value {
+            t if t < -1 => todo!(),
+            -1 => Self::Never,
+            0 => Self::Configurable,
+            t => Self::Millis(t as u32),
+        }
+    }
 }
 
 impl Display for Timeout {
