@@ -1260,7 +1260,7 @@ dependencies = [
  "rayon",
  "derive_more",
  "image",
- "lazy_static",
+ "once_cell",
  "regex",
  "resvg",
  "serde",

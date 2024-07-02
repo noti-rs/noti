@@ -1,54 +1,67 @@
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{env, fs, path::Path};
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Config {
-    pub general: General,
-    pub display: Display,
+    pub general: GeneralConfig,
+    pub display: DisplayConfig,
+
+    #[serde(rename(deserialize = "app"))]
+    pub apps: Option<Vec<AppConfig>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-pub struct General {
-    pub timeout: u16,
+pub struct GeneralConfig {
+    pub timeout: Option<u16>,
+    pub offset: Option<(u8, u8)>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-pub struct Display {
-    pub width: u16,
-    pub height: u16,
+pub struct DisplayConfig {
+    pub width: Option<u16>,
+    pub height: Option<u16>,
 
-    pub rounding: u8,
-    pub padding: u8,
+    pub rounding: Option<u8>,
+    pub padding: Option<u8>,
 
-    pub border: Border,
+    pub border: Option<Border>,
 
-    pub colors: UrgencyColors,
-    pub font: (String, u8),
+    pub colors: Option<UrgencyColors>,
+    pub font: Option<(String, u8)>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct UrgencyColors {
-    low: Colors,
-    normal: Colors,
-    critical: Colors,
+    pub low: Option<Colors>,
+    pub normal: Option<Colors>,
+    pub critical: Option<Colors>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Colors {
-    background: String,
-    foreground: String,
+    pub background: Option<String>,
+    pub foreground: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Border {
-    enabled: bool,
-    size: u8,
-    color: String,
+    pub enabled: Option<bool>,
+    pub size: Option<u8>,
+    pub color: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct AppConfig {
+    pub name: String,
+    pub general: Option<GeneralConfig>,
+    pub display: Option<DisplayConfig>,
+}
+
+pub static CONFIG: Lazy<Config> = Lazy::new(Config::parse);
+
 impl Config {
-    pub fn parse() -> Self {
+    fn parse() -> Self {
         let config_dir = format!(
             "{}/.config/{}/",
             env::var("HOME").unwrap(),
@@ -65,14 +78,9 @@ impl Config {
             fs::File::create(&config_path).unwrap();
         }
 
-        let config_content = fs::read_to_string(&config_path).unwrap_or_default();
+        let config_content = fs::read_to_string(&config_path).unwrap();
         let config = toml::from_str(&config_content).unwrap_or_default();
-        dbg!(&config);
 
         config
     }
-}
-
-lazy_static! {
-    pub static ref CONFIG: Config = Config::parse();
 }
