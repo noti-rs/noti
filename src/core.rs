@@ -3,7 +3,6 @@ use std::thread;
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
-    config::CONFIG,
     data::{aliases::Result, dbus::Action},
     dbus::server::Server,
     render::Renderer,

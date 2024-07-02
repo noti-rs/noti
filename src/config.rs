@@ -10,7 +10,6 @@ pub struct Config {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct General {
-    pub startup_notification: bool,
     pub timeout: u16,
 }
 
@@ -43,6 +42,7 @@ pub struct Colors {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Border {
+    enabled: bool,
     size: u8,
     color: String,
 }
