@@ -1,6 +1,7 @@
 use super::{image::ImageData, text::Text};
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display};
+use std::collections::HashMap;
 use zbus::zvariant::Value;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -188,7 +189,7 @@ pub enum CategoryEvent {
     Complete,
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, Display)]
 pub enum Timeout {
     Millis(u32),
     Never,
@@ -207,13 +208,7 @@ impl From<i32> for Timeout {
     }
 }
 
-impl Display for Timeout {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("{self:?}"))
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, Display)]
 pub enum Urgency {
     Low,
     #[default]
@@ -226,12 +221,6 @@ impl Urgency {
         u32::try_from(hint)
             .ok()
             .and_then(|val| Some(Self::from(val)))
-    }
-}
-
-impl Display for Urgency {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("{self:?}").to_lowercase())
     }
 }
 

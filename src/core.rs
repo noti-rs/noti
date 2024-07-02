@@ -3,6 +3,7 @@ use std::thread;
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
+    config::CONFIG,
     data::{aliases::Result, dbus::Action},
     dbus::server::Server,
     render::Renderer,
@@ -15,6 +16,20 @@ pub async fn run() -> Result<()> {
     let (server_internal_channel, mut renderer) = Renderer::init()?;
 
     thread::spawn(move || renderer.run());
+    let client = Client::init().await?;
+
+    if CONFIG.general.startup_notification {
+        client
+            .notify(
+                None,
+                None,
+                "Noti",
+                Some("<i>Noti is up!</i>"),
+                Some(0),
+                None,
+            )
+            .await?;
+    };
 
     loop {
         while let Ok(action) = receiver.try_recv() {

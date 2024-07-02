@@ -3,6 +3,8 @@ use std::u32;
 use zbus::fdo::Result;
 use zbus::{proxy, zvariant::Value, Connection};
 
+use crate::config::CONFIG;
+
 #[proxy(
     default_service = "org.freedesktop.Notifications",
     default_path = "/org/freedesktop/Notifications"
@@ -61,7 +63,7 @@ impl Client {
 
         let expire_timeout = match expire_timeout {
             Some(i) => i,
-            None => 2000, // TODO: set value from user config
+            None => CONFIG.general.timeout as i32,
         };
 
         let mut hints = HashMap::new();
