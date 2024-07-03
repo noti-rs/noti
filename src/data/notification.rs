@@ -134,7 +134,7 @@ pub enum Category {
     Presence(CategoryEvent),
     Transfer(CategoryEvent),
     #[default]
-    None,
+    Unknown,
 }
 
 impl Category {
@@ -168,7 +168,7 @@ impl From<&str> for Category {
             "transfer" => Self::Transfer(CategoryEvent::Generic),
             "transfer.complete" => Self::Transfer(CategoryEvent::Complete),
             "transfer.error" => Self::Transfer(CategoryEvent::Error),
-            _ => Self::None,
+            _ => Self::Unknown,
         }
     }
 }
