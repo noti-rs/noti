@@ -10,6 +10,7 @@ use crate::data::{
 use self::layer::NotificationStack;
 
 mod font;
+mod color;
 mod layer;
 
 pub(crate) struct Renderer {
