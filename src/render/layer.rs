@@ -217,7 +217,7 @@ impl Dispatch<wl_shm::WlShm, ()> for NotificationRect {
             0,
             state.width,
             state.height,
-            4,
+            state.width * 4,
             wl_shm::Format::Argb8888,
             qhandle,
             (),
