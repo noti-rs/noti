@@ -15,10 +15,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use super::{
-    color::{self, Bgra},
-    image::Image,
-};
+use super::{color::Bgra, image::Image};
 
 pub(crate) struct NotificationStack {
     connection: Connection,
@@ -100,7 +97,10 @@ impl NotificationRect {
     }
 
     fn draw(&self, tmp: &mut File) {
-        let mut buf = vec![255; self.width as usize * self.height as usize * 4];
+        let mut buf: Vec<u8> = vec![Bgra::new_white; self.width as usize * self.height as usize]
+            .into_iter()
+            .flat_map(|bgra| bgra().to_slice())
+            .collect();
         let background = Bgra::new_white();
 
         let mut image = Image::from(self.data.hints.image_data.as_ref());

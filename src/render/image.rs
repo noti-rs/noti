@@ -33,12 +33,11 @@ impl<'a> Image<'a> {
             data: pixmap
                 .data()
                 .chunks_exact(4)
-                .map(|chunk| {
+                .flat_map(|chunk| {
                     Rgba::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap())
                         .to_bgra()
                         .to_slice()
                 })
-                .flatten()
                 .collect(),
             width: size as i32,
             height: size as i32,

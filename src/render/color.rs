@@ -109,7 +109,6 @@ impl Rgba {
             (self.blue * 255.0).round() as u8,
             (self.alpha * 255.0).round() as u8,
         ]
-
     }
 }
 
