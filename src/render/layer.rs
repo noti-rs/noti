@@ -15,6 +15,8 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
+use super::color;
+
 pub(crate) struct NotificationStack {
     connection: Connection,
 
@@ -95,9 +97,66 @@ impl NotificationRect {
     }
 
     fn draw(&self, tmp: &mut File) {
-        let mut buf = std::io::BufWriter::new(tmp);
-        (0..self.width * self.height).for_each(|_| buf.write_all(&[255, 255, 255, 255]).unwrap());
-        buf.flush().unwrap();
+        let mut buf = vec![255; self.width as usize * self.height as usize * 4];
+        // WARNING: Only 4 channels support
+        if let Some(image_data) = self.data.hints.image_data.as_ref() {
+            let mut position = 0;
+            for height in 0..image_data.height as usize {
+                let mut buf_position = height * self.width as usize * 4;
+                for _x in 0..image_data.width as usize {
+                    let slice: &mut [u8; 4] = (&mut buf[buf_position..buf_position + 4])
+                        .try_into()
+                        .unwrap();
+                    let bgra = color::Bgra::from(
+                        TryInto::<&[u8; 4]>::try_into(&image_data.data[position..position + 4])
+                            .unwrap(),
+                    );
+                    *slice = bgra.overlay_on(&color::Bgra::new_white()).to_slice();
+
+                    position += 4;
+                    buf_position += 4;
+                }
+            }
+        }
+        if let Some(image_path) = self.data.hints.image_path.as_deref() {
+            let tree = resvg::usvg::Tree::from_data(
+                &std::fs::read(std::path::Path::new(image_path)).unwrap(),
+                &resvg::usvg::Options::default(),
+            )
+            .unwrap();
+            const SIZE: u32 = 50;
+            const FLOAT_SIZE: f32 = 50.0;
+            let sx = FLOAT_SIZE / tree.size().width();
+            let sy = FLOAT_SIZE / tree.size().height();
+            let mut pixmap = resvg::tiny_skia::Pixmap::new(SIZE, SIZE).unwrap();
+            resvg::render(
+                &tree,
+                resvg::usvg::Transform::from_scale(sx, sy),
+                &mut pixmap.as_mut(),
+            );
+            let mut position = 0;
+            for height in 0..pixmap.height() as usize {
+                let mut buf_position = height * self.width as usize * 4;
+                for _x in 0..pixmap.width() as usize {
+                    let slice: &mut [u8; 4] = (&mut buf[buf_position..buf_position + 4])
+                        .try_into()
+                        .unwrap();
+                    let bgra = color::Rgba::from(
+                        TryInto::<&[u8; 4]>::try_into(&pixmap.data()[position..position + 4])
+                            .unwrap(),
+                    );
+                    *slice = bgra
+                        .overlay_on(&color::Rgba::new_white())
+                        .to_bgra()
+                        .to_slice();
+
+                    position += 4;
+                    buf_position += 4;
+                }
+            }
+        }
+
+        tmp.write_all(&buf).unwrap();
     }
 }
 
@@ -280,8 +339,17 @@ impl Dispatch<wl_pointer::WlPointer, ()> for NotificationRect {
                 const MIDDLE_BTN: u32 = 274;
 
                 match button {
-                    LEFT_BTN => (),
-                    RIGHT_BTN => (),
+                    LEFT_BTN => {
+                        println!("Pressed!")
+                    }
+                    RIGHT_BTN => {
+                        state
+                            .layer_surface
+                            .as_ref()
+                            .unwrap()
+                            .set_margin(175, 25, 0, 0);
+                        state.surface.as_ref().unwrap().commit();
+                    }
                     MIDDLE_BTN => (),
                     _ => (),
                 }
