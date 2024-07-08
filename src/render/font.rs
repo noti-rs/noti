@@ -1,7 +1,7 @@
 use derive_more::Display;
 use std::{
     collections::HashMap,
-    ops::{Add, Sub},
+    ops::{Add, AddAssign, Sub, SubAssign},
     process::Command,
     sync::Arc,
 };
@@ -10,7 +10,7 @@ use ab_glyph::FontArc;
 
 use crate::data::aliases::Result;
 
-struct FontCollection {
+pub(crate) struct FontCollection {
     map: HashMap<FontStyle, Font>,
 }
 
@@ -43,9 +43,17 @@ impl FontCollection {
 
         Ok(Self { map })
     }
+
+    fn font_by_style(&self, font_style: &FontStyle) -> &Font {
+        self.map.get(font_style).unwrap_or(
+            self.map
+                .get(&FontStyle::Regular)
+                .expect("Not found regular font in Font collection"),
+        )
+    }
 }
 
-struct Font {
+pub(crate) struct Font {
     style: FontStyle,
     path: Arc<str>,
     data: FontArc,
@@ -67,10 +75,14 @@ impl Font {
             path: Arc::from(filepath),
         })
     }
+
+    fn font_arc(&self) -> FontArc {
+        self.data.clone()
+    }
 }
 
 #[derive(Debug, Display, Hash, PartialEq, Eq, Clone)]
-enum FontStyle {
+pub(crate) enum FontStyle {
     #[display(fmt = "Regular")]
     Regular,
     #[display(fmt = "Bold")]
@@ -129,112 +141,247 @@ impl From<&str> for FontStyle {
     }
 }
 
+fn union_font_styles(lhs: &FontStyle, rhs: &FontStyle) -> FontStyle {
+    match lhs {
+        FontStyle::Bold => match rhs {
+            FontStyle::Regular | FontStyle::Bold => FontStyle::Bold,
+            FontStyle::Italic | FontStyle::BoldItalic => FontStyle::BoldItalic,
+            FontStyle::ExtraBold => FontStyle::ExtraBold,
+            FontStyle::ExtraBoldItalic => FontStyle::ExtraBoldItalic,
+            FontStyle::SemiBold => FontStyle::SemiBold,
+            FontStyle::SemiBoldItalic => FontStyle::SemiBoldItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::Italic => match rhs {
+            FontStyle::Regular | FontStyle::Italic => FontStyle::Italic,
+            FontStyle::Bold | FontStyle::BoldItalic => FontStyle::BoldItalic,
+            FontStyle::ExtraLight | FontStyle::ExtraLightItalic => FontStyle::ExtraLightItalic,
+            FontStyle::ExtraBold | FontStyle::ExtraBoldItalic => FontStyle::ExtraBoldItalic,
+            FontStyle::Light | FontStyle::LightItalic => FontStyle::LightItalic,
+            FontStyle::Thin | FontStyle::ThinItalic => FontStyle::ThinItalic,
+            FontStyle::SemiBold | FontStyle::SemiBoldItalic => FontStyle::SemiBoldItalic,
+            FontStyle::Medium | FontStyle::MediumItalic => FontStyle::MediumItalic,
+        },
+        FontStyle::BoldItalic => match rhs {
+            FontStyle::Regular | FontStyle::Bold | FontStyle::Italic | FontStyle::BoldItalic => {
+                FontStyle::BoldItalic
+            }
+            FontStyle::ExtraBold | FontStyle::ExtraBoldItalic => FontStyle::ExtraBoldItalic,
+            FontStyle::SemiBold | FontStyle::SemiBoldItalic => FontStyle::SemiBoldItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::ExtraBold => match rhs {
+            FontStyle::Regular | FontStyle::Bold | FontStyle::ExtraBold => FontStyle::ExtraBold,
+            FontStyle::Italic | FontStyle::BoldItalic | FontStyle::ExtraBoldItalic => {
+                FontStyle::ExtraBoldItalic
+            }
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::ExtraLight => match rhs {
+            FontStyle::Regular | FontStyle::Light | FontStyle::ExtraLight => FontStyle::ExtraLight,
+            FontStyle::Italic | FontStyle::ExtraLightItalic | FontStyle::LightItalic => {
+                FontStyle::ExtraLightItalic
+            }
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::ExtraLightItalic => match rhs {
+            FontStyle::Regular
+            | FontStyle::Italic
+            | FontStyle::ExtraLight
+            | FontStyle::ExtraLightItalic
+            | FontStyle::LightItalic
+            | FontStyle::Light => FontStyle::ExtraLightItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::ExtraBoldItalic => match rhs {
+            FontStyle::Regular
+            | FontStyle::Bold
+            | FontStyle::Italic
+            | FontStyle::BoldItalic
+            | FontStyle::ExtraBold
+            | FontStyle::ExtraBoldItalic => FontStyle::ExtraBoldItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::LightItalic => match rhs {
+            FontStyle::Regular | FontStyle::Italic | FontStyle::Light | FontStyle::LightItalic => {
+                FontStyle::LightItalic
+            }
+            FontStyle::ExtraLight | FontStyle::ExtraLightItalic => FontStyle::ExtraLightItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::Thin => match rhs {
+            FontStyle::Regular | FontStyle::Thin => FontStyle::Thin,
+            FontStyle::Italic | FontStyle::ThinItalic => FontStyle::ThinItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::ThinItalic => match rhs {
+            FontStyle::Regular | FontStyle::Thin | FontStyle::Italic | FontStyle::ThinItalic => {
+                FontStyle::ThinItalic
+            }
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::SemiBold => match rhs {
+            FontStyle::Regular | FontStyle::Bold | FontStyle::SemiBold => FontStyle::SemiBold,
+            FontStyle::Italic | FontStyle::BoldItalic | FontStyle::SemiBoldItalic => {
+                FontStyle::SemiBoldItalic
+            }
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::SemiBoldItalic => match rhs {
+            FontStyle::Regular
+            | FontStyle::Bold
+            | FontStyle::SemiBold
+            | FontStyle::Italic
+            | FontStyle::BoldItalic
+            | FontStyle::SemiBoldItalic => FontStyle::SemiBoldItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::Medium => match rhs {
+            FontStyle::Regular | FontStyle::Medium => FontStyle::Medium,
+            FontStyle::Italic | FontStyle::MediumItalic => FontStyle::MediumItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::Regular => FontStyle::Regular,
+        FontStyle::Light => match rhs {
+            FontStyle::Regular | FontStyle::Light => FontStyle::Light,
+            FontStyle::Italic | FontStyle::LightItalic => FontStyle::LightItalic,
+            FontStyle::ExtraLight => FontStyle::ExtraLight,
+            FontStyle::ExtraLightItalic => FontStyle::ExtraLightItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::MediumItalic => match rhs {
+            FontStyle::Regular
+            | FontStyle::Medium
+            | FontStyle::Italic
+            | FontStyle::MediumItalic => FontStyle::MediumItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+    }
+}
+
 impl Add for FontStyle {
     type Output = FontStyle;
 
     fn add(self, rhs: Self) -> Self::Output {
-        match self {
-            Self::Bold => match rhs {
-                Self::Regular | Self::Bold => Self::Bold,
-                Self::Italic | Self::BoldItalic => Self::BoldItalic,
-                Self::ExtraBold => Self::ExtraBold,
-                Self::ExtraBoldItalic => Self::ExtraBoldItalic,
-                Self::SemiBold => Self::SemiBold,
-                Self::SemiBoldItalic => Self::SemiBoldItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::Italic => match rhs {
-                Self::Regular | Self::Italic => Self::Italic,
-                Self::Bold | Self::BoldItalic => Self::BoldItalic,
-                Self::ExtraLight | Self::ExtraLightItalic => Self::ExtraLightItalic,
-                Self::ExtraBold | Self::ExtraBoldItalic => Self::ExtraBoldItalic,
-                Self::Light | Self::LightItalic => Self::LightItalic,
-                Self::Thin | Self::ThinItalic => Self::ThinItalic,
-                Self::SemiBold | Self::SemiBoldItalic => Self::SemiBoldItalic,
-                Self::Medium | Self::MediumItalic => Self::MediumItalic,
-            },
-            Self::BoldItalic => match rhs {
-                Self::Regular | Self::Bold | Self::Italic | Self::BoldItalic => Self::BoldItalic,
-                Self::ExtraBold | Self::ExtraBoldItalic => Self::ExtraBoldItalic,
-                Self::SemiBold | Self::SemiBoldItalic => Self::SemiBoldItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::ExtraBold => match rhs {
-                Self::Regular | Self::Bold | Self::ExtraBold => Self::ExtraBold,
-                Self::Italic | Self::BoldItalic | Self::ExtraBoldItalic => Self::ExtraBoldItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::ExtraLight => match rhs {
-                Self::Regular | Self::Light | Self::ExtraLight => Self::ExtraLight,
-                Self::Italic | Self::ExtraLightItalic | Self::LightItalic => Self::ExtraLightItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::ExtraLightItalic => match rhs {
-                Self::Regular
-                | Self::Italic
-                | Self::ExtraLight
-                | Self::ExtraLightItalic
-                | Self::LightItalic
-                | Self::Light => Self::ExtraLightItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::ExtraBoldItalic => match rhs {
-                Self::Regular
-                | Self::Bold
-                | Self::Italic
-                | Self::BoldItalic
-                | Self::ExtraBold
-                | Self::ExtraBoldItalic => Self::ExtraBoldItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::LightItalic => match rhs {
-                Self::Regular | Self::Italic | Self::Light | Self::LightItalic => Self::LightItalic,
-                Self::ExtraLight | Self::ExtraLightItalic => Self::ExtraLightItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::Thin => match rhs {
-                Self::Regular | Self::Thin => Self::Thin,
-                Self::Italic | Self::ThinItalic => Self::ThinItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::ThinItalic => match rhs {
-                Self::Regular | Self::Thin | Self::Italic | Self::ThinItalic => Self::ThinItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::SemiBold => match rhs {
-                Self::Regular | Self::Bold | Self::SemiBold => Self::SemiBold,
-                Self::Italic | Self::BoldItalic | Self::SemiBoldItalic => Self::SemiBoldItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::SemiBoldItalic => match rhs {
-                Self::Regular
-                | Self::Bold
-                | Self::SemiBold
-                | Self::Italic
-                | Self::BoldItalic
-                | Self::SemiBoldItalic => Self::SemiBoldItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::Medium => match rhs {
-                Self::Regular | Self::Medium => Self::Medium,
-                Self::Italic | Self::MediumItalic => Self::MediumItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::Regular => rhs,
-            Self::Light => match rhs {
-                Self::Regular | Self::Light => Self::Light,
-                Self::Italic | Self::LightItalic => Self::LightItalic,
-                Self::ExtraLight => Self::ExtraLight,
-                Self::ExtraLightItalic => Self::ExtraLightItalic,
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-            Self::MediumItalic => match rhs {
-                Self::Regular | Self::Medium | Self::Italic | Self::MediumItalic => {
-                    Self::MediumItalic
-                }
-                other => panic!("Incorrect combination of {} and {other}", self),
-            },
-        }
+        union_font_styles(&self, &rhs)
+    }
+}
+
+impl Add for &FontStyle {
+    type Output = FontStyle;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        union_font_styles(self, rhs)
+    }
+}
+
+impl AddAssign for FontStyle {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = union_font_styles(self, &rhs);
+    }
+}
+
+fn intersect_font_styles(lhs: &FontStyle, rhs: &FontStyle) -> FontStyle {
+    match lhs {
+        FontStyle::Bold => match rhs {
+            FontStyle::Regular => FontStyle::Bold,
+            FontStyle::Bold => FontStyle::Regular,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::Italic => match rhs {
+            FontStyle::Regular => FontStyle::Italic,
+            FontStyle::Italic => FontStyle::Regular,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::BoldItalic => match rhs {
+            FontStyle::Bold => FontStyle::Italic,
+            FontStyle::Italic => FontStyle::Bold,
+            FontStyle::BoldItalic => FontStyle::Regular,
+            FontStyle::Regular => FontStyle::BoldItalic,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::ExtraBold => match rhs {
+            FontStyle::Bold => FontStyle::Bold,
+            FontStyle::ExtraBold => FontStyle::Regular,
+            FontStyle::Regular => FontStyle::ExtraBold,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::ExtraLight => match rhs {
+            FontStyle::Regular => FontStyle::ExtraLight,
+            FontStyle::ExtraLight => FontStyle::Regular,
+            FontStyle::Light => FontStyle::Light,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::ExtraLightItalic => match rhs {
+            FontStyle::Italic => FontStyle::ExtraLight,
+            FontStyle::ExtraLight => FontStyle::Italic,
+            FontStyle::ExtraLightItalic => FontStyle::Regular,
+            FontStyle::LightItalic => FontStyle::Light,
+            FontStyle::Regular => FontStyle::ExtraLightItalic,
+            FontStyle::Light => FontStyle::LightItalic,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::ExtraBoldItalic => match rhs {
+            FontStyle::Bold => FontStyle::BoldItalic,
+            FontStyle::Italic => FontStyle::ExtraBold,
+            FontStyle::BoldItalic => FontStyle::Bold,
+            FontStyle::ExtraBold => FontStyle::Italic,
+            FontStyle::ExtraBoldItalic => FontStyle::Regular,
+            FontStyle::Regular => FontStyle::ExtraBoldItalic,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::LightItalic => match rhs {
+            FontStyle::Italic => FontStyle::Light,
+            FontStyle::LightItalic => FontStyle::Regular,
+            FontStyle::Regular => FontStyle::LightItalic,
+            FontStyle::Light => FontStyle::Italic,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::Thin => match rhs {
+            FontStyle::Thin => FontStyle::Regular,
+            FontStyle::Regular => FontStyle::Thin,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::ThinItalic => match rhs {
+            FontStyle::Italic => FontStyle::Thin,
+            FontStyle::Thin => FontStyle::Italic,
+            FontStyle::ThinItalic => FontStyle::Regular,
+            FontStyle::Regular => FontStyle::ThinItalic,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::SemiBold => match rhs {
+            FontStyle::SemiBold => FontStyle::Regular,
+            FontStyle::Regular => FontStyle::SemiBold,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::SemiBoldItalic => match rhs {
+            FontStyle::Italic => FontStyle::SemiBold,
+            FontStyle::SemiBold => FontStyle::Italic,
+            FontStyle::SemiBoldItalic => FontStyle::Regular,
+            FontStyle::Regular => FontStyle::SemiBoldItalic,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::Medium => match rhs {
+            FontStyle::Medium => FontStyle::Regular,
+            FontStyle::Regular => FontStyle::Medium,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::Regular => match rhs {
+            FontStyle::Regular => FontStyle::Regular,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::Light => match rhs {
+            FontStyle::Regular => FontStyle::Light,
+            FontStyle::Light => FontStyle::Regular,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::MediumItalic => match rhs {
+            FontStyle::Regular => FontStyle::MediumItalic,
+            FontStyle::Italic => FontStyle::Medium,
+            FontStyle::Medium => FontStyle::Italic,
+            FontStyle::MediumItalic => FontStyle::Regular,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
     }
 }
 
@@ -242,107 +389,21 @@ impl Sub for FontStyle {
     type Output = FontStyle;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        match self {
-            Self::Bold => match rhs {
-                Self::Regular => Self::Bold,
-                Self::Bold => Self::Regular,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::Italic => match rhs {
-                Self::Regular => Self::Italic,
-                Self::Italic => Self::Regular,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::BoldItalic => match rhs {
-                Self::Bold => Self::Italic,
-                Self::Italic => Self::Bold,
-                Self::BoldItalic => Self::Regular,
-                Self::Regular => Self::BoldItalic,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::ExtraBold => match rhs {
-                Self::Bold => Self::Bold,
-                Self::ExtraBold => Self::Regular,
-                Self::Regular => Self::ExtraBold,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::ExtraLight => match rhs {
-                Self::Regular => Self::ExtraLight,
-                Self::ExtraLight => Self::Regular,
-                Self::Light => Self::Light,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::ExtraLightItalic => match rhs {
-                Self::Italic => Self::ExtraLight,
-                Self::ExtraLight => Self::Italic,
-                Self::ExtraLightItalic => Self::Regular,
-                Self::LightItalic => Self::Light,
-                Self::Regular => Self::ExtraLightItalic,
-                Self::Light => Self::LightItalic,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::ExtraBoldItalic => match rhs {
-                Self::Bold => Self::BoldItalic,
-                Self::Italic => Self::ExtraBold,
-                Self::BoldItalic => Self::Bold,
-                Self::ExtraBold => Self::Italic,
-                Self::ExtraBoldItalic => Self::Regular,
-                Self::Regular => Self::ExtraBoldItalic,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::LightItalic => match rhs {
-                Self::Italic => Self::Light,
-                Self::LightItalic => Self::Regular,
-                Self::Regular => Self::LightItalic,
-                Self::Light => Self::Italic,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::Thin => match rhs {
-                Self::Thin => Self::Regular,
-                Self::Regular => Self::Thin,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::ThinItalic => match rhs {
-                Self::Italic => Self::Thin,
-                Self::Thin => Self::Italic,
-                Self::ThinItalic => Self::Regular,
-                Self::Regular => Self::ThinItalic,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::SemiBold => match rhs {
-                Self::SemiBold => Self::Regular,
-                Self::Regular => Self::SemiBold,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::SemiBoldItalic => match rhs {
-                Self::Italic => Self::SemiBold,
-                Self::SemiBold => Self::Italic,
-                Self::SemiBoldItalic => Self::Regular,
-                Self::Regular => Self::SemiBoldItalic,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::Medium => match rhs {
-                Self::Medium => Self::Regular,
-                Self::Regular => Self::Medium,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::Regular => match rhs {
-                Self::Regular => Self::Regular,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::Light => match rhs {
-                Self::Regular => Self::Light,
-                Self::Light => Self::Regular,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-            Self::MediumItalic => match rhs {
-                Self::Regular => Self::MediumItalic,
-                Self::Italic => Self::Medium,
-                Self::Medium => Self::Italic,
-                Self::MediumItalic => Self::Regular,
-                other => panic!("Incorrect substraction from {} by {other}", self),
-            },
-        }
+        intersect_font_styles(&self, &rhs)
+    }
+}
+
+impl Sub for &FontStyle {
+    type Output = FontStyle;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        intersect_font_styles(self, rhs)
+    }
+}
+
+impl SubAssign for FontStyle {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = intersect_font_styles(self, &rhs);
     }
 }
 
