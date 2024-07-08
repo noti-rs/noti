@@ -9,9 +9,24 @@ pub(crate) struct Image<'a> {
 }
 
 impl<'a> Image<'a> {
-    pub(crate) fn add_svg(&mut self, image_path: Option<&'a str>, size: u32) {
+    pub(crate) fn or_svg(
+        mut self,
+        image_path: Option<&'a str>,
+        min_size: u32,
+        max_size: u32,
+    ) -> Self {
+        fn resize(min_size: f32, max_size: f32, actual_size: f32) -> (f32, f32) {
+            if min_size > actual_size {
+                (min_size, min_size / actual_size)
+            } else if max_size < actual_size {
+                (max_size, max_size / actual_size)
+            } else {
+                (actual_size, 1.0)
+            }
+        }
+
         if self.image_data.is_some() || image_path.is_none() {
-            return;
+            return self;
         }
 
         let tree = resvg::usvg::Tree::from_data(
@@ -20,12 +35,15 @@ impl<'a> Image<'a> {
         )
         .unwrap();
 
-        let sx = size as f32 / tree.size().width();
-        let sy = size as f32 / tree.size().height();
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size).unwrap();
+        let (min_size, max_size) = (min_size as f32, max_size as f32);
+
+        let (size, scale) = resize(min_size, max_size, tree.size().width());
+        let size = size.round() as i32;
+
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(size as u32, size as u32).unwrap();
         resvg::render(
             &tree,
-            resvg::usvg::Transform::from_scale(sx, sy),
+            resvg::usvg::Transform::from_scale(scale, scale),
             &mut pixmap.as_mut(),
         );
 
@@ -39,13 +57,14 @@ impl<'a> Image<'a> {
                         .to_slice()
                 })
                 .collect(),
-            width: size as i32,
-            height: size as i32,
+            width: size,
+            height: size,
             rowstride: size as i32 * 4,
             has_alpha: true,
             bits_per_sample: 8,
             channels: 4,
         });
+        self
     }
 
     pub(crate) fn draw<O: FnMut(usize, Bgra)>(
