@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, sync::Arc};
 
-use ab_glyph::{Font, OutlinedGlyph};
+use fontdue::Metrics;
 
 use crate::{
     data::text::{EntityKind, Text},
@@ -19,7 +19,7 @@ pub(crate) struct TextRect {
 impl TextRect {
     pub(crate) fn from_text(
         text: &Text,
-        pt_size: u32,
+        px_size: f32,
         font_collection: Arc<FontCollection>,
     ) -> Self {
         let Text { body, entities } = text;
@@ -28,7 +28,7 @@ impl TextRect {
         let mut current_entities = VecDeque::new();
         let mut current_style = FontStyle::Regular;
 
-        let glyph_collection: Vec<Option<OutlinedGlyph>> = body
+        let glyph_collection: Vec<Option<(Metrics, Vec<u8>)>> = body
             .chars()
             .enumerate()
             .map(|(pos, ch)| {
@@ -47,12 +47,7 @@ impl TextRect {
 
                 let glyph = if !ch.is_whitespace() {
                     let font = font_collection.font_by_style(&current_style).font_arc();
-                    let glyph = font.glyph_id(ch);
-                    let px_scale = font.pt_to_px_scale(pt_size as f32).unwrap();
-                    font.outline_glyph(glyph.with_scale_and_position(
-                        px_scale,
-                        (px_scale.x, px_scale.y),
-                    ))
+                    Some(font.rasterize_indexed(font.lookup_glyph_index(ch), px_size))
                 } else {
                     None
                 };
@@ -93,7 +88,7 @@ impl TextRect {
         self.padding = padding;
     }
 
-    pub(crate) fn draw<O: FnMut(usize, usize, Bgra)>(
+    pub(crate) fn draw<O: FnMut(isize, isize, Bgra)>(
         &self,
         width: usize,
         height: usize,
@@ -122,31 +117,36 @@ impl TextRect {
                     word.width as isize + if words.len() > 1 { SPACEBAR_WIDTH } else { 0 };
             }
 
+            let max_height = words
+                .iter()
+                .flat_map(|word| word.glyphs.iter())
+                .map(|(metrics, _)| metrics.height)
+                .max()
+                .unwrap_or_default() as isize;
+
             //TODO: in future here maybe justification algorithm
 
-            let mut x = self.padding;
+            let mut x = self.padding as isize;
             for word in words {
-                word.glyphs.iter().for_each(|glyph| {
-                    let glyph_bounds = glyph.px_bounds();
-                    let (min_x, min_y) = (
-                        glyph_bounds.min.x.round() as usize,
-                        glyph_bounds.min.y.round() as usize,
-                    );
-                    glyph.draw(|glyph_x, glyph_y, alpha| {
-                        let mut bgra = Bgra::new();
-                        bgra.alpha = alpha;
+                word.glyphs.iter().for_each(|(metrics, coverage)| {
+                    let mut coverage_iter = coverage.iter();
+                    let (width, height) = (metrics.width as isize, metrics.height as isize);
+                    let y_diff = -metrics.ymin as isize + max_height - height;
+                    let x_diff = metrics.xmin as isize;
 
-                        callback(
-                            x + glyph_x as usize + min_x,
-                            y + glyph_y as usize + min_y,
-                            bgra,
-                        );
-                    });
-                    x += glyph_bounds.width().round() as usize;
+                    for glyph_y in y_diff..height + y_diff {
+                        for glyph_x in x_diff..width + x_diff {
+                            let mut bgra = Bgra::new();
+                            bgra.alpha = *coverage_iter.next().unwrap() as f32 / 255.0;
+                            callback(x + glyph_x, y as isize + glyph_y, bgra);
+                        }
+                    }
+
+                    x += metrics.advance_width.round() as isize;
                 });
 
                 // TODO: replace here a code after calculating text justification
-                x += SPACEBAR_WIDTH as usize;
+                x += SPACEBAR_WIDTH;
             }
         }
     }
@@ -155,23 +155,23 @@ impl TextRect {
 pub(crate) struct TextObject {
     width: usize,
     height: usize,
-    glyphs: Vec<OutlinedGlyph>,
+    glyphs: Vec<(Metrics, Vec<u8>)>,
 }
 
 impl TextObject {
-    fn from_outlined_glyphs(outlined_glyphs: &[Option<OutlinedGlyph>]) -> Self {
-        let outlined_glyphs: Vec<OutlinedGlyph> = outlined_glyphs
+    fn from_outlined_glyphs(outlined_glyphs: &[Option<(Metrics, Vec<u8>)>]) -> Self {
+        let outlined_glyphs: Vec<(Metrics, Vec<u8>)> = outlined_glyphs
             .into_iter()
             .map(|glyph| glyph.as_ref().cloned().unwrap())
             .collect();
 
         let width = outlined_glyphs
             .iter()
-            .map(|glyph| glyph.px_bounds().width())
+            .map(|glyph| glyph.0.advance_width)
             .sum::<f32>()
             .round() as usize;
 
-        let height = outlined_glyphs[0].px_bounds().height().round() as usize;
+        let height = outlined_glyphs[0].0.height;
 
         Self {
             width,

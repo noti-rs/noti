@@ -141,19 +141,19 @@ impl NotificationRect {
 
         let mut text = TextRect::from_text(
             &self.data.body,
-            12,
+            16.0,
             self.font_collection.as_ref().cloned().unwrap(),
         );
 
 
         let x_offset = (img_width.unwrap_or_default() + 30) * 4;
         text.set_padding(15);
-        text.set_line_spacing(5);
+        text.set_line_spacing(0);
         text.draw(
-            self.width as usize - img_width.unwrap_or_default() - 15,
+            self.width as usize - img_width.unwrap_or_default() - 30,
             self.height as usize,
             |x, y, bgra| {
-                let position = y * stride + x_offset + x * 4;
+                let position = (y * stride as isize + x_offset as isize + x * 4) as usize;
                 unsafe {
                     *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
                         .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()

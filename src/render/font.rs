@@ -1,12 +1,11 @@
 use derive_more::Display;
+use fontdue::FontSettings;
 use std::{
     collections::HashMap,
     ops::{Add, AddAssign, Sub, SubAssign},
     process::Command,
     sync::Arc,
 };
-
-use ab_glyph::FontArc;
 
 use crate::data::aliases::Result;
 
@@ -56,7 +55,7 @@ impl FontCollection {
 pub(crate) struct Font {
     style: FontStyle,
     path: Arc<str>,
-    data: FontArc,
+    data: Arc<fontdue::Font>,
 }
 
 impl Font {
@@ -68,7 +67,8 @@ impl Font {
                 .unwrap_or(styles),
         );
         let bytes = std::fs::read(filepath)?;
-        let data = FontArc::try_from_vec(bytes)?;
+        let font_settings = FontSettings::default();
+        let data = Arc::new(fontdue::Font::from_bytes(bytes, font_settings)?);
         Ok(Self {
             style,
             data,
@@ -76,7 +76,7 @@ impl Font {
         })
     }
 
-    pub(crate) fn font_arc(&self) -> FontArc {
+    pub(crate) fn font_arc(&self) -> Arc<fontdue::Font> {
         self.data.clone()
     }
 }
@@ -248,7 +248,7 @@ fn union_font_styles(lhs: &FontStyle, rhs: &FontStyle) -> FontStyle {
             FontStyle::Italic | FontStyle::MediumItalic => FontStyle::MediumItalic,
             other => panic!("Incorrect combination of {lhs} and {other}"),
         },
-        FontStyle::Regular => FontStyle::Regular,
+        FontStyle::Regular => rhs.clone(),
         FontStyle::Light => match rhs {
             FontStyle::Regular | FontStyle::Light => FontStyle::Light,
             FontStyle::Italic | FontStyle::LightItalic => FontStyle::LightItalic,
@@ -411,7 +411,7 @@ fn intersect_font_styles(lhs: &FontStyle, rhs: &FontStyle) -> FontStyle {
             FontStyle::Italic => FontStyle::Black,
             FontStyle::BlackItalic => FontStyle::Regular,
             other => panic!("Incorrect intersection from {lhs} by {other}"),
-        }
+        },
     }
 }
 
