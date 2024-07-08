@@ -115,7 +115,7 @@ impl NotificationRect {
             .or_svg(self.data.hints.image_path.as_deref(), 50, 100);
 
         let stride = self.width as usize * 4;
-        image.draw(0, stride, |position, bgra| {
+        image.draw(0, 0, stride, |position, bgra| {
             *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4]).unwrap() =
                 bgra.overlay_on(&background).to_slice()
         });
