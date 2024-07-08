@@ -69,7 +69,8 @@ impl<'a> Image<'a> {
 
     pub(crate) fn draw<O: FnMut(usize, Bgra)>(
         &self,
-        initial_pos: usize,
+        x_offset: usize,
+        y_offset: usize,
         stride: usize,
         mut callback: O,
     ) {
@@ -90,13 +91,13 @@ impl<'a> Image<'a> {
                 }
             });
 
-        let mut position = initial_pos;
+        let mut position = stride * y_offset + x_offset * 4;
         for y in 0..image_data.height as usize {
             for _x in 0..image_data.width as usize {
                 callback(position, chunks.next().unwrap());
                 position += 4;
             }
-            position = stride * y;
+            position = stride * (y + y_offset) + x_offset * 4;
         }
     }
 }
