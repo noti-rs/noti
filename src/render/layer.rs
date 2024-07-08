@@ -111,14 +111,27 @@ impl NotificationRect {
             .collect();
         let background = Bgra::new_white();
 
-        let image = Image::from(self.data.hints.image_data.as_ref())
-            .or_svg(self.data.hints.image_path.as_deref(), 50, 100);
+        let image = Image::from(self.data.hints.image_data.as_ref()).or_svg(
+            self.data.hints.image_path.as_deref(),
+            50,
+            100,
+        );
+
+        // INFO: img_width is need for further render (Summary and Text rendering)
+        let _img_width = image.width();
+        let img_height = image.height();
+        let y_offset = img_height.map(|height| self.height as usize / 2 - height / 2);
 
         let stride = self.width as usize * 4;
-        image.draw(0, 0, stride, |position, bgra| {
-            *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4]).unwrap() =
-                bgra.overlay_on(&background).to_slice()
-        });
+        image.draw(
+            15,
+            y_offset.unwrap_or_default(),
+            stride,
+            |position, bgra| {
+                *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4]).unwrap() =
+                    bgra.overlay_on(&background).to_slice()
+            },
+        );
 
         tmp.write_all(&buf).unwrap();
     }

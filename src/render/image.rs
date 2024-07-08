@@ -67,6 +67,18 @@ impl<'a> Image<'a> {
         self
     }
 
+    pub(crate) fn width(&self) -> Option<usize> {
+        self.image_data
+            .or(self.svg_image.as_ref())
+            .map(|image| image.width as usize)
+    }
+
+    pub(crate) fn height(&self) -> Option<usize> {
+        self.image_data
+            .or(self.svg_image.as_ref())
+            .map(|image| image.height as usize)
+    }
+
     pub(crate) fn draw<O: FnMut(usize, Bgra)>(
         &self,
         x_offset: usize,
