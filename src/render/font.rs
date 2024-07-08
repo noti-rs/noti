@@ -16,11 +16,9 @@ pub(crate) struct FontCollection {
 
 impl FontCollection {
     pub(crate) fn load_by_font_name(font_name: String) -> Result<Self> {
-        let process_result = Command::new(format!(
-            "fc-list {font_name} --format \"%{{file}}:%{{style}}\""
-        ))
-        .spawn()?
-        .wait_with_output()?;
+        let process_result = Command::new("fc-list")
+            .args(vec![&font_name, "--format", "%{file}:%{style}\n"])
+            .output()?;
 
         let output: String = process_result
             .stdout
@@ -30,6 +28,7 @@ impl FontCollection {
 
         let map = output
             .split("\n")
+            .take_while(|line| !line.is_empty())
             .map(|line| {
                 let (filepath, styles) = line
                     .split_once(":")
@@ -53,6 +52,7 @@ impl FontCollection {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct Font {
     style: FontStyle,
     path: Arc<str>,
@@ -61,6 +61,7 @@ pub(crate) struct Font {
 
 impl Font {
     fn try_read(filepath: &str, styles: &str) -> Result<Self> {
+        dbg!(&styles);
         let style = FontStyle::from(
             styles
                 .split_once(",")
@@ -115,6 +116,10 @@ pub(crate) enum FontStyle {
     ExtraBoldItalic,
     #[display(fmt = "ExtraLightItalic")]
     ExtraLightItalic,
+    #[display(fmt = "Black")]
+    Black,
+    #[display(fmt = "BlacItalic")]
+    BlackItalic,
 }
 
 impl From<&str> for FontStyle {
@@ -136,6 +141,8 @@ impl From<&str> for FontStyle {
             "ExtraBold Italic" => Self::ExtraBoldItalic,
             "ExtraLight" => Self::ExtraLight,
             "ExtraLight Italic" => Self::ExtraLightItalic,
+            "Black" => Self::Black,
+            "Black Italic" => Self::BlackItalic,
             other => panic!("Invalid style: {other}"),
         }
     }
@@ -161,6 +168,7 @@ fn union_font_styles(lhs: &FontStyle, rhs: &FontStyle) -> FontStyle {
             FontStyle::Thin | FontStyle::ThinItalic => FontStyle::ThinItalic,
             FontStyle::SemiBold | FontStyle::SemiBoldItalic => FontStyle::SemiBoldItalic,
             FontStyle::Medium | FontStyle::MediumItalic => FontStyle::MediumItalic,
+            FontStyle::Black | FontStyle::BlackItalic => FontStyle::BlackItalic,
         },
         FontStyle::BoldItalic => match rhs {
             FontStyle::Regular | FontStyle::Bold | FontStyle::Italic | FontStyle::BoldItalic => {
@@ -254,6 +262,17 @@ fn union_font_styles(lhs: &FontStyle, rhs: &FontStyle) -> FontStyle {
             | FontStyle::Medium
             | FontStyle::Italic
             | FontStyle::MediumItalic => FontStyle::MediumItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::Black => match rhs {
+            FontStyle::Regular | FontStyle::Black => FontStyle::Black,
+            FontStyle::Italic | FontStyle::BlackItalic => FontStyle::BlackItalic,
+            other => panic!("Incorrect combination of {lhs} and {other}"),
+        },
+        FontStyle::BlackItalic => match rhs {
+            FontStyle::Regular | FontStyle::Black | FontStyle::Italic | FontStyle::BlackItalic => {
+                FontStyle::BlackItalic
+            }
             other => panic!("Incorrect combination of {lhs} and {other}"),
         },
     }
@@ -382,6 +401,18 @@ fn intersect_font_styles(lhs: &FontStyle, rhs: &FontStyle) -> FontStyle {
             FontStyle::MediumItalic => FontStyle::Regular,
             other => panic!("Incorrect intersection from {lhs} by {other}"),
         },
+        FontStyle::Black => match rhs {
+            FontStyle::Regular => FontStyle::Black,
+            FontStyle::Black => FontStyle::Regular,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        },
+        FontStyle::BlackItalic => match rhs {
+            FontStyle::Regular => FontStyle::BlackItalic,
+            FontStyle::Black => FontStyle::Italic,
+            FontStyle::Italic => FontStyle::Black,
+            FontStyle::BlackItalic => FontStyle::Regular,
+            other => panic!("Incorrect intersection from {lhs} by {other}"),
+        }
     }
 }
 
