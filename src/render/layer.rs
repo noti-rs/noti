@@ -48,9 +48,17 @@ impl NotificationStack {
         self.stack
             .iter_mut()
             .for_each(|(event_queue, notification_rect)| {
-                event_queue
-                    .blocking_dispatch(notification_rect)
-                    .expect("Succesful dispatching");
+                let dispatched_count = event_queue
+                    .dispatch_pending(notification_rect)
+                    .expect("Successful dispatch");
+
+                if dispatched_count > 0 {
+                    return
+                }
+
+                event_queue.flush().expect("Successful event queue flush");
+                let guard = event_queue.prepare_read().expect("Get read events guard");
+                let _ = guard.read();
             });
     }
 }

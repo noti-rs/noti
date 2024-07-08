@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use wayland_client::Connection;
 
 use crate::data::{
@@ -49,6 +51,9 @@ impl Renderer {
             }
 
             self.notification_stack.dispatch();
+
+            std::thread::sleep(Duration::from_millis(20));
+            std::hint::spin_loop();
         }
     }
 }
