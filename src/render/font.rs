@@ -15,7 +15,7 @@ pub(crate) struct FontCollection {
 }
 
 impl FontCollection {
-    fn load_by_font_name(font_name: String) -> Result<Self> {
+    pub(crate) fn load_by_font_name(font_name: String) -> Result<Self> {
         let process_result = Command::new(format!(
             "fc-list {font_name} --format \"%{{file}}:%{{style}}\""
         ))
@@ -44,7 +44,7 @@ impl FontCollection {
         Ok(Self { map })
     }
 
-    fn font_by_style(&self, font_style: &FontStyle) -> &Font {
+    pub(crate) fn font_by_style(&self, font_style: &FontStyle) -> &Font {
         self.map.get(font_style).unwrap_or(
             self.map
                 .get(&FontStyle::Regular)
@@ -76,7 +76,7 @@ impl Font {
         })
     }
 
-    fn font_arc(&self) -> FontArc {
+    pub(crate) fn font_arc(&self) -> FontArc {
         self.data.clone()
     }
 }
