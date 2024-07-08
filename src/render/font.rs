@@ -61,7 +61,6 @@ pub(crate) struct Font {
 
 impl Font {
     fn try_read(filepath: &str, styles: &str) -> Result<Self> {
-        dbg!(&styles);
         let style = FontStyle::from(
             styles
                 .split_once(",")

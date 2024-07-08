@@ -48,9 +48,11 @@ impl TextRect {
                 let glyph = if !ch.is_whitespace() {
                     let font = font_collection.font_by_style(&current_style).font_arc();
                     let glyph = font.glyph_id(ch);
-                    font.outline_glyph(
-                        glyph.with_scale(font.pt_to_px_scale(pt_size as f32).unwrap()),
-                    )
+                    let px_scale = font.pt_to_px_scale(pt_size as f32).unwrap();
+                    font.outline_glyph(glyph.with_scale_and_position(
+                        px_scale,
+                        (px_scale.x, px_scale.y),
+                    ))
                 } else {
                     None
                 };
@@ -125,13 +127,22 @@ impl TextRect {
             let mut x = self.padding;
             for word in words {
                 word.glyphs.iter().for_each(|glyph| {
+                    let glyph_bounds = glyph.px_bounds();
+                    let (min_x, min_y) = (
+                        glyph_bounds.min.x.round() as usize,
+                        glyph_bounds.min.y.round() as usize,
+                    );
                     glyph.draw(|glyph_x, glyph_y, alpha| {
                         let mut bgra = Bgra::new();
                         bgra.alpha = alpha;
-                        
-                        callback(x + glyph_x as usize, y + glyph_y as usize, bgra);
+
+                        callback(
+                            x + glyph_x as usize + min_x,
+                            y + glyph_y as usize + min_y,
+                            bgra,
+                        );
                     });
-                    x += glyph.px_bounds().width().round() as usize;
+                    x += glyph_bounds.width().round() as usize;
                 });
 
                 // TODO: replace here a code after calculating text justification
