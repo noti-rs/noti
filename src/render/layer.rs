@@ -53,7 +53,7 @@ impl NotificationStack {
                     .expect("Successful dispatch");
 
                 if dispatched_count > 0 {
-                    return
+                    return;
                 }
 
                 event_queue.flush().expect("Successful event queue flush");
@@ -111,8 +111,8 @@ impl NotificationRect {
             .collect();
         let background = Bgra::new_white();
 
-        let mut image = Image::from(self.data.hints.image_data.as_ref());
-        image.add_svg(self.data.hints.image_path.as_deref(), 50);
+        let image = Image::from(self.data.hints.image_data.as_ref())
+            .or_svg(self.data.hints.image_path.as_deref(), 50, 100);
 
         let stride = self.width as usize * 4;
         image.draw(0, stride, |position, bgra| {
