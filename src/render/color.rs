@@ -34,17 +34,6 @@ impl Bgra {
     }
 }
 
-impl From<&[u8; 3]> for Bgra {
-    fn from(value: &[u8; 3]) -> Self {
-        Self {
-            blue: value[0] as f32 / 255.0,
-            green: value[1] as f32 / 255.0,
-            red: value[2] as f32 / 255.0,
-            alpha: 1.0,
-        }
-    }
-}
-
 impl From<&[u8; 4]> for Bgra {
     fn from(value: &[u8; 4]) -> Self {
         Self {
@@ -110,6 +99,17 @@ impl Rgba {
             (self.blue * 255.0).round() as u8,
             (self.alpha * 255.0).round() as u8,
         ]
+    }
+}
+
+impl From<&[u8; 3]> for Rgba {
+    fn from(value: &[u8; 3]) -> Self {
+        Self {
+            red: value[0] as f32 / 255.0,
+            green: value[1] as f32 / 255.0,
+            blue: value[2] as f32 / 255.0,
+            alpha: 1.0,
+        }
     }
 }
 
