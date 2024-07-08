@@ -48,15 +48,7 @@ impl<'a> Image<'a> {
         );
 
         self.svg_image = Some(ImageData {
-            data: pixmap
-                .data()
-                .chunks_exact(4)
-                .flat_map(|chunk| {
-                    Rgba::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap())
-                        .to_bgra()
-                        .to_slice()
-                })
-                .collect(),
+            data: pixmap.data().into_iter().map(|byte| *byte).collect(),
             width: size,
             height: size,
             rowstride: size as i32 * 4,
@@ -97,16 +89,16 @@ impl<'a> Image<'a> {
             .chunks_exact(image_data.channels as usize)
             .map(|chunk| {
                 if image_data.has_alpha {
-                    Bgra::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap())
+                    Rgba::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap())
                 } else {
-                    Bgra::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap())
+                    Rgba::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap())
                 }
             });
 
         let mut position = stride * y_offset + x_offset * 4;
         for y in 0..image_data.height as usize {
             for _x in 0..image_data.width as usize {
-                callback(position, chunks.next().unwrap());
+                callback(position, chunks.next().unwrap().to_bgra());
                 position += 4;
             }
             position = stride * (y + y_offset) + x_offset * 4;
