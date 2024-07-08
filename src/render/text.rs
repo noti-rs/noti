@@ -96,13 +96,31 @@ impl TextRect {
     ) {
         const SPACEBAR_WIDTH: isize = 15;
         let bottom = height - self.padding;
-        let word_height = self.words[0].height;
+
+        let bottom_spacing = self
+            .words
+            .iter()
+            .flat_map(|word| word.glyphs.iter())
+            .map(|(metrics, _)| metrics.ymin as isize)
+            .min()
+            .unwrap_or_default()
+            .abs() as usize;
+
+        let line_height = self
+            .words
+            .iter()
+            .flat_map(|word| word.glyphs.iter())
+            .map(|(metrics, _)| metrics.height as isize + metrics.ymin as isize)
+            .max()
+            .unwrap_or_default();
+
+        let total_height = bottom_spacing + line_height as usize;
 
         let mut word_index = 0;
 
-        for y in (self.padding..bottom)
-            .step_by(word_height + self.line_spacing)
-            .take_while(|y| bottom - y > word_height)
+        for y in (self.padding as isize..bottom as isize)
+            .step_by(total_height + self.line_spacing)
+            .take_while(|y| bottom - *y as usize > total_height)
         {
             let mut remaining_width = (width - self.padding * 2) as isize;
             let mut words = vec![];
@@ -117,13 +135,6 @@ impl TextRect {
                     word.width as isize + if words.len() > 1 { SPACEBAR_WIDTH } else { 0 };
             }
 
-            let max_height = words
-                .iter()
-                .flat_map(|word| word.glyphs.iter())
-                .map(|(metrics, _)| metrics.height)
-                .max()
-                .unwrap_or_default() as isize;
-
             //TODO: in future here maybe justification algorithm
 
             let mut x = self.padding as isize;
@@ -131,7 +142,7 @@ impl TextRect {
                 word.glyphs.iter().for_each(|(metrics, coverage)| {
                     let mut coverage_iter = coverage.iter();
                     let (width, height) = (metrics.width as isize, metrics.height as isize);
-                    let y_diff = -metrics.ymin as isize + max_height - height;
+                    let y_diff = -metrics.ymin as isize + line_height - height;
                     let x_diff = metrics.xmin as isize;
 
                     for glyph_y in y_diff..height + y_diff {
