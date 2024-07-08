@@ -14,6 +14,7 @@ use self::layer::NotificationStack;
 mod font;
 mod color;
 mod image;
+mod text;
 mod layer;
 
 pub(crate) struct Renderer {

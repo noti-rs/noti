@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, os::fd::AsFd};
+use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc};
 
 use crate::data::{aliases::Result, notification::Notification};
 use wayland_client::{
@@ -15,10 +15,11 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use super::{color::Bgra, image::Image};
+use super::{color::Bgra, font::FontCollection, image::Image, text::TextRect};
 
 pub(crate) struct NotificationStack {
     connection: Connection,
+    font_collection: Arc<FontCollection>,
 
     stack: Vec<(EventQueue<NotificationRect>, NotificationRect)>,
 }
@@ -26,9 +27,11 @@ pub(crate) struct NotificationStack {
 impl NotificationStack {
     pub(crate) fn init() -> Result<Self> {
         let connection = Connection::connect_to_env()?;
+        let font_collection = Arc::new(FontCollection::load_by_font_name("NotoSans".to_string())?);
 
         Ok(Self {
             connection,
+            font_collection,
             stack: vec![],
         })
     }
@@ -39,7 +42,8 @@ impl NotificationStack {
         let display = self.connection.display();
 
         display.get_registry(&qh, ());
-        let notification_rect = NotificationRect::init(notification);
+        let mut notification_rect = NotificationRect::init(notification);
+        notification_rect.font_collection = Some(self.font_collection.clone());
 
         self.stack.push((event_queue, notification_rect));
     }
@@ -69,6 +73,7 @@ struct NotificationRect {
     margin: Margin,
 
     data: Notification,
+    font_collection: Option<Arc<FontCollection>>,
 
     shm: Option<wl_shm::WlShm>,
     buffer: Option<wl_buffer::WlBuffer>,
@@ -90,6 +95,7 @@ impl NotificationRect {
             height: 150,
             margin: Margin::new(),
             data: notification,
+            font_collection: None,
 
             shm: None,
             buffer: None,
@@ -118,7 +124,7 @@ impl NotificationRect {
         );
 
         // INFO: img_width is need for further render (Summary and Text rendering)
-        let _img_width = image.width();
+        let img_width = image.width();
         let img_height = image.height();
         let y_offset = img_height.map(|height| self.height as usize / 2 - height / 2);
 
@@ -127,9 +133,31 @@ impl NotificationRect {
             15,
             y_offset.unwrap_or_default(),
             stride,
-            |position, bgra| {
-                *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4]).unwrap() =
-                    bgra.overlay_on(&background).to_slice()
+            |position, bgra| unsafe {
+                *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
+                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
+            },
+        );
+
+        let mut text = TextRect::from_text(
+            &self.data.body,
+            12,
+            self.font_collection.as_ref().cloned().unwrap(),
+        );
+
+
+        let x_offset = (img_width.unwrap_or_default() + 30) * 4;
+        text.set_padding(15);
+        text.set_line_spacing(5);
+        text.draw(
+            self.width as usize - img_width.unwrap_or_default() - 15,
+            self.height as usize,
+            |x, y, bgra| {
+                let position = y * stride + x_offset + x * 4;
+                unsafe {
+                    *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
+                        .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
+                }
             },
         );
 

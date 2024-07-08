@@ -1,8 +1,8 @@
 pub(crate) struct Bgra {
-    blue: f32,
-    green: f32,
-    red: f32,
-    alpha: f32,
+    pub(crate) blue: f32,
+    pub(crate) green: f32,
+    pub(crate) red: f32,
+    pub(crate) alpha: f32,
 }
 
 impl Bgra {
@@ -14,6 +14,7 @@ impl Bgra {
             alpha: 0.0,
         }
     }
+
     pub(crate) fn new_white() -> Self {
         Self {
             blue: 1.0,
@@ -73,10 +74,10 @@ impl From<Bgra> for [u8; 4] {
 }
 
 pub(crate) struct Rgba {
-    red: f32,
-    green: f32,
-    blue: f32,
-    alpha: f32,
+    pub(crate) red: f32,
+    pub(crate) green: f32,
+    pub(crate) blue: f32,
+    pub(crate) alpha: f32,
 }
 
 impl Rgba {
