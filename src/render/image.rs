@@ -101,7 +101,7 @@ impl<'a> Image<'a> {
                 callback(position, chunks.next().unwrap().to_bgra());
                 position += 4;
             }
-            position = stride * (y + y_offset) + x_offset * 4;
+            position += stride - image_data.rowstride as usize;
         }
     }
 }
