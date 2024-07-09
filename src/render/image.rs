@@ -84,16 +84,17 @@ impl<'a> Image<'a> {
         }
 
         let image_data = image_data.unwrap();
+
+        let convert = if image_data.has_alpha {
+            |chunk: &[u8]| Rgba::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap())
+        } else {
+            |chunk: &[u8]| Rgba::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap())
+        };
+
         let mut chunks = image_data
             .data
             .chunks_exact(image_data.channels as usize)
-            .map(|chunk| {
-                if image_data.has_alpha {
-                    Rgba::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap())
-                } else {
-                    Rgba::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap())
-                }
-            });
+            .map(convert);
 
         let mut position = stride * y_offset + x_offset * 4;
         for y in 0..image_data.height as usize {
