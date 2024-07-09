@@ -17,6 +17,36 @@ pub(crate) struct TextRect {
 }
 
 impl TextRect {
+    pub(crate) fn from_str(
+        string: &str,
+        px_size: f32,
+        font_collection: Arc<FontCollection>,
+    ) -> Self {
+        let font = font_collection
+            .font_by_style(&FontStyle::Regular)
+            .font_arc();
+        let glyph_collection: Vec<Option<(Metrics, Vec<u8>)>> = string
+            .chars()
+            .map(|ch| {
+                if !ch.is_whitespace() {
+                    Some(font.rasterize_indexed(font.lookup_glyph_index(ch), px_size))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let words: Vec<TextObject> = glyph_collection
+            .split(|maybe_glyph| maybe_glyph.is_none())
+            .map(|word| TextObject::from_outlined_glyphs(word))
+            .collect();
+
+        Self {
+            words,
+            ..Default::default()
+        }
+    }
+
     pub(crate) fn from_text(
         text: &Text,
         px_size: f32,
@@ -92,30 +122,22 @@ impl TextRect {
         &self,
         width: usize,
         height: usize,
+        text_alignment: TextAlignment,
         mut callback: O,
-    ) {
+    ) -> usize {
         const SPACEBAR_WIDTH: isize = 15;
         let bottom = height - self.padding;
 
-        let bottom_spacing = self
+        let (bottom_spacing, line_height) = self
             .words
             .iter()
-            .flat_map(|word| word.glyphs.iter())
-            .map(|(metrics, _)| metrics.ymin as isize)
-            .min()
-            .unwrap_or_default()
-            .abs() as usize;
-
-        let line_height = self
-            .words
-            .iter()
-            .flat_map(|word| word.glyphs.iter())
-            .map(|(metrics, _)| metrics.height as isize + metrics.ymin as isize)
-            .max()
+            .map(|word| (word.bottom_spacing, word.line_height))
+            .reduce(|lhs, rhs| (std::cmp::max(lhs.0, rhs.0), std::cmp::max(lhs.1, rhs.1)))
             .unwrap_or_default();
 
         let total_height = bottom_spacing + line_height as usize;
 
+        let mut actual_height = self.padding;
         let mut word_index = 0;
 
         for y in (self.padding as isize..bottom as isize)
@@ -125,24 +147,41 @@ impl TextRect {
             let mut remaining_width = (width - self.padding * 2) as isize;
             let mut words = vec![];
             while let Some(word) = self.words.get(word_index) {
-                if remaining_width < 0 || word.width > remaining_width as usize {
+                if remaining_width < 0 || word.advance_width > remaining_width as usize {
                     break;
                 }
 
                 words.push(word);
                 word_index += 1;
                 remaining_width -=
-                    word.width as isize + if words.len() > 1 { SPACEBAR_WIDTH } else { 0 };
+                    word.advance_width as isize + if words.len() > 1 { SPACEBAR_WIDTH } else { 0 };
             }
 
-            //TODO: in future here maybe justification algorithm
+            if words.len() == 0 {
+                break;
+            }
 
-            let mut x = self.padding as isize;
+            let (mut x, x_incrementor) = match text_alignment {
+                TextAlignment::Center => (remaining_width / 2, SPACEBAR_WIDTH),
+                TextAlignment::Left => (0, SPACEBAR_WIDTH),
+                TextAlignment::Right => (remaining_width, SPACEBAR_WIDTH),
+                TextAlignment::SpaceBetween => (
+                    0,
+                    if words.len() == 1 {
+                        0
+                    } else {
+                        let count = words.len() as isize - 1;
+                        (remaining_width + SPACEBAR_WIDTH * count) / count
+                    },
+                ),
+            };
+            x += self.padding as isize;
+
             for word in words {
                 word.glyphs.iter().for_each(|(metrics, coverage)| {
                     let mut coverage_iter = coverage.iter();
                     let (width, height) = (metrics.width as isize, metrics.height as isize);
-                    let y_diff = -metrics.ymin as isize + line_height - height;
+                    let y_diff = -metrics.ymin as isize + line_height as isize - height;
                     let x_diff = metrics.xmin as isize;
 
                     for glyph_y in y_diff..height + y_diff {
@@ -156,16 +195,24 @@ impl TextRect {
                     x += metrics.advance_width.round() as isize;
                 });
 
-                // TODO: replace here a code after calculating text justification
-                x += SPACEBAR_WIDTH;
+                x += x_incrementor;
             }
+
+            actual_height += total_height + self.line_spacing;
         }
+
+        if actual_height > self.padding {
+            actual_height -= self.line_spacing;
+        }
+
+        actual_height
     }
 }
 
 pub(crate) struct TextObject {
-    width: usize,
-    height: usize,
+    advance_width: usize,
+    line_height: usize,
+    bottom_spacing: usize,
     glyphs: Vec<(Metrics, Vec<u8>)>,
 }
 
@@ -176,18 +223,38 @@ impl TextObject {
             .map(|glyph| glyph.as_ref().cloned().unwrap())
             .collect();
 
-        let width = outlined_glyphs
+        let (advance_width, bottom_spacing, line_height) = outlined_glyphs
             .iter()
-            .map(|glyph| glyph.0.advance_width)
-            .sum::<f32>()
-            .round() as usize;
-
-        let height = outlined_glyphs[0].0.height;
+            .map(|(metrics, _)| {
+                (
+                    metrics.advance_width,
+                    metrics.ymin,
+                    (metrics.height as i32 + metrics.ymin) as usize,
+                )
+            })
+            .reduce(|lhs, rhs| {
+                (
+                    lhs.0 + rhs.0,
+                    std::cmp::min(lhs.1, rhs.1),
+                    std::cmp::max(lhs.2, rhs.2),
+                )
+            })
+            .unwrap();
 
         Self {
-            width,
-            height,
+            advance_width: advance_width.round() as usize,
+            bottom_spacing: bottom_spacing.abs() as usize,
+            line_height,
             glyphs: outlined_glyphs,
         }
     }
+}
+
+#[derive(Default)]
+pub(crate) enum TextAlignment {
+    Center,
+    #[default]
+    Left,
+    Right,
+    SpaceBetween,
 }

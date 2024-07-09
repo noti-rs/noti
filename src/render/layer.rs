@@ -15,7 +15,12 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use super::{color::Bgra, font::FontCollection, image::Image, text::TextRect};
+use super::{
+    color::Bgra,
+    font::FontCollection,
+    image::Image,
+    text::{self, TextRect},
+};
 
 pub(crate) struct NotificationStack {
     connection: Connection,
@@ -111,6 +116,9 @@ impl NotificationRect {
     }
 
     fn draw(&self, tmp: &mut File) {
+        const PX_SIZE: f32 = 16.0;
+        const PADDING: usize = 15;
+
         let mut buf: Vec<u8> = vec![Bgra::new_white; self.width as usize * self.height as usize]
             .into_iter()
             .flat_map(|bgra| bgra().to_slice())
@@ -130,7 +138,7 @@ impl NotificationRect {
 
         let stride = self.width as usize * 4;
         image.draw(
-            15,
+            PADDING,
             y_offset.unwrap_or_default(),
             stride,
             |position, bgra| unsafe {
@@ -139,21 +147,44 @@ impl NotificationRect {
             },
         );
 
-        let mut text = TextRect::from_text(
-            &self.data.body,
-            16.0,
+        let mut summary = TextRect::from_str(
+            &self.data.summary,
+            PX_SIZE,
             self.font_collection.as_ref().cloned().unwrap(),
         );
 
-
-        let x_offset = (img_width.unwrap_or_default() + 30) * 4;
-        text.set_padding(15);
-        text.set_line_spacing(0);
-        text.draw(
-            self.width as usize - img_width.unwrap_or_default() - 30,
+        let x_offset = (img_width.unwrap_or_default() + PADDING * 2) * 4;
+        summary.set_padding(PADDING);
+        summary.set_line_spacing(0);
+        let y_offset = summary.draw(
+            self.width as usize - img_width.unwrap_or_default() - PADDING * 2,
             self.height as usize,
+            text::TextAlignment::Center,
             |x, y, bgra| {
                 let position = (y * stride as isize + x_offset as isize + x * 4) as usize;
+                unsafe {
+                    *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
+                        .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
+                }
+            },
+        );
+
+        let mut text = TextRect::from_text(
+            &self.data.body,
+            PX_SIZE,
+            self.font_collection.as_ref().cloned().unwrap(),
+        );
+
+        text.set_padding(PADDING);
+        text.set_line_spacing(0);
+        text.draw(
+            self.width as usize - img_width.unwrap_or_default() - PADDING * 2,
+            self.height as usize - y_offset,
+            text::TextAlignment::default(),
+            |x, y, bgra| {
+                let position = ((y + y_offset as isize) * stride as isize
+                    + x_offset as isize
+                    + x * 4) as usize;
                 unsafe {
                     *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
                         .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
