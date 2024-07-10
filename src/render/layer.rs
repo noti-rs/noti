@@ -33,7 +33,9 @@ impl NotificationStack {
     pub(crate) fn init() -> Result<Self> {
         let connection = Connection::connect_to_env()?;
         // let font_collection = Arc::new(FontCollection::load_by_font_name("NotoSans".to_string())?);
-        let font_collection = Arc::new(FontCollection::load_by_font_name("JetBrainsMonoNerdFont".to_string())?);
+        let font_collection = Arc::new(FontCollection::load_by_font_name(
+            "JetBrainsMonoNerdFont".to_string(),
+        )?);
 
         Ok(Self {
             connection,
@@ -193,7 +195,90 @@ impl NotificationRect {
             },
         );
 
+        self.apply_border(&mut buf);
+
         tmp.write_all(&buf).unwrap();
+    }
+
+    fn apply_border(&self, buf: &mut Vec<u8>) {
+        const RADIUS: usize = 15;
+        let radius = (self.width as usize / 2).min(RADIUS);
+
+        let stride = self.width as usize * 4;
+        let mut position = (self.height as usize - radius + 1) * stride - radius * 4;
+
+        //INFO: bottom-right
+        let mut bottom_right_corner_coverage = vec![vec![0; radius]; radius];
+        for y in 0..radius {
+            for x in 0..radius {
+                let inner_hypot = (x as f32).hypot(y as f32);
+                let inner_diff = radius as f32 - inner_hypot;
+                let outer_hypot = ((x + 1) as f32).hypot((y + 1) as f32);
+
+                let value = if inner_hypot > radius as f32 {
+                    0
+                } else if outer_hypot > radius as f32 {
+                    (inner_diff * 255.0).round() as u8
+                } else {
+                    255
+                };
+
+                bottom_right_corner_coverage[x][y] = value;
+
+                buf[position] = value;
+                buf[position + 1] = value;
+                buf[position + 2] = value;
+                buf[position + 3] = value;
+                position += 4;
+            }
+
+            position += stride - radius * 4;
+        }
+
+        //INFO: top-left
+        position = 0;
+        for y in (0..radius).rev() {
+            for x in (0..radius).rev() {
+                let value = bottom_right_corner_coverage[x][y];
+                buf[position] = value;
+                buf[position + 1] = value;
+                buf[position + 2] = value;
+                buf[position + 3] = value;
+                position += 4;
+            }
+
+            position += stride - radius * 4;
+        }
+
+        //INFO: top-right
+        position = stride - radius * 4;
+        for y in (0..radius).rev() {
+            for x in 0..radius {
+                let value = bottom_right_corner_coverage[x][y];
+                buf[position] = value;
+                buf[position + 1] = value;
+                buf[position + 2] = value;
+                buf[position + 3] = value;
+                position += 4;
+            }
+
+            position += stride - radius * 4;
+        }
+
+        //INFO: bottom-left
+        position = (self.height as usize - radius) * stride;
+        for y in 0..radius {
+            for x in (0..radius).rev() {
+                let value = bottom_right_corner_coverage[x][y];
+                buf[position] = value;
+                buf[position + 1] = value;
+                buf[position + 2] = value;
+                buf[position + 3] = value;
+                position += 4;
+            }
+
+            position += stride - radius * 4;
+        }
     }
 }
 
