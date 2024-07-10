@@ -9,7 +9,7 @@ use data::aliases::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dbg!(&CONFIG);
+    dbg!(&*CONFIG); // &* used for initializing
 
     core::run().await?;
     Ok(())
