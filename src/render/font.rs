@@ -1,6 +1,6 @@
 use derive_more::Display;
 use fontdue::FontSettings;
-use owned_ttf_parser::{AsFaceRef, OwnedFace, RasterImageFormat};
+use owned_ttf_parser::{AsFaceRef, OwnedFace};
 use std::{
     collections::HashMap,
     ops::{Add, AddAssign, Sub, SubAssign},
@@ -15,18 +15,6 @@ use super::image::Image;
 pub(crate) struct FontCollection {
     map: HashMap<FontStyle, Font>,
     pub(crate) emoji: Option<OwnedFace>,
-}
-
-#[derive(Debug)]
-pub(crate) struct RasterGlyphImage {
-    pub(crate) x: i16,
-    pub(crate) y: i16,
-    pub(crate) width: u16,
-    pub(crate) height: u16,
-    pub(crate) pixels_per_em: u16,
-    pub(crate) format: RasterImageFormat,
-    pub(crate) data: Box<[u8]>,
-    pub(crate) image: image::RgbaImage,
 }
 
 impl FontCollection {
