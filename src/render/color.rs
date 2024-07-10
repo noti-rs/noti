@@ -1,3 +1,6 @@
+use std::ops::{Mul, MulAssign};
+
+#[derive(Clone, Default)]
 pub(crate) struct Bgra {
     pub(crate) blue: f32,
     pub(crate) green: f32,
@@ -80,6 +83,27 @@ impl From<Bgra> for Rgba {
             blue,
             alpha,
         }
+    }
+}
+
+impl Mul<f32> for Bgra {
+    type Output = Bgra;
+
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        self.blue *= rhs;
+        self.green *= rhs;
+        self.red *= rhs;
+        self.alpha *= rhs;
+        self
+    }
+}
+
+impl MulAssign<f32> for Bgra {
+    fn mul_assign(&mut self, rhs: f32) {
+        self.blue *= rhs;
+        self.green *= rhs;
+        self.red *= rhs;
+        self.alpha *= rhs;
     }
 }
 
@@ -176,6 +200,27 @@ impl From<Rgba> for Bgra {
 impl From<Rgba> for [u8; 4] {
     fn from(value: Rgba) -> Self {
         value.to_slice()
+    }
+}
+
+impl Mul<f32> for Rgba {
+    type Output = Rgba;
+
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        self.blue *= rhs;
+        self.green *= rhs;
+        self.red *= rhs;
+        self.alpha *= rhs;
+        self
+    }
+}
+
+impl MulAssign<f32> for Rgba {
+    fn mul_assign(&mut self, rhs: f32) {
+        self.blue *= rhs;
+        self.green *= rhs;
+        self.red *= rhs;
+        self.alpha *= rhs;
     }
 }
 

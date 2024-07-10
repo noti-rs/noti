@@ -1,6 +1,9 @@
 use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc};
 
-use crate::data::{aliases::Result, notification::Notification};
+use crate::{
+    data::{aliases::Result, notification::Notification},
+    render::border::BorderBuilder,
+};
 use wayland_client::{
     delegate_noop,
     protocol::{
@@ -119,14 +122,36 @@ impl NotificationRect {
     }
 
     fn draw(&self, tmp: &mut File) {
-        const PX_SIZE: f32 = 16.0;
-        const PADDING: usize = 15;
-
         let mut buf: Vec<u8> = vec![Bgra::new_white; self.width as usize * self.height as usize]
             .into_iter()
             .flat_map(|bgra| bgra().to_slice())
             .collect();
+
         let background = Bgra::new_white();
+        let stride = self.width as usize * 4;
+
+        const RADIUS: usize = 10;
+        const BORDER_WIDTH: usize = 5;
+
+        let mut black_color = Bgra::new();
+        black_color.alpha = 1.0;
+        let border = BorderBuilder::default()
+            .width(BORDER_WIDTH)
+            .radius(RADIUS)
+            .color(black_color)
+            .background_color(background.clone())
+            .frame_width(self.width as usize)
+            .frame_height(self.height as usize)
+            .build()
+            .unwrap();
+        border.draw(|x, y, bgra| unsafe {
+            let position = y * stride + x * 4;
+            *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
+                .unwrap_unchecked() = bgra.to_slice()
+        });
+
+        const PX_SIZE: f32 = 16.0;
+        const PADDING: usize = 15 + BORDER_WIDTH;
 
         let image = Image::from(self.data.hints.image_data.as_ref()).or_svg(
             self.data.hints.image_path.as_deref(),
@@ -139,7 +164,6 @@ impl NotificationRect {
         let img_height = image.height();
         let y_offset = img_height.map(|height| self.height as usize / 2 - height / 2);
 
-        let stride = self.width as usize * 4;
         image.draw(
             PADDING,
             y_offset.unwrap_or_default(),
@@ -195,90 +219,7 @@ impl NotificationRect {
             },
         );
 
-        self.apply_border(&mut buf);
-
         tmp.write_all(&buf).unwrap();
-    }
-
-    fn apply_border(&self, buf: &mut Vec<u8>) {
-        const RADIUS: usize = 15;
-        let radius = (self.width as usize / 2).min(RADIUS);
-
-        let stride = self.width as usize * 4;
-        let mut position = (self.height as usize - radius + 1) * stride - radius * 4;
-
-        //INFO: bottom-right
-        let mut bottom_right_corner_coverage = vec![vec![0; radius]; radius];
-        for y in 0..radius {
-            for x in 0..radius {
-                let inner_hypot = (x as f32).hypot(y as f32);
-                let inner_diff = radius as f32 - inner_hypot;
-                let outer_hypot = ((x + 1) as f32).hypot((y + 1) as f32);
-
-                let value = if inner_hypot > radius as f32 {
-                    0
-                } else if outer_hypot > radius as f32 {
-                    (inner_diff * 255.0).round() as u8
-                } else {
-                    255
-                };
-
-                bottom_right_corner_coverage[x][y] = value;
-
-                buf[position] = value;
-                buf[position + 1] = value;
-                buf[position + 2] = value;
-                buf[position + 3] = value;
-                position += 4;
-            }
-
-            position += stride - radius * 4;
-        }
-
-        //INFO: top-left
-        position = 0;
-        for y in (0..radius).rev() {
-            for x in (0..radius).rev() {
-                let value = bottom_right_corner_coverage[x][y];
-                buf[position] = value;
-                buf[position + 1] = value;
-                buf[position + 2] = value;
-                buf[position + 3] = value;
-                position += 4;
-            }
-
-            position += stride - radius * 4;
-        }
-
-        //INFO: top-right
-        position = stride - radius * 4;
-        for y in (0..radius).rev() {
-            for x in 0..radius {
-                let value = bottom_right_corner_coverage[x][y];
-                buf[position] = value;
-                buf[position + 1] = value;
-                buf[position + 2] = value;
-                buf[position + 3] = value;
-                position += 4;
-            }
-
-            position += stride - radius * 4;
-        }
-
-        //INFO: bottom-left
-        position = (self.height as usize - radius) * stride;
-        for y in 0..radius {
-            for x in (0..radius).rev() {
-                let value = bottom_right_corner_coverage[x][y];
-                buf[position] = value;
-                buf[position + 1] = value;
-                buf[position + 2] = value;
-                buf[position + 3] = value;
-                position += 4;
-            }
-
-            position += stride - radius * 4;
-        }
     }
 }
 

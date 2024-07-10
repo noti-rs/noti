@@ -15,6 +15,7 @@ mod font;
 mod color;
 mod image;
 mod text;
+mod border;
 mod layer;
 
 pub(crate) struct Renderer {
