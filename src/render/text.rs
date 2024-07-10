@@ -7,7 +7,7 @@ use crate::{
     render::font::FontStyle,
 };
 
-use super::{color::Bgra, font::FontCollection};
+use super::{color::Bgra, font::FontCollection, image::Image};
 
 #[derive(Default)]
 pub(crate) struct TextRect {
@@ -25,22 +25,29 @@ impl TextRect {
         let font = font_collection
             .font_by_style(&FontStyle::Regular)
             .font_arc();
-        let glyph_collection: Vec<Option<(Metrics, Vec<u8>)>> = string
+        {}
+        let glyph_collection: Vec<LocalGlyph> = string
             .chars()
             .map(|ch| {
                 if !ch.is_whitespace() {
-                    Some(font.rasterize_indexed(font.lookup_glyph_index(ch), px_size))
+                    let glyph_id = font.lookup_glyph_index(ch);
+                    if glyph_id != 0 {
+                        LocalGlyph::Outline(
+                            font.rasterize_indexed(font.lookup_glyph_index(ch), px_size),
+                        )
+                    } else {
+                        font_collection
+                            .emoji_image(ch, px_size as u16)
+                            .map(|image| LocalGlyph::Image(image))
+                            .unwrap_or(LocalGlyph::Empty)
+                    }
                 } else {
-                    None
+                    LocalGlyph::Empty
                 }
             })
             .collect();
 
-        let words: Vec<TextObject> = glyph_collection
-            .split(|maybe_glyph| maybe_glyph.is_none())
-            .map(|word| TextObject::from_outlined_glyphs(word))
-            .collect();
-
+        let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
             ..Default::default()
@@ -58,7 +65,7 @@ impl TextRect {
         let mut current_entities = VecDeque::new();
         let mut current_style = FontStyle::Regular;
 
-        let glyph_collection: Vec<Option<(Metrics, Vec<u8>)>> = body
+        let glyph_collection: Vec<LocalGlyph> = body
             .chars()
             .enumerate()
             .map(|(pos, ch)| {
@@ -77,9 +84,22 @@ impl TextRect {
 
                 let glyph = if !ch.is_whitespace() {
                     let font = font_collection.font_by_style(&current_style).font_arc();
-                    Some(font.rasterize_indexed(font.lookup_glyph_index(ch), px_size))
+                    // LocalGlyph::Outline(
+                    //     font.rasterize_indexed(font.lookup_glyph_index(ch), px_size),
+                    // )
+                    let glyph_id = font.lookup_glyph_index(ch);
+                    if glyph_id != 0 {
+                        LocalGlyph::Outline(
+                            font.rasterize_indexed(font.lookup_glyph_index(ch), px_size),
+                        )
+                    } else {
+                        font_collection
+                            .emoji_image(ch, px_size as u16)
+                            .map(|image| LocalGlyph::Image(image))
+                            .unwrap_or(LocalGlyph::Empty)
+                    }
                 } else {
-                    None
+                    LocalGlyph::Empty
                 };
 
                 while let Some(entity) = current_entities.front() {
@@ -99,15 +119,32 @@ impl TextRect {
             })
             .collect();
 
-        let words: Vec<TextObject> = glyph_collection
-            .split(|maybe_glyph| maybe_glyph.is_none())
-            .map(|word| TextObject::from_outlined_glyphs(word))
-            .collect();
-
+        let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
             ..Default::default()
         }
+    }
+
+    fn convert_to_words(glyph_collection: Vec<LocalGlyph>) -> Vec<TextObject> {
+        let mut words = vec![];
+        let mut word = vec![];
+        for local_glyph in glyph_collection {
+            if local_glyph.is_empty() {
+                if !word.is_empty() {
+                    words.push(TextObject::from_local_glyphs(word));
+                }
+                word = vec![];
+            } else {
+                word.push(local_glyph);
+            }
+        }
+
+        if !word.is_empty() {
+            words.push(TextObject::from_local_glyphs(word));
+        }
+
+        words
     }
 
     pub(crate) fn set_line_spacing(&mut self, line_spacing: usize) {
@@ -147,7 +184,9 @@ impl TextRect {
             let mut remaining_width = (width - self.padding * 2) as isize;
             let mut words = vec![];
             while let Some(word) = self.words.get(word_index) {
-                if remaining_width < 0 || word.advance_width > remaining_width as usize {
+                let new_width =
+                    word.advance_width as isize + if words.len() > 1 { SPACEBAR_WIDTH } else { 0 };
+                if remaining_width < 0 || new_width > remaining_width {
                     break;
                 }
 
@@ -178,22 +217,33 @@ impl TextRect {
             x += self.padding as isize;
 
             for word in words {
-                word.glyphs.iter().for_each(|(metrics, coverage)| {
-                    let mut coverage_iter = coverage.iter();
-                    let (width, height) = (metrics.width as isize, metrics.height as isize);
-                    let y_diff = -metrics.ymin as isize + line_height as isize - height;
-                    let x_diff = metrics.xmin as isize;
-
-                    for glyph_y in y_diff..height + y_diff {
-                        for glyph_x in x_diff..width + x_diff {
-                            let mut bgra = Bgra::new();
-                            bgra.alpha = *coverage_iter.next().unwrap() as f32 / 255.0;
-                            callback(x + glyph_x, y as isize + glyph_y, bgra);
+                word.glyphs
+                    .iter()
+                    .for_each(|local_glyph| match local_glyph {
+                        LocalGlyph::Image(img) => {
+                            img.draw_by_xy(|img_x, img_y, bgra| {
+                                callback(img_x + x, img_y + y, bgra)
+                            });
+                            x += img.width().unwrap_or_default() as isize;
                         }
-                    }
+                        LocalGlyph::Outline((metrics, coverage)) => {
+                            let mut coverage_iter = coverage.iter();
+                            let (width, height) = (metrics.width as isize, metrics.height as isize);
+                            let y_diff = -metrics.ymin as isize + line_height as isize - height;
+                            let x_diff = metrics.xmin as isize;
 
-                    x += metrics.advance_width.round() as isize;
-                });
+                            for glyph_y in y_diff..height + y_diff {
+                                for glyph_x in x_diff..width + x_diff {
+                                    let mut bgra = Bgra::new();
+                                    bgra.alpha = *coverage_iter.next().unwrap() as f32 / 255.0;
+                                    callback(x + glyph_x, y as isize + glyph_y, bgra);
+                                }
+                            }
+
+                            x += metrics.advance_width.round() as isize;
+                        }
+                        LocalGlyph::Empty => unreachable!(),
+                    });
 
                 x += x_incrementor;
             }
@@ -209,28 +259,45 @@ impl TextRect {
     }
 }
 
+enum LocalGlyph {
+    Image(Image),
+    Outline((Metrics, Vec<u8>)),
+    Empty,
+}
+
+impl LocalGlyph {
+    fn is_empty(&self) -> bool {
+        if let LocalGlyph::Empty = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 pub(crate) struct TextObject {
     advance_width: usize,
     line_height: usize,
     bottom_spacing: usize,
-    glyphs: Vec<(Metrics, Vec<u8>)>,
+    glyphs: Vec<LocalGlyph>,
 }
 
 impl TextObject {
-    fn from_outlined_glyphs(outlined_glyphs: &[Option<(Metrics, Vec<u8>)>]) -> Self {
-        let outlined_glyphs: Vec<(Metrics, Vec<u8>)> = outlined_glyphs
-            .into_iter()
-            .map(|glyph| glyph.as_ref().cloned().unwrap())
-            .collect();
-
+    fn from_local_glyphs(outlined_glyphs: Vec<LocalGlyph>) -> Self {
         let (advance_width, bottom_spacing, line_height) = outlined_glyphs
             .iter()
-            .map(|(metrics, _)| {
-                (
+            .map(|local_glyph| match local_glyph {
+                LocalGlyph::Image(img) => (
+                    img.width().unwrap_or_default() as f32,
+                    0,
+                    img.height().unwrap_or_default() as usize,
+                ),
+                LocalGlyph::Outline((metrics, _)) => (
                     metrics.advance_width,
                     metrics.ymin,
                     (metrics.height as i32 + metrics.ymin) as usize,
-                )
+                ),
+                LocalGlyph::Empty => panic!("TextObject have an empty glyph, which is nonsense!"),
             })
             .reduce(|lhs, rhs| {
                 (
@@ -251,6 +318,7 @@ impl TextObject {
 }
 
 #[derive(Default)]
+#[allow(unused)]
 pub(crate) enum TextAlignment {
     Center,
     #[default]

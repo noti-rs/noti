@@ -32,7 +32,8 @@ pub(crate) struct NotificationStack {
 impl NotificationStack {
     pub(crate) fn init() -> Result<Self> {
         let connection = Connection::connect_to_env()?;
-        let font_collection = Arc::new(FontCollection::load_by_font_name("NotoSans".to_string())?);
+        // let font_collection = Arc::new(FontCollection::load_by_font_name("NotoSans".to_string())?);
+        let font_collection = Arc::new(FontCollection::load_by_font_name("JetBrainsMonoNerdFont".to_string())?);
 
         Ok(Self {
             connection,
