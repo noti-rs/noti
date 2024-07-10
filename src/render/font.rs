@@ -1,5 +1,6 @@
 use derive_more::Display;
 use fontdue::FontSettings;
+use owned_ttf_parser::{AsFaceRef, OwnedFace, RasterImageFormat};
 use std::{
     collections::HashMap,
     ops::{Add, AddAssign, Sub, SubAssign},
@@ -9,14 +10,29 @@ use std::{
 
 use crate::data::aliases::Result;
 
+use super::image::Image;
+
 pub(crate) struct FontCollection {
     map: HashMap<FontStyle, Font>,
+    pub(crate) emoji: Option<OwnedFace>,
+}
+
+#[derive(Debug)]
+pub(crate) struct RasterGlyphImage {
+    pub(crate) x: i16,
+    pub(crate) y: i16,
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+    pub(crate) pixels_per_em: u16,
+    pub(crate) format: RasterImageFormat,
+    pub(crate) data: Box<[u8]>,
+    pub(crate) image: image::RgbaImage,
 }
 
 impl FontCollection {
     pub(crate) fn load_by_font_name(font_name: String) -> Result<Self> {
         let process_result = Command::new("fc-list")
-            .args(vec![&font_name, "--format", "%{file}:%{style}\n"])
+            .args([&font_name, "--format", "%{file}:%{style}\n"])
             .output()?;
 
         let output: String = process_result
@@ -39,7 +55,21 @@ impl FontCollection {
                 acc
             });
 
-        Ok(Self { map })
+        let emoji = OwnedFace::from_vec(
+            std::fs::read(
+                &Command::new("fc-list")
+                    .args(["NotoColorEmoji", "--format", "%{file}"])
+                    .output()?
+                    .stdout
+                    .into_iter()
+                    .map(|byte| byte as char)
+                    .collect::<String>(),
+            )?,
+            0,
+        )
+        .ok();
+
+        Ok(Self { map, emoji })
     }
 
     pub(crate) fn font_by_style(&self, font_style: &FontStyle) -> &Font {
@@ -48,6 +78,12 @@ impl FontCollection {
                 .get(&FontStyle::Regular)
                 .expect("Not found regular font in Font collection"),
         )
+    }
+
+    pub(crate) fn emoji_image(&self, ch: char, size: u16) -> Option<Image> {
+        let face = self.emoji.as_ref()?.as_face_ref();
+        let glyph_id = face.glyph_index(ch)?;
+        Image::from_raster_glyph_image(face.glyph_raster_image(glyph_id, size)?, size as u32)
     }
 }
 

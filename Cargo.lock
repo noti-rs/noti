@@ -752,7 +752,7 @@ dependencies = [
  "memmap2",
  "slotmap",
  "tinyvec",
- "ttf-parser",
+ "ttf-parser 0.21.1",
 ]
 
 [[package]]
@@ -762,7 +762,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "efe23d02309319171d00d794c9ff48d4f903c0e481375b1b04b017470838af04"
 dependencies = [
  "hashbrown",
- "ttf-parser",
+ "ttf-parser 0.21.1",
 ]
 
 [[package]]
@@ -1173,6 +1173,7 @@ dependencies = [
  "derive_more",
  "fontdue",
  "image",
+ "owned_ttf_parser",
  "regex",
  "resvg",
  "serde",
@@ -1267,6 +1268,15 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "owned_ttf_parser"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "490d3a563d3122bf7c911a59b0add9389e5ec0f5f0c3ac6b91ff235a0e6a7f90"
+dependencies = [
+ "ttf-parser 0.24.0",
 ]
 
 [[package]]
@@ -1655,7 +1665,7 @@ dependencies = [
  "bitflags 2.6.0",
  "bytemuck",
  "smallvec",
- "ttf-parser",
+ "ttf-parser 0.21.1",
  "unicode-bidi-mirroring",
  "unicode-ccc",
  "unicode-properties",
@@ -2069,6 +2079,12 @@ name = "ttf-parser"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c591d83f69777866b9126b24c6dd9a18351f177e49d625920d19f989fd31cf8"
+
+[[package]]
+name = "ttf-parser"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8686b91785aff82828ed725225925b33b4fde44c4bb15876e5f7c832724c420a"
 
 [[package]]
 name = "typenum"

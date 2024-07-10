@@ -24,6 +24,10 @@ impl Bgra {
         }
     }
 
+    pub(crate) fn to_rgba(self) -> Rgba {
+        self.into()
+    }
+
     pub(crate) fn to_slice(&self) -> [u8; 4] {
         [
             (self.blue * 255.0).round() as u8,
@@ -59,6 +63,23 @@ impl From<&[f32; 4]> for Bgra {
 impl From<Bgra> for [u8; 4] {
     fn from(value: Bgra) -> Self {
         value.to_slice()
+    }
+}
+
+impl From<Bgra> for Rgba {
+    fn from(value: Bgra) -> Self {
+        let Bgra {
+            blue,
+            green,
+            red,
+            alpha,
+        } = value;
+        Rgba {
+            red,
+            green,
+            blue,
+            alpha,
+        }
     }
 }
 
