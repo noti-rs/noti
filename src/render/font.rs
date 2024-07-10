@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::data::aliases::Result;
+use crate::data::{aliases::Result, text::EntityKind};
 
 use super::image::Image;
 
@@ -169,6 +169,22 @@ impl From<&str> for FontStyle {
             "Black" => Self::Black,
             "Black Italic" => Self::BlackItalic,
             other => panic!("Invalid style: {other}"),
+        }
+    }
+}
+
+impl From<EntityKind> for FontStyle {
+    fn from(value: EntityKind) -> Self {
+        FontStyle::from(&value)
+    }
+}
+
+impl From<&EntityKind> for FontStyle {
+    fn from(value: &EntityKind) -> Self {
+        match value {
+            EntityKind::Bold => FontStyle::Bold,
+            EntityKind::Italic => FontStyle::Italic,
+            other => todo!("Unsupported style {other:?} at current moment"),
         }
     }
 }

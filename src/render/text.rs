@@ -2,16 +2,13 @@ use std::{collections::VecDeque, sync::Arc};
 
 use fontdue::Metrics;
 
-use crate::{
-    data::text::{EntityKind, Text},
-    render::font::FontStyle,
-};
+use crate::{data::text::Text, render::font::FontStyle};
 
 use super::{color::Bgra, font::FontCollection, image::Image};
 
 #[derive(Default)]
 pub(crate) struct TextRect {
-    words: Vec<TextObject>,
+    words: Vec<WordRect>,
     line_spacing: usize,
     padding: usize,
 }
@@ -51,11 +48,7 @@ impl TextRect {
             .map(|(pos, ch)| {
                 while let Some(entity) = entities.front() {
                     if entity.offset == pos {
-                        match entity.kind {
-                            EntityKind::Bold => current_style += FontStyle::Bold,
-                            EntityKind::Italic => current_style += FontStyle::Italic,
-                            _ => todo!("Unsupported styles at current moment"),
-                        }
+                        current_style += FontStyle::from(&entity.kind);
                         current_entities.push_back(entities.pop_front().unwrap());
                     } else {
                         break;
@@ -68,11 +61,7 @@ impl TextRect {
                 while let Some(entity) = current_entities.front() {
                     if entity.offset + entity.length < pos {
                         let entity = current_entities.pop_front().unwrap();
-                        match entity.kind {
-                            EntityKind::Bold => current_style -= FontStyle::Bold,
-                            EntityKind::Italic => current_style -= FontStyle::Italic,
-                            _ => todo!("Unsupported styles at current moment"),
-                        }
+                        current_style -= FontStyle::from(&entity.kind);
                     } else {
                         break;
                     }
@@ -111,13 +100,13 @@ impl TextRect {
         }
     }
 
-    fn convert_to_words(glyph_collection: Vec<LocalGlyph>) -> Vec<TextObject> {
+    fn convert_to_words(glyph_collection: Vec<LocalGlyph>) -> Vec<WordRect> {
         let mut words = vec![];
         let mut word = vec![];
         for local_glyph in glyph_collection {
             if local_glyph.is_empty() {
                 if !word.is_empty() {
-                    words.push(TextObject::from_local_glyphs(word));
+                    words.push(WordRect::from_local_glyphs(word));
                 }
                 word = vec![];
             } else {
@@ -126,7 +115,7 @@ impl TextRect {
         }
 
         if !word.is_empty() {
-            words.push(TextObject::from_local_glyphs(word));
+            words.push(WordRect::from_local_glyphs(word));
         }
 
         words
@@ -202,33 +191,11 @@ impl TextRect {
             x += self.padding as isize;
 
             for word in words {
-                word.glyphs
-                    .iter()
-                    .for_each(|local_glyph| match local_glyph {
-                        LocalGlyph::Image(img) => {
-                            img.draw_by_xy(|img_x, img_y, bgra| {
-                                callback(img_x + x, img_y + y, bgra)
-                            });
-                            x += img.width().unwrap_or_default() as isize;
-                        }
-                        LocalGlyph::Outline((metrics, coverage)) => {
-                            let mut coverage_iter = coverage.iter();
-                            let (width, height) = (metrics.width as isize, metrics.height as isize);
-                            let y_diff = -metrics.ymin as isize + line_height as isize - height;
-                            let x_diff = metrics.xmin as isize;
-
-                            for glyph_y in y_diff..height + y_diff {
-                                for glyph_x in x_diff..width + x_diff {
-                                    let mut bgra = Bgra::new();
-                                    bgra.alpha = *coverage_iter.next().unwrap() as f32 / 255.0;
-                                    callback(x + glyph_x, y as isize + glyph_y, bgra);
-                                }
-                            }
-
-                            x += metrics.advance_width.round() as isize;
-                        }
-                        LocalGlyph::Empty => unreachable!(),
-                    });
+                word.glyphs.iter().for_each(|local_glyph| {
+                    let (x_shift, _y_shift) =
+                        local_glyph.draw(x, y as isize, line_height as isize, &mut callback);
+                    x += x_shift;
+                });
 
                 x += x_incrementor;
             }
@@ -258,16 +225,56 @@ impl LocalGlyph {
             false
         }
     }
+
+    fn draw<O: FnMut(isize, isize, Bgra)>(
+        &self,
+        x_offset: isize,
+        y_offset: isize,
+        line_height: isize,
+        callback: &mut O,
+    ) -> (isize, isize) {
+        match self {
+            LocalGlyph::Image(img) => {
+                img.draw_by_xy(|img_x, img_y, bgra| {
+                    callback(img_x + x_offset, img_y + y_offset, bgra)
+                });
+                (
+                    img.width().unwrap_or_default() as isize,
+                    img.height().unwrap_or_default() as isize,
+                )
+            }
+            LocalGlyph::Outline((metrics, coverage)) => {
+                let mut coverage_iter = coverage.iter();
+                let (width, height) = (metrics.width as isize, metrics.height as isize);
+                let y_diff = -metrics.ymin as isize + line_height - height;
+                let x_diff = metrics.xmin as isize;
+
+                for glyph_y in y_diff..height + y_diff {
+                    for glyph_x in x_diff..width + x_diff {
+                        let mut bgra = Bgra::new();
+                        bgra.alpha = *coverage_iter.next().unwrap() as f32 / 255.0;
+                        callback(x_offset + glyph_x, y_offset as isize + glyph_y, bgra);
+                    }
+                }
+
+                (
+                    metrics.advance_width.round() as isize,
+                    metrics.advance_height.round() as isize,
+                )
+            }
+            LocalGlyph::Empty => unreachable!(),
+        }
+    }
 }
 
-pub(crate) struct TextObject {
+pub(crate) struct WordRect {
     advance_width: usize,
     line_height: usize,
     bottom_spacing: usize,
     glyphs: Vec<LocalGlyph>,
 }
 
-impl TextObject {
+impl WordRect {
     fn from_local_glyphs(outlined_glyphs: Vec<LocalGlyph>) -> Self {
         let (advance_width, bottom_spacing, line_height) = outlined_glyphs
             .iter()
@@ -282,7 +289,7 @@ impl TextObject {
                     metrics.ymin,
                     (metrics.height as i32 + metrics.ymin) as usize,
                 ),
-                LocalGlyph::Empty => panic!("TextObject have an empty glyph, which is nonsense!"),
+                LocalGlyph::Empty => panic!("WordRect have an empty glyph, which is nonsense!"),
             })
             .reduce(|lhs, rhs| {
                 (
