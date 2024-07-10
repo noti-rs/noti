@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 clap = "4.5.7"
+derive_builder = "0.20.0"
 derive_more = "0.99.18"
 fontdue = "0.9.2"
 image = "0.25.1"
