@@ -100,9 +100,7 @@ impl Image {
         )
         .unwrap();
 
-        let (min_size, max_size) = (min_size as f32, max_size as f32);
-
-        let (size, scale) = resize(min_size, max_size, tree.size().width());
+        let (size, scale) = resize(min_size as f32, max_size as f32, tree.size().width());
         let size = size.round() as i32;
 
         let mut pixmap = resvg::tiny_skia::Pixmap::new(size as u32, size as u32).unwrap();
@@ -144,22 +142,16 @@ impl Image {
         stride: usize,
         mut callback: O,
     ) {
-        let image_data = if let Image::Exists(image_data) = self  {
+        let image_data = if let Image::Exists(image_data) = self {
             image_data
         } else {
             return;
         };
 
-        let convert = if image_data.has_alpha {
-            |chunk: &[u8]| Rgba::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap())
-        } else {
-            |chunk: &[u8]| Rgba::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap())
-        };
-
         let mut chunks = image_data
             .data
             .chunks_exact(image_data.channels as usize)
-            .map(convert);
+            .map(Self::converter(image_data.has_alpha));
 
         let mut position = stride * y_offset + x_offset * 4;
         for _y in 0..image_data.height as usize {
@@ -171,30 +163,35 @@ impl Image {
         }
     }
 
-    pub(crate) fn draw_by_xy<O: FnMut(isize, isize, Bgra)>(
-        &self,
-        mut callback: O,
-    ) {
-        let image_data = if let Image::Exists(image_data) = self  {
+    pub(crate) fn draw_by_xy<O: FnMut(isize, isize, Bgra)>(&self, mut callback: O) {
+        let image_data = if let Image::Exists(image_data) = self {
             image_data
         } else {
             return;
         };
 
-        let convert = if image_data.has_alpha {
-            |chunk: &[u8]| Rgba::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap())
-        } else {
-            |chunk: &[u8]| Rgba::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap())
-        };
-
         let mut chunks = image_data
             .data
             .chunks_exact(image_data.channels as usize)
-            .map(convert);
+            .map(Self::converter(image_data.has_alpha));
 
         for y in 0..image_data.height as isize {
             for x in 0..image_data.width as isize {
                 callback(x, y, chunks.next().unwrap().to_bgra());
+            }
+        }
+    }
+
+    fn converter(has_alpha: bool) -> fn(&[u8]) -> Rgba {
+        //SAFETY: it always safe way while the framebuffer have ARGB format and gives the correct
+        //postiton.
+        if has_alpha {
+            |chunk: &[u8]| unsafe {
+                Rgba::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap_unchecked())
+            }
+        } else {
+            |chunk: &[u8]| unsafe {
+                Rgba::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap_unchecked())
             }
         }
     }
