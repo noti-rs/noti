@@ -22,29 +22,9 @@ impl TextRect {
         px_size: f32,
         font_collection: Arc<FontCollection>,
     ) -> Self {
-        let font = font_collection
-            .font_by_style(&FontStyle::Regular)
-            .font_arc();
-        {}
         let glyph_collection: Vec<LocalGlyph> = string
             .chars()
-            .map(|ch| {
-                if !ch.is_whitespace() {
-                    let glyph_id = font.lookup_glyph_index(ch);
-                    if glyph_id != 0 {
-                        LocalGlyph::Outline(
-                            font.rasterize_indexed(font.lookup_glyph_index(ch), px_size),
-                        )
-                    } else {
-                        font_collection
-                            .emoji_image(ch, px_size as u16)
-                            .map(|image| LocalGlyph::Image(image))
-                            .unwrap_or(LocalGlyph::Empty)
-                    }
-                } else {
-                    LocalGlyph::Empty
-                }
-            })
+            .map(|ch| Self::load_glyph_by_style(ch, &FontStyle::Regular, px_size, &font_collection))
             .collect();
 
         let words = Self::convert_to_words(glyph_collection);
@@ -82,25 +62,8 @@ impl TextRect {
                     }
                 }
 
-                let glyph = if !ch.is_whitespace() {
-                    let font = font_collection.font_by_style(&current_style).font_arc();
-                    // LocalGlyph::Outline(
-                    //     font.rasterize_indexed(font.lookup_glyph_index(ch), px_size),
-                    // )
-                    let glyph_id = font.lookup_glyph_index(ch);
-                    if glyph_id != 0 {
-                        LocalGlyph::Outline(
-                            font.rasterize_indexed(font.lookup_glyph_index(ch), px_size),
-                        )
-                    } else {
-                        font_collection
-                            .emoji_image(ch, px_size as u16)
-                            .map(|image| LocalGlyph::Image(image))
-                            .unwrap_or(LocalGlyph::Empty)
-                    }
-                } else {
-                    LocalGlyph::Empty
-                };
+                let glyph =
+                    Self::load_glyph_by_style(ch, &current_style, px_size, &font_collection);
 
                 while let Some(entity) = current_entities.front() {
                     if entity.offset + entity.length < pos {
@@ -123,6 +86,28 @@ impl TextRect {
         Self {
             words,
             ..Default::default()
+        }
+    }
+
+    fn load_glyph_by_style(
+        ch: char,
+        style: &FontStyle,
+        px_size: f32,
+        font_collection: &Arc<FontCollection>,
+    ) -> LocalGlyph {
+        if ch.is_whitespace() {
+            return LocalGlyph::Empty;
+        }
+
+        let font = font_collection.font_by_style(style).font_arc();
+        let glyph_id = font.lookup_glyph_index(ch);
+        if glyph_id != 0 {
+            LocalGlyph::Outline(font.rasterize_indexed(font.lookup_glyph_index(ch), px_size))
+        } else {
+            font_collection
+                .emoji_image(ch, px_size as u16)
+                .map(|image| LocalGlyph::Image(image))
+                .unwrap_or(LocalGlyph::Empty)
         }
     }
 
