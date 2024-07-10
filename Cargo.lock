@@ -1174,6 +1174,7 @@ dependencies = [
  "fontdue",
  "image",
  "owned_ttf_parser",
+ "rayon",
  "regex",
  "resvg",
  "serde",

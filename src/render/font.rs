@@ -1,6 +1,7 @@
 use derive_more::Display;
 use fontdue::FontSettings;
 use owned_ttf_parser::{AsFaceRef, OwnedFace};
+use rayon::prelude::*;
 use std::{
     collections::HashMap,
     ops::{Add, AddAssign, Sub, SubAssign},
@@ -30,17 +31,21 @@ impl FontCollection {
             .collect();
 
         let map = output
-            .split("\n")
-            .take_while(|line| !line.is_empty())
+            .par_split('\n')
+            .filter(|line| !line.is_empty())
             .map(|line| {
                 let (filepath, styles) = line
                     .split_once(":")
                     .expect("Must be the colon delimiter in --format when calling fc-list");
                 Font::try_read(filepath, styles).expect("Can't read the font file")
             })
-            .fold(HashMap::new(), |mut acc, font| {
+            .fold(HashMap::new, |mut acc, font| {
                 acc.insert(font.style.clone(), font);
                 acc
+            })
+            .reduce(HashMap::new, |mut lhs, rhs| {
+                lhs.extend(rhs);
+                lhs
             });
 
         let emoji = OwnedFace::from_vec(
@@ -78,7 +83,6 @@ impl FontCollection {
 #[derive(Debug)]
 pub(crate) struct Font {
     style: FontStyle,
-    path: Arc<str>,
     data: Arc<fontdue::Font>,
 }
 
@@ -90,14 +94,12 @@ impl Font {
                 .map(|(important_style, _)| important_style)
                 .unwrap_or(styles),
         );
+
         let bytes = std::fs::read(filepath)?;
         let font_settings = FontSettings::default();
         let data = Arc::new(fontdue::Font::from_bytes(bytes, font_settings)?);
-        Ok(Self {
-            style,
-            data,
-            path: Arc::from(filepath),
-        })
+
+        Ok(Self { style, data })
     }
 
     pub(crate) fn font_arc(&self) -> Arc<fontdue::Font> {
