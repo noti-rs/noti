@@ -10,23 +10,12 @@ Noti is a modern, lightweight notification manager designed for the Wayland disp
 - **Custom Configurations:** Supports per-application custom configurations with a mergeable settings system.
 
 ## Installation
-### Building from Source
 
-1. Clone the repository:
-    ```bash
-    git clone https://github.com/noti-rs/noti.git
-    cd noti
-    ```
+Install binary via `cargo install`:
 
-2. Build the project using Cargo:
-    ```bash
-    cargo build --release
-    ```
-
-3. Install the binary:
-    ```bash
-    sudo cp target/release/noti /usr/local/bin/
-    ```
+```bash
+cargo install --git https://github.com/noti-rs/noti/
+```
 
 ### Running Noti
 
