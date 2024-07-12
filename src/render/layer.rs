@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc};
 
 use crate::{
-    config::CONFIG,
+    config::{self, CONFIG},
     data::{
         aliases::Result,
         notification::{self, Notification},
@@ -103,10 +103,10 @@ struct NotificationRect {
 
 impl NotificationRect {
     fn init(notification: Notification) -> Self {
-        let display = CONFIG.display_by_app(&notification.app_name);
+        let general_cfg = CONFIG.general();
         Self {
-            width: display.width() as i32,
-            height: display.height() as i32,
+            width: general_cfg.width() as i32,
+            height: general_cfg.height() as i32,
             margin: Margin::new(),
             data: notification,
             font_collection: None,
@@ -313,12 +313,42 @@ impl Dispatch<wl_registry::WlRegistry, ()> for NotificationRect {
                             (),
                         );
 
+                        let general_cfg = CONFIG.general();
+                        let anchor_cfg = general_cfg.anchor();
+
+                        let (x, y) = CONFIG.general().offset();
+
+                        if anchor_cfg.is_top() {
+                            state.margin.top = y as i32;
+                        }
+                        if anchor_cfg.is_bottom() {
+                            state.margin.bottom = y as i32;
+                        }
+                        if anchor_cfg.is_left() {
+                            state.margin.left = x as i32;
+                        }
+                        if anchor_cfg.is_right() {
+                            state.margin.right = x as i32;
+                        }
+
+                        let anchor = match anchor_cfg {
+                            config::Anchor::Top => Anchor::Top,
+                            config::Anchor::TopLeft => Anchor::Top.union(Anchor::Left),
+                            config::Anchor::TopRight => Anchor::Top.union(Anchor::Right),
+                            config::Anchor::Bottom => Anchor::Bottom,
+                            config::Anchor::BottomLeft => Anchor::Bottom.union(Anchor::Left),
+                            config::Anchor::BottomRight => Anchor::Bottom.union(Anchor::Right),
+                            config::Anchor::Left => Anchor::Left,
+                            config::Anchor::Right => Anchor::Right,
+                        };
+
+                        layer_surface.set_anchor(anchor);
                         state.margin.apply(&layer_surface);
+
                         layer_surface.set_size(state.width as u32, state.height as u32);
                         layer_surface.set_keyboard_interactivity(
                             zwlr_layer_surface_v1::KeyboardInteractivity::None,
                         );
-                        layer_surface.set_anchor(Anchor::Top.union(Anchor::Right));
                         surface.commit();
 
                         state.layer_surface = Some(layer_surface);
@@ -454,9 +484,9 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for NotificationRec
             layer_surface.ack_configure(serial);
 
             if width == 0 && height == 0 {
-                //TODO: change to values from config
-                state.width = 300;
-                state.height = 150;
+                let general_cfg = CONFIG.general();
+                state.width = general_cfg.width() as i32;
+                state.height = general_cfg.height() as i32;
             } else {
                 state.width = width as i32;
                 state.height = height as i32;

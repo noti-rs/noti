@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use serde::Deserialize;
-use std::{collections::HashMap, env, fs, path::Path, str::Chars};
+use std::{collections::HashMap, fs, path::Path, str::Chars};
 
 pub static CONFIG: Lazy<Config> = Lazy::new(Config::init);
 
@@ -80,8 +80,15 @@ impl TomlConfig {
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct GeneralConfig {
-    pub font: Font,
-    pub offset: (u8, u8),
+    font: Font,
+
+    #[serde(default = "GeneralConfig::default_width")]
+    width: u16,
+    #[serde(default = "GeneralConfig::default_height")]
+    height: u16,
+
+    anchor: Anchor,
+    offset: (u8, u8),
 }
 
 impl GeneralConfig {
@@ -89,8 +96,28 @@ impl GeneralConfig {
         &self.font
     }
 
+    pub fn width(&self) -> u16 {
+        self.width
+    }
+
+    pub fn height(&self) -> u16 {
+        self.height
+    }
+
+    pub fn anchor(&self) -> &Anchor {
+        &self.anchor
+    }
+
     pub fn offset(&self) -> (u8, u8) {
         self.offset
+    }
+
+    fn default_width() -> u16 {
+        300
+    }
+
+    fn default_height() -> u16 {
+        150
     }
 }
 
@@ -120,17 +147,85 @@ impl From<(String, u8)> for Font {
 impl Default for Font {
     fn default() -> Self {
         Font {
-            name: "NotoSans".to_string(),
+            name: "Noto Sans".to_string(),
             size: 12,
         }
     }
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
-pub struct DisplayConfig {
-    width: Option<u16>,
-    height: Option<u16>,
+#[serde(from = "String")]
+pub enum Anchor {
+    Top,
+    TopLeft,
+    #[default]
+    TopRight,
+    Bottom,
+    BottomLeft,
+    BottomRight,
+    Left,
+    Right,
+}
 
+impl Anchor {
+    pub fn is_top(&self) -> bool {
+        match self {
+            Anchor::Top | Anchor::TopLeft | Anchor::TopRight => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_right(&self) -> bool {
+        match self {
+            Anchor::TopRight | Anchor::BottomRight | Anchor::Right => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_bottom(&self) -> bool {
+        match self {
+            Anchor::Bottom | Anchor::BottomLeft | Anchor::BottomRight => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_left(&self) -> bool {
+        match self {
+            Anchor::TopLeft | Anchor::BottomLeft | Anchor::Left => true,
+            _ => false,
+        }
+    }
+}
+
+impl From<String> for Anchor {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "top" => Anchor::Top,
+            "top-left" => Anchor::TopLeft,
+            "top-right" => Anchor::TopRight,
+            "bottom" => Anchor::Bottom,
+            "bottom-left" => Anchor::BottomLeft,
+            "bottom-right" => Anchor::BottomRight,
+            "left" => Anchor::Left,
+            "right" => Anchor::Right,
+            other => panic!(
+                "Invalid anchor option! There are possible values:\n\
+                - top\n\
+                - top-right\n\
+                - top-left\n\
+                - bottom\n\
+                - bottom-right\n\
+                - bottom-left\n\
+                - left\n\
+                - right\n\
+                Used: {other}"
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct DisplayConfig {
     rounding: Option<u8>,
     padding: Option<u8>,
 
@@ -141,14 +236,6 @@ pub struct DisplayConfig {
 }
 
 impl DisplayConfig {
-    pub fn width(&self) -> u16 {
-        self.width.unwrap()
-    }
-
-    pub fn height(&self) -> u16 {
-        self.height.unwrap()
-    }
-
     pub fn rounding(&self) -> u8 {
         self.rounding.unwrap()
     }
@@ -170,14 +257,6 @@ impl DisplayConfig {
     }
 
     fn fill_empty_by_default(&mut self) {
-        if self.width.is_none() {
-            self.width = Some(300);
-        }
-
-        if self.height.is_none() {
-            self.height = Some(150);
-        }
-
         if self.rounding.is_none() {
             self.rounding = Some(0);
         }
@@ -351,9 +430,6 @@ pub struct AppConfig {
 impl AppConfig {
     fn merge(&mut self, other: &DisplayConfig) {
         if let Some(display) = self.display.as_mut() {
-            display.width = display.width.or(other.width);
-            display.height = display.height.or(other.height);
-
             display.rounding = display.rounding.or(other.rounding);
             display.padding = display.padding.or(other.padding);
 
