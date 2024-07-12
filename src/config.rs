@@ -46,8 +46,8 @@ impl Config {
         &self.display
     }
 
-    fn display_by_app(&self, name: String) -> &DisplayConfig {
-        self.app_configs.get(&name).unwrap_or(&self.display)
+    pub fn display_by_app(&self, name: &str) -> &DisplayConfig {
+        self.app_configs.get(name).unwrap_or(&self.display)
     }
 }
 
@@ -62,24 +62,18 @@ pub struct TomlConfig {
 
 impl TomlConfig {
     fn parse() -> Self {
-        let config_dir = format!(
-            "{}/.config/{}/",
-            env::var("HOME").unwrap(),
-            env!("CARGO_PKG_NAME")
-        );
+        let config_dirs = [
+            format!("{}/{}/", env!("XDG_CONFIG_HOME"), env!("CARGO_PKG_NAME")),
+            format!("{}/.config/{}/", env!("HOME"), env!("CARGO_PKG_NAME")),
+        ];
 
-        let config_path = Path::new(&config_dir).join("config.toml");
-
-        if !config_path.parent().unwrap().exists() {
-            fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-        }
-
-        if !config_path.exists() {
-            fs::File::create(&config_path).unwrap();
-        }
-
-        let config_content = fs::read_to_string(&config_path).unwrap();
-        toml::from_str(&config_content).unwrap_or_default()
+        config_dirs
+            .iter()
+            .map(|str| Path::new(&str).join("config.toml"))
+            .find(|path| path.exists())
+            .map(|config_path| fs::read_to_string(&config_path).unwrap())
+            .map(|content| toml::from_str(&content).unwrap())
+            .unwrap_or(Default::default())
     }
 }
 
@@ -112,8 +106,8 @@ impl Font {
         &self.name
     }
 
-    pub fn size(&self) -> &u8 {
-        &self.size
+    pub fn size(&self) -> u8 {
+        self.size
     }
 }
 
@@ -343,7 +337,7 @@ impl Border {
         }
 
         if self.color.is_none() {
-            self.color = Default::default();
+            self.color = Some(Default::default());
         }
     }
 }

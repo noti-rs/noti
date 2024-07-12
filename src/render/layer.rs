@@ -1,7 +1,11 @@
 use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc};
 
 use crate::{
-    data::{aliases::Result, notification::Notification},
+    config::CONFIG,
+    data::{
+        aliases::Result,
+        notification::{self, Notification},
+    },
     render::border::BorderBuilder,
 };
 use wayland_client::{
@@ -35,9 +39,8 @@ pub(crate) struct NotificationStack {
 impl NotificationStack {
     pub(crate) fn init() -> Result<Self> {
         let connection = Connection::connect_to_env()?;
-        // let font_collection = Arc::new(FontCollection::load_by_font_name("NotoSans".to_string())?);
         let font_collection = Arc::new(FontCollection::load_by_font_name(
-            "JetBrainsMonoNerdFont".to_string(),
+            CONFIG.general().font().name(),
         )?);
 
         Ok(Self {
@@ -100,10 +103,10 @@ struct NotificationRect {
 
 impl NotificationRect {
     fn init(notification: Notification) -> Self {
-        //TODO: change to values from config
+        let display = CONFIG.display_by_app(&notification.app_name);
         Self {
-            width: 300,
-            height: 150,
+            width: display.width() as i32,
+            height: display.height() as i32,
             margin: Margin::new(),
             data: notification,
             font_collection: None,
@@ -122,36 +125,41 @@ impl NotificationRect {
     }
 
     fn draw(&self, tmp: &mut File) {
-        let mut buf: Vec<u8> = vec![Bgra::new_white; self.width as usize * self.height as usize]
+        let display = CONFIG.display_by_app(&self.data.app_name);
+        let colors = match self.data.hints.urgency {
+            notification::Urgency::Low => display.colors().low(),
+            notification::Urgency::Normal => display.colors().normal(),
+            notification::Urgency::Critical => display.colors().critical(),
+        };
+
+        let background: Bgra = colors.background().into();
+        let foreground: Bgra = colors.foreground().into();
+
+        let mut buf: Vec<u8> = vec![background.clone(); self.width as usize * self.height as usize]
             .into_iter()
-            .flat_map(|bgra| bgra().to_slice())
+            .flat_map(|bgra| bgra.to_slice())
             .collect();
 
-        let background = Bgra::new_white();
+        let border_cfg = display.border();
         let stride = self.width as usize * 4;
 
-        const RADIUS: usize = 10;
-        const BORDER_WIDTH: usize = 5;
-
-        let mut black_color = Bgra::new();
-        black_color.alpha = 1.0;
         let border = BorderBuilder::default()
-            .width(BORDER_WIDTH)
-            .radius(RADIUS)
-            .color(black_color)
+            .width(border_cfg.size() as usize)
+            .radius(display.rounding() as usize)
+            .color(border_cfg.color().into())
             .background_color(background.clone())
             .frame_width(self.width as usize)
             .frame_height(self.height as usize)
             .build()
             .unwrap();
+
         border.draw(|x, y, bgra| unsafe {
             let position = y * stride + x * 4;
             *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
                 .unwrap_unchecked() = bgra.to_slice()
         });
 
-        const PX_SIZE: f32 = 16.0;
-        const PADDING: usize = 15 + BORDER_WIDTH;
+        let padding = display.padding() as usize + border_cfg.size() as usize;
 
         let image = Image::from(self.data.hints.image_data.as_ref()).or_svg(
             self.data.hints.image_path.as_deref(),
@@ -165,7 +173,7 @@ impl NotificationRect {
         let y_offset = img_height.map(|height| self.height as usize / 2 - height / 2);
 
         image.draw(
-            PADDING,
+            padding,
             y_offset.unwrap_or_default(),
             stride,
             |position, bgra| unsafe {
@@ -174,17 +182,21 @@ impl NotificationRect {
             },
         );
 
+        let font_size = CONFIG.general().font().size() as f32;
+
         let mut summary = TextRect::from_str(
             &self.data.summary,
-            PX_SIZE,
+            font_size,
             self.font_collection.as_ref().cloned().unwrap(),
         );
 
-        let x_offset = (img_width.unwrap_or_default() + PADDING * 2) * 4;
-        summary.set_padding(PADDING);
+        let x_offset = (img_width.unwrap_or_default() + padding * 2) * 4;
+        summary.set_padding(padding);
         summary.set_line_spacing(0);
+        summary.set_foreground(foreground.clone());
+
         let y_offset = summary.draw(
-            self.width as usize - img_width.unwrap_or_default() - PADDING * 2,
+            self.width as usize - img_width.unwrap_or_default() - padding * 2,
             self.height as usize,
             text::TextAlignment::Center,
             |x, y, bgra| {
@@ -198,14 +210,15 @@ impl NotificationRect {
 
         let mut text = TextRect::from_text(
             &self.data.body,
-            PX_SIZE,
+            font_size,
             self.font_collection.as_ref().cloned().unwrap(),
         );
 
-        text.set_padding(PADDING);
+        text.set_padding(padding);
         text.set_line_spacing(0);
+        text.set_foreground(foreground);
         text.draw(
-            self.width as usize - img_width.unwrap_or_default() - PADDING * 2,
+            self.width as usize - img_width.unwrap_or_default() - padding * 2,
             self.height as usize - y_offset,
             text::TextAlignment::default(),
             |x, y, bgra| {
