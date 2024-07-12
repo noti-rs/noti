@@ -218,14 +218,14 @@ pub enum Urgency {
 
 impl Urgency {
     pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
-        u32::try_from(hint)
+        u8::try_from(hint)
             .ok()
             .and_then(|val| Some(Self::from(val)))
     }
 }
 
-impl From<u32> for Urgency {
-    fn from(value: u32) -> Self {
+impl From<u8> for Urgency {
+    fn from(value: u8) -> Self {
         match value {
             0 => Self::Low,
             1 => Self::Normal,
