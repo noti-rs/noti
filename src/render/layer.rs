@@ -4,6 +4,7 @@ use crate::{
     config::{self, CONFIG},
     data::{
         aliases::Result,
+        internal_messages::RendererMessage,
         notification::{self, Notification},
     },
     render::border::BorderBuilder,
@@ -33,6 +34,7 @@ pub(crate) struct NotificationStack {
     font_collection: Arc<FontCollection>,
 
     stack: Vec<NotificationRect>,
+    events: Vec<RendererMessage>,
 }
 
 impl NotificationStack {
@@ -47,8 +49,11 @@ impl NotificationStack {
             event_queue: None,
             qhandle: None,
             window: None,
+
             font_collection,
+
             stack: vec![],
+            events: vec![],
         })
     }
 
@@ -68,34 +73,110 @@ impl NotificationStack {
 
         let mut file = tempfile::tempfile().unwrap();
         notification_rect.draw(&mut file);
-        self.stack
-            .iter()
-            .rev()
-            .for_each(|notification_rect| file.write_all(&notification_rect.frame_buffer).unwrap());
+        Self::write_stack_to_file(&self.stack, &mut file);
 
-        let pool = window.shm.as_ref().unwrap().create_pool(
-            file.as_fd(),
-            window.width * window.height * 4,
-            qhandle,
-            (),
-        );
-        window.buffer = Some(pool.create_buffer(
-            0,
-            window.width,
-            window.height,
-            window.width * 4,
-            wl_shm::Format::Argb8888,
-            qhandle,
-            (),
-        ));
-
-        let layer_surface = window.layer_surface.as_ref().unwrap();
-        layer_surface.set_size(window.width as u32, window.height as u32);
-        let surface = window.surface.as_ref().unwrap();
-        surface.attach(window.buffer.as_ref(), 0, 0);
-        surface.commit();
+        window.create_buffer(file, qhandle);
+        window.resize_layer_surface();
 
         self.stack.push(notification_rect);
+    }
+
+    pub(crate) fn close_notification(&mut self, id: u32) {
+        if let Some((i, _)) = self
+            .stack
+            .iter()
+            .enumerate()
+            .find(|(_, notification_rect)| notification_rect.data.id == id)
+        {
+            let _notification_rect = self.remove_rect(i);
+            self.events.push(RendererMessage::ClosedNotification {
+                id,
+                reason: crate::data::dbus::ClosingReason::CallCloseNotification,
+            });
+        }
+    }
+
+    pub(crate) fn pop_event(&mut self) -> Option<RendererMessage> {
+        self.events.pop()
+    }
+
+    pub(crate) fn handle_actions(&mut self) {
+        //TODO: change it to actions
+
+        if let Some(window) = self.window.as_mut() {
+            if window.pointer_state.lb_pressed {
+                window.pointer_state.lb_pressed = false;
+
+                let rect_height = CONFIG.general().height() as usize;
+                let count = window.height as usize / rect_height;
+
+                if let Some((i, _)) = (0..window.height as usize)
+                    .step_by(rect_height)
+                    .enumerate()
+                    .take(count)
+                    .find(|&(_, height)| {
+                        (height..height + rect_height).contains(&(window.pointer_state.y as usize))
+                    })
+                {
+                    let notification = self.remove_rect(count - i - 1);
+                    self.events.push(RendererMessage::ClosedNotification {
+                        id: notification.id,
+                        reason: crate::data::dbus::ClosingReason::DimissedByUser,
+                    });
+                }
+            }
+        }
+    }
+
+    fn remove_rect(&mut self, index: usize) -> Notification {
+        let notification = self.stack.remove(index);
+
+        if self.stack.len() == 0 {
+            unsafe {
+                let window = self.window.as_mut().unwrap_unchecked();
+                window.surface.as_ref().unwrap_unchecked().destroy();
+                self.event_queue
+                    .as_mut()
+                    .unwrap_unchecked()
+                    .roundtrip(window)
+                    .unwrap();
+                // self.event_queue
+                //     .as_mut()
+                //     .unwrap_unchecked()
+                //     .blocking_dispatch(window)
+                //     .unwrap();
+            }
+            self.window = None;
+            self.event_queue = None;
+            self.qhandle = None;
+            return dbg!(notification.data);
+        }
+
+        let mut file = tempfile::tempfile().unwrap();
+        Self::write_stack_to_file(&self.stack, &mut file);
+
+        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
+        window.height -= CONFIG.general().height() as i32;
+
+        let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
+        window.create_buffer(file, qhandle);
+        window.resize_layer_surface();
+        unsafe {
+            self.event_queue
+                .as_mut()
+                .unwrap_unchecked()
+                .roundtrip(window)
+                .unwrap();
+        }
+
+        notification.data
+    }
+
+    fn write_stack_to_file(stack: &[NotificationRect], file: &mut File) {
+        stack
+            .iter()
+            .rev()
+            .for_each(|rect| file.write_all(&rect.frame_buffer).unwrap());
     }
 
     pub(crate) fn dispatch(&mut self) -> bool {
@@ -187,6 +268,33 @@ impl Window {
             pointer_state: Default::default(),
         }
     }
+
+    fn create_buffer(&mut self, file: File, qhandle: &QueueHandle<Window>) {
+        let pool = self.shm.as_ref().unwrap().create_pool(
+            file.as_fd(),
+            self.width * self.height * 4,
+            qhandle,
+            (),
+        );
+
+        self.buffer = Some(pool.create_buffer(
+            0,
+            self.width,
+            self.height,
+            self.width * 4,
+            wl_shm::Format::Argb8888,
+            qhandle,
+            (),
+        ));
+    }
+
+    fn resize_layer_surface(&mut self) {
+        let layer_surface = unsafe { self.layer_surface.as_ref().unwrap_unchecked() };
+        layer_surface.set_size(self.width as u32, self.height as u32);
+        let surface = unsafe { self.surface.as_ref().unwrap_unchecked() };
+        surface.attach(self.buffer.as_ref(), 0, 0);
+        surface.commit();
+    }
 }
 
 struct Margin {
@@ -211,16 +319,26 @@ impl Margin {
     }
 }
 
-struct NotificationRect {
-    data: Notification,
-    frame_buffer: Vec<u8>,
-    font_collection: Option<Arc<FontCollection>>,
-}
-
 #[derive(Default)]
 struct PointerState {
     x: f64,
     y: f64,
+
+    lb_pressed: bool,
+    rb_pressed: bool,
+    mb_pressed: bool,
+}
+
+impl PointerState {
+    const LEFT_BTN: u32 = 272;
+    const RIGHT_BTN: u32 = 273;
+    const MIDDLE_BTN: u32 = 274;
+}
+
+struct NotificationRect {
+    data: Notification,
+    frame_buffer: Vec<u8>,
+    font_collection: Option<Arc<FontCollection>>,
 }
 
 impl NotificationRect {
@@ -530,28 +648,18 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Window {
                 button,
                 state: WEnum::Value(ButtonState::Pressed),
                 ..
-            } => {
-                const LEFT_BTN: u32 = 272;
-                const RIGHT_BTN: u32 = 273;
-                const MIDDLE_BTN: u32 = 274;
-
-                match button {
-                    LEFT_BTN => {
-                        println!("Pressed!")
-                    }
-                    RIGHT_BTN => {
-                        state
-                            .layer_surface
-                            .as_ref()
-                            .unwrap()
-                            .set_margin(175, 25, 0, 0);
-                        state.surface.as_ref().unwrap().commit();
-                    }
-                    MIDDLE_BTN => (),
-                    _ => (),
+            } => match button {
+                PointerState::LEFT_BTN => {
+                    state.pointer_state.lb_pressed = true;
                 }
-            }
-            // wl_pointer::Event::Frame => todo!(),
+                PointerState::RIGHT_BTN => {
+                    state.pointer_state.rb_pressed = true;
+                }
+                PointerState::MIDDLE_BTN => {
+                    state.pointer_state.mb_pressed = true;
+                }
+                _ => (),
+            },
             _ => (),
         }
     }

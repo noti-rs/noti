@@ -27,7 +27,9 @@ pub async fn run() -> Result<()> {
                     )?;
                 }
                 Action::Close(Some(id)) => {
-                    dbg!(id);
+                    server_internal_channel.send_to_renderer(
+                        crate::data::internal_messages::ServerMessage::CloseNotification { id },
+                    )?;
                 }
                 Action::Close(None) => {
                     dbg!("close last");

@@ -1,7 +1,5 @@
 use std::time::Duration;
 
-use wayland_client::Connection;
-
 use crate::data::{
     aliases::Result,
     internal_messages::{
@@ -11,28 +9,24 @@ use crate::data::{
 
 use self::layer::NotificationStack;
 
-mod font;
-mod color;
-mod image;
-mod text;
 mod border;
+mod color;
+mod font;
+mod image;
 mod layer;
+mod text;
 
 pub(crate) struct Renderer {
-    connection: Connection,
     notification_stack: NotificationStack,
     channel: RendererInternalChannel,
 }
 
 impl Renderer {
     pub(crate) fn init() -> Result<(ServerInternalChannel, Self)> {
-        let connection = Connection::connect_to_env()?;
-
         let (server_internal_channel, renderer_internal_channel) = InternalChannel::new().split();
         Ok((
             server_internal_channel,
             Self {
-                connection,
                 notification_stack: NotificationStack::init()?,
                 channel: renderer_internal_channel,
             },
@@ -48,13 +42,20 @@ impl Renderer {
                         self.notification_stack
                             .create_notification_rect(notification);
                     }
-                    ServerMessage::CloseNotification { id } => todo!(),
+                    ServerMessage::CloseNotification { id } => {
+                        self.notification_stack.close_notification(id)
+                    }
                 }
             }
 
+            while let Some(message) = self.notification_stack.pop_event() {
+                self.channel.send_to_server(message).unwrap();
+            }
+
+            self.notification_stack.handle_actions();
             self.notification_stack.dispatch();
 
-            std::thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(Duration::from_millis(50));
             std::hint::spin_loop();
         }
     }
