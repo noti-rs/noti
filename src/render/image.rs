@@ -10,6 +10,56 @@ pub(crate) enum Image {
 }
 
 impl Image {
+    pub(crate) fn from_image_data(image_data: Option<&ImageData>, size: u16) -> Self {
+        image_data
+            .map(|image_data| {
+                let mut width = image_data.width;
+                let mut height = image_data.height;
+                let has_alpha = image_data.has_alpha;
+
+                let image = if has_alpha {
+                    image::DynamicImage::from(
+                        image::RgbaImage::from_vec(
+                            width as u32,
+                            height as u32,
+                            image_data.data.clone(),
+                        )
+                        .unwrap(),
+                    )
+                } else {
+                    image::DynamicImage::from(
+                        image::RgbImage::from_vec(
+                            width as u32,
+                            height as u32,
+                            image_data.data.clone(),
+                        )
+                        .unwrap(),
+                    )
+                };
+
+                Self::resize(&mut width, &mut height, size);
+                let rowstride = width * 4;
+
+                let image = image::imageops::resize(
+                    &image,
+                    width as u32,
+                    height as u32,
+                    image::imageops::FilterType::Gaussian,
+                );
+
+                Image::Exists(ImageData {
+                    width,
+                    height,
+                    rowstride,
+                    has_alpha: true,
+                    bits_per_sample: image_data.bits_per_sample,
+                    channels: 4,
+                    data: image.to_vec(),
+                })
+            })
+            .unwrap_or(Image::Unknown)
+    }
+
     pub(crate) fn exists(&self) -> bool {
         if let Image::Exists(_) = self {
             true
@@ -17,6 +67,7 @@ impl Image {
             false
         }
     }
+
     pub(crate) fn from_raster_glyph_image(from: RasterGlyphImage, size: u32) -> Option<Self> {
         let RasterGlyphImage {
             width,
@@ -79,17 +130,7 @@ impl Image {
         }))
     }
 
-    pub(crate) fn or_svg(self, image_path: Option<&str>, min_size: u32, max_size: u32) -> Self {
-        fn resize(min_size: f32, max_size: f32, actual_size: f32) -> (f32, f32) {
-            if min_size > actual_size {
-                (min_size, min_size / actual_size)
-            } else if max_size < actual_size {
-                (max_size, max_size / actual_size)
-            } else {
-                (actual_size, 1.0)
-            }
-        }
-
+    pub(crate) fn or_svg(self, image_path: Option<&str>, size: u16) -> Self {
         if self.exists() || image_path.is_none() {
             return self;
         }
@@ -100,10 +141,21 @@ impl Image {
         )
         .unwrap();
 
-        let (size, scale) = resize(min_size as f32, max_size as f32, tree.size().width());
-        let size = size.round() as i32;
+        let tree_size = tree.size();
+        let (mut width, mut height) = (
+            tree_size.width().round() as i32,
+            tree_size.height().round() as i32,
+        );
 
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(size as u32, size as u32).unwrap();
+        Self::resize(&mut width, &mut height, size);
+
+        let scale = if width > height {
+            width as f32 / tree_size.width()
+        } else {
+            height as f32 / tree_size.height()
+        };
+
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(width as u32, height as u32).unwrap();
         resvg::render(
             &tree,
             resvg::usvg::Transform::from_scale(scale, scale),
@@ -111,10 +163,10 @@ impl Image {
         );
 
         Image::Exists(ImageData {
-            data: pixmap.data().into_iter().map(|byte| *byte).collect(),
-            width: size,
-            height: size,
-            rowstride: size as i32 * 4,
+            data: pixmap.data().to_vec(),
+            width,
+            height,
+            rowstride: width * 4,
             has_alpha: true,
             bits_per_sample: 8,
             channels: 4,
@@ -182,6 +234,18 @@ impl Image {
         }
     }
 
+    fn resize(width: &mut i32, height: &mut i32, new_size: u16) {
+        if width > height {
+            let factor = new_size as f32 / *width as f32;
+            *width = new_size as i32;
+            *height = (factor * *height as f32).round() as i32;
+        } else {
+            let factor = new_size as f32 / *height as f32;
+            *height = new_size as i32;
+            *width = (factor * *width as f32).round() as i32;
+        }
+    }
+
     fn converter(has_alpha: bool) -> fn(&[u8]) -> Rgba {
         //SAFETY: it always safe way while the framebuffer have ARGB format and gives the correct
         //postiton.
@@ -194,13 +258,5 @@ impl Image {
                 Rgba::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap_unchecked())
             }
         }
-    }
-}
-
-impl From<Option<&ImageData>> for Image {
-    fn from(image_data: Option<&ImageData>) -> Self {
-        image_data
-            .map(|data| Image::Exists(data.clone()))
-            .unwrap_or(Image::Unknown)
     }
 }

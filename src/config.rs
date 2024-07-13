@@ -226,6 +226,8 @@ impl From<String> for Anchor {
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct DisplayConfig {
+    image_size: Option<u16>,
+
     rounding: Option<u8>,
     padding: Option<u8>,
 
@@ -236,6 +238,10 @@ pub struct DisplayConfig {
 }
 
 impl DisplayConfig {
+    pub fn image_size(&self) -> u16 {
+        self.image_size.unwrap()
+    }
+
     pub fn rounding(&self) -> u8 {
         self.rounding.unwrap()
     }
@@ -257,6 +263,10 @@ impl DisplayConfig {
     }
 
     fn fill_empty_by_default(&mut self) {
+        if self.image_size.is_none() {
+            self.image_size = Some(64);
+        }
+
         if self.rounding.is_none() {
             self.rounding = Some(0);
         }
@@ -430,6 +440,8 @@ pub struct AppConfig {
 impl AppConfig {
     fn merge(&mut self, other: &DisplayConfig) {
         if let Some(display) = self.display.as_mut() {
+            display.image_size = display.image_size.or(other.image_size);
+
             display.rounding = display.rounding.or(other.rounding);
             display.padding = display.padding.or(other.padding);
 

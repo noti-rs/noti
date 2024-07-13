@@ -161,26 +161,33 @@ impl NotificationRect {
 
         let padding = display.padding() as usize + border_cfg.size() as usize;
 
-        let image = Image::from(self.data.hints.image_data.as_ref()).or_svg(
-            self.data.hints.image_path.as_deref(),
-            50,
-            100,
-        );
+        let image =
+            Image::from_image_data(self.data.hints.image_data.as_ref(), display.image_size())
+                .or_svg(self.data.hints.image_path.as_deref(), display.image_size());
 
         // INFO: img_width is need for further render (Summary and Text rendering)
-        let img_width = image.width();
+        let mut img_width = image.width();
         let img_height = image.height();
-        let y_offset = img_height.map(|height| self.height as usize / 2 - height / 2);
 
-        image.draw(
-            padding,
-            y_offset.unwrap_or_default(),
-            stride,
-            |position, bgra| unsafe {
-                *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
-                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
-            },
-        );
+        if img_height
+            .is_some_and(|heigth| heigth <= self.height as usize - border_cfg.size() as usize * 2)
+        {
+            let y_offset = img_height.map(|height| self.height as usize / 2 - height / 2);
+
+            image.draw(
+                padding,
+                y_offset.unwrap_or_default(),
+                stride,
+                |position, bgra| unsafe {
+                    *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
+                        .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
+                },
+            );
+        } else {
+            eprintln!("Image height exceeds the possible height!\n\
+                Please set a higher value of height or decrease the value of image_size in config.toml.");
+            img_width = None;
+        }
 
         let font_size = CONFIG.general().font().size() as f32;
 
@@ -190,13 +197,18 @@ impl NotificationRect {
             self.font_collection.as_ref().cloned().unwrap(),
         );
 
-        let x_offset = (img_width.unwrap_or_default() + padding * 2) * 4;
+        let x_offset = img_width
+            .map(|width| (width + padding * 2) * 4)
+            .unwrap_or_default();
         summary.set_padding(padding);
         summary.set_line_spacing(0);
         summary.set_foreground(foreground.clone());
 
         let y_offset = summary.draw(
-            self.width as usize - img_width.unwrap_or_default() - padding * 2,
+            self.width as usize
+                - img_width
+                    .map(|width| width - padding * 2)
+                    .unwrap_or_default(),
             self.height as usize,
             text::TextAlignment::Center,
             |x, y, bgra| {
@@ -218,7 +230,10 @@ impl NotificationRect {
         text.set_line_spacing(0);
         text.set_foreground(foreground);
         text.draw(
-            self.width as usize - img_width.unwrap_or_default() - padding * 2,
+            self.width as usize
+                - img_width
+                    .map(|width| width - padding * 2)
+                    .unwrap_or_default(),
             self.height as usize - y_offset,
             text::TextAlignment::default(),
             |x, y, bgra| {
