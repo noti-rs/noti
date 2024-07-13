@@ -20,6 +20,7 @@ cargo install --git https://github.com/noti-rs/noti/
 ### Running Noti
 
 After installation, you can start Noti with:
+
 ```bash
 noti
 ```
@@ -29,14 +30,23 @@ To enable Noti to start automatically with your Wayland session, add it to your 
 ## Configuration
 
 Noti can be configured via a configuration file located at `~/.config/noti/config.toml`. Below is an example configuration:
+
 ```toml
 [general]
-timeout = 2000
+font = [ "JetBrainsMono Nerd Font", 16 ]
+anchor = "top-right"
+offset = [15, 15]
+
+width = 300
+height = 150
 
 [display]
-font = [ "JetBrainsMono Nerd", 10 ]
-width = 300
-height = 100
+image_size = 64
+
+rounding = 10
+padding = 8
+
+timeout = 2000
 
 [display.colors.normal]
 background = "#1e1e2e"
@@ -46,16 +56,25 @@ foreground = "#99AEB3"
 background = "#EBA0AC"
 foreground = "#1E1E2E"
 
+[display.border]
+size = 4
+color = "#000"
+
 [[app]]
-name = "Telegram"
-[display]
+name = "Telegram Desktop"
+[app.display]
 rounding = 8
 markup = true
+
+[app.display.body]
+alignment = "center"
+line_spacing = 5
 ```
 
 ## Contributing
 
 Contributions are welcome! Please fork the repository and submit a pull request for any changes. For major changes, please open an issue first to discuss what you would like to change
+
 - Fork the repository
 - Create your feature branch: `git checkout -b your-feature`
 - Commit your changes: `git commit -am 'Add some feature'`
