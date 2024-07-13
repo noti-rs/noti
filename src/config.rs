@@ -42,6 +42,7 @@ impl Config {
         &self.general
     }
 
+    #[allow(unused)]
     pub fn default_display(&self) -> &DisplayConfig {
         &self.display
     }
@@ -234,6 +235,9 @@ pub struct DisplayConfig {
     border: Option<Border>,
 
     colors: Option<UrgencyColors>,
+    title: Option<TextProperty>,
+    body: Option<TextProperty>,
+
     timeout: Option<u16>,
 }
 
@@ -256,6 +260,14 @@ impl DisplayConfig {
 
     pub fn colors(&self) -> &UrgencyColors {
         self.colors.as_ref().unwrap()
+    }
+
+    pub fn title(&self) -> &TextProperty {
+        self.title.as_ref().unwrap()
+    }
+
+    pub fn body(&self) -> &TextProperty {
+        self.body.as_ref().unwrap()
     }
 
     pub fn timeout(&self) -> u16 {
@@ -284,6 +296,16 @@ impl DisplayConfig {
             self.colors = Some(Default::default());
         }
         self.colors.as_mut().unwrap().fill_empty_by_default();
+
+        if self.title.is_none() {
+            self.title = Some(Default::default());
+        }
+        self.title.as_mut().unwrap().fill_empty_by_default("title");
+
+        if self.body.is_none() {
+            self.body = Some(Default::default());
+        }
+        self.body.as_mut().unwrap().fill_empty_by_default("body");
 
         if self.timeout.is_none() {
             self.timeout = Some(0);
@@ -431,6 +453,65 @@ impl Border {
     }
 }
 
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct TextProperty {
+    alignment: Option<TextAlignment>,
+    line_spacing: Option<u8>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(from = "String")]
+pub enum TextAlignment {
+    Center,
+    #[default]
+    Left,
+    Right,
+    SpaceBetween,
+}
+
+impl TextProperty {
+    pub fn alignment(&self) -> &TextAlignment {
+        self.alignment.as_ref().unwrap()
+    }
+
+    pub fn line_spacing(&self) -> u8 {
+        self.line_spacing.unwrap()
+    }
+
+    pub fn fill_empty_by_default(&mut self, entity: &str) {
+        if self.alignment.is_none() {
+            if entity == "title" {
+                self.alignment = Some(TextAlignment::Center);
+            } else {
+                self.alignment = Some(Default::default());
+            }
+        }
+
+        if self.line_spacing.is_none() {
+            self.line_spacing = Some(0);
+        }
+    }
+}
+
+impl From<String> for TextAlignment {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "center" => TextAlignment::Center,
+            "right" => TextAlignment::Right,
+            "left" => TextAlignment::Left,
+            "space-between" => TextAlignment::SpaceBetween,
+            other => panic!(
+                "Invalid text alignment option! There are possible values:\n\
+                - center\n\
+                - right\n\
+                - left\n\
+                - space-between\n\
+                Used: {other}"
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct AppConfig {
     pub name: String,
@@ -461,6 +542,24 @@ impl AppConfig {
                 colors.critical = colors.critical.clone().or(other_colors.critical.clone());
             } else {
                 display.colors = other.colors.clone();
+            }
+
+            if let Some(title) = display.title.as_mut() {
+                let other_title = other.title();
+
+                title.alignment = title.alignment.clone().or(other_title.alignment.clone());
+                title.line_spacing = title.line_spacing.or(other_title.line_spacing);
+            } else {
+                display.title = other.title.clone();
+            }
+
+            if let Some(body) = display.body.as_mut() {
+                let other_body = other.body();
+
+                body.alignment = body.alignment.clone().or(other_body.alignment.clone());
+                body.line_spacing = body.line_spacing.or(other_body.line_spacing);
+            } else {
+                display.body = other.body.clone();
             }
 
             display.timeout = display.timeout.or(other.timeout);

@@ -201,16 +201,16 @@ impl NotificationRect {
             .map(|width| (width + padding * 2) * 4)
             .unwrap_or_default();
         summary.set_padding(padding);
-        summary.set_line_spacing(0);
+        summary.set_line_spacing(display.title().line_spacing() as usize);
         summary.set_foreground(foreground.clone());
 
         let y_offset = summary.draw(
             self.width as usize
                 - img_width
-                    .map(|width| width - padding * 2)
+                    .map(|width| width + padding * 2)
                     .unwrap_or_default(),
             self.height as usize,
-            text::TextAlignment::Center,
+            display.title().alignment(),
             |x, y, bgra| {
                 let position = (y * stride as isize + x_offset as isize + x * 4) as usize;
                 unsafe {
@@ -227,15 +227,15 @@ impl NotificationRect {
         );
 
         text.set_padding(padding);
-        text.set_line_spacing(0);
+        text.set_line_spacing(display.body().line_spacing() as usize);
         text.set_foreground(foreground);
         text.draw(
             self.width as usize
                 - img_width
-                    .map(|width| width - padding * 2)
+                    .map(|width| width + padding * 2)
                     .unwrap_or_default(),
             self.height as usize - y_offset,
-            text::TextAlignment::default(),
+            display.body().alignment(),
             |x, y, bgra| {
                 let position = ((y + y_offset as isize) * stride as isize
                     + x_offset as isize
