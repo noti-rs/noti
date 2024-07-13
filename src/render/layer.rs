@@ -220,11 +220,19 @@ impl NotificationRect {
             },
         );
 
-        let mut text = TextRect::from_text(
-            &self.data.body,
-            font_size,
-            self.font_collection.as_ref().cloned().unwrap(),
-        );
+        let mut text = if display.markup() {
+            TextRect::from_text(
+                &self.data.body,
+                font_size,
+                self.font_collection.as_ref().cloned().unwrap(),
+            )
+        } else {
+            TextRect::from_str(
+                &self.data.body.body,
+                font_size,
+                self.font_collection.as_ref().cloned().unwrap(),
+            )
+        };
 
         text.set_padding(padding);
         text.set_line_spacing(display.body().line_spacing() as usize);

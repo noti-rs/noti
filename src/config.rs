@@ -237,6 +237,7 @@ pub struct DisplayConfig {
     colors: Option<UrgencyColors>,
     title: Option<TextProperty>,
     body: Option<TextProperty>,
+    markup: Option<bool>,
 
     timeout: Option<u16>,
 }
@@ -268,6 +269,10 @@ impl DisplayConfig {
 
     pub fn body(&self) -> &TextProperty {
         self.body.as_ref().unwrap()
+    }
+
+    pub fn markup(&self) -> bool {
+        self.markup.unwrap()
     }
 
     pub fn timeout(&self) -> u16 {
@@ -306,6 +311,10 @@ impl DisplayConfig {
             self.body = Some(Default::default());
         }
         self.body.as_mut().unwrap().fill_empty_by_default("body");
+
+        if self.markup.is_none() {
+            self.markup = Some(true);
+        }
 
         if self.timeout.is_none() {
             self.timeout = Some(0);
@@ -562,6 +571,7 @@ impl AppConfig {
                 display.body = other.body.clone();
             }
 
+            display.markup = display.markup.or(other.markup);
             display.timeout = display.timeout.or(other.timeout);
         } else {
             self.display = Some(other.clone());
