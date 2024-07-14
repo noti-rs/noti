@@ -198,21 +198,21 @@ impl From<String> for Anchor {
     fn from(value: String) -> Self {
         match value.as_str() {
             "top" => Anchor::Top,
-            "top-left" => Anchor::TopLeft,
-            "top-right" => Anchor::TopRight,
+            "top-left" | "top left" => Anchor::TopLeft,
+            "top-right" | "top right" => Anchor::TopRight,
             "bottom" => Anchor::Bottom,
-            "bottom-left" => Anchor::BottomLeft,
-            "bottom-right" => Anchor::BottomRight,
+            "bottom-left" | "bottom left" => Anchor::BottomLeft,
+            "bottom-right" | "bottom right" => Anchor::BottomRight,
             "left" => Anchor::Left,
             "right" => Anchor::Right,
             other => panic!(
                 "Invalid anchor option! There are possible values:\n\
-                - top\n\
-                - top-right\n\
-                - top-left\n\
+                - \"top\"\n\
+                - \"top-right\" or \"top right\"\n\
+                - \"top-left\" or \"top left\"\n\
                 - bottom\n\
-                - bottom-right\n\
-                - bottom-left\n\
+                - \"bottom-right\" or \"bottom right\"\n\
+                - \"bottom-left\" or \"bottom left\"\n\
                 - left\n\
                 - right\n\
                 Used: {other}"
