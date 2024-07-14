@@ -57,43 +57,53 @@ impl NotificationStack {
         })
     }
 
-    pub(crate) fn create_notification_rect(&mut self, notification: Notification) {
+    pub(crate) fn create_notification_rects(&mut self, notifications: Vec<Notification>) {
         let init = self.init_window();
 
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
         let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
-        let mut notification_rect = NotificationRect::init(notification);
-        notification_rect.font_collection = Some(self.font_collection.clone());
+        let mut rects: Vec<NotificationRect> = notifications
+            .into_iter()
+            .map(|notification| {
+                let mut notification_rect = NotificationRect::init(notification);
+                notification_rect.font_collection = Some(self.font_collection.clone());
+                notification_rect
+            })
+            .collect();
 
         if !init {
             let height = CONFIG.general().height() as i32;
-            window.height += height;
+            window.height += height * rects.len() as i32;
         }
 
         let mut file = tempfile::tempfile().unwrap();
-        notification_rect.draw(&mut file);
+        rects.iter_mut().for_each(|rect| rect.draw(&mut file));
         Self::write_stack_to_file(&self.stack, &mut file);
 
         window.create_buffer(file, qhandle);
         window.resize_layer_surface();
 
-        self.stack.push(notification_rect);
+        self.stack.extend(rects);
     }
 
-    pub(crate) fn close_notification(&mut self, id: u32) {
-        if let Some((i, _)) = self
+    pub(crate) fn close_notifications(&mut self, indices: &[u32]) {
+        let indices_to_remove: Vec<usize> = self
             .stack
             .iter()
             .enumerate()
-            .find(|(_, notification_rect)| notification_rect.data.id == id)
-        {
-            let _notification_rect = self.remove_rect(i);
+            .filter(|(_, notification_rect)| indices.contains(&notification_rect.data.id))
+            .map(|(i, _)| i)
+            .rev()
+            .collect();
+
+        self.remove_rects(&indices_to_remove);
+        indices.iter().for_each(|&id| {
             self.events.push(RendererMessage::ClosedNotification {
                 id,
                 reason: crate::data::dbus::ClosingReason::CallCloseNotification,
-            });
-        }
+            })
+        })
     }
 
     pub(crate) fn pop_event(&mut self) -> Option<RendererMessage> {
@@ -118,45 +128,34 @@ impl NotificationStack {
                         (height..height + rect_height).contains(&(window.pointer_state.y as usize))
                     })
                 {
-                    let notification = self.remove_rect(count - i - 1);
-                    self.events.push(RendererMessage::ClosedNotification {
-                        id: notification.id,
-                        reason: crate::data::dbus::ClosingReason::DimissedByUser,
-                    });
+                    let notifications = self.remove_rects(&[count - i - 1]);
+                    notifications.iter().for_each(|notification| {
+                        self.events.push(RendererMessage::ClosedNotification {
+                            id: notification.id,
+                            reason: crate::data::dbus::ClosingReason::DimissedByUser,
+                        })
+                    })
                 }
             }
         }
     }
 
-    fn remove_rect(&mut self, index: usize) -> Notification {
-        let notification = self.stack.remove(index);
+    fn remove_rects(&mut self, indices_to_remove: &[usize]) -> Vec<Notification> {
+        let notifications = indices_to_remove
+            .iter()
+            .map(|id| self.stack.remove(*id).data)
+            .collect();
 
         if self.stack.len() == 0 {
-            unsafe {
-                let window = self.window.as_mut().unwrap_unchecked();
-                window.surface.as_ref().unwrap_unchecked().destroy();
-                self.event_queue
-                    .as_mut()
-                    .unwrap_unchecked()
-                    .roundtrip(window)
-                    .unwrap();
-                // self.event_queue
-                //     .as_mut()
-                //     .unwrap_unchecked()
-                //     .blocking_dispatch(window)
-                //     .unwrap();
-            }
-            self.window = None;
-            self.event_queue = None;
-            self.qhandle = None;
-            return dbg!(notification.data);
+            self.deinit_window();
+            return notifications;
         }
 
         let mut file = tempfile::tempfile().unwrap();
         Self::write_stack_to_file(&self.stack, &mut file);
 
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
-        window.height -= CONFIG.general().height() as i32;
+        window.height -= CONFIG.general().height() as i32 * notifications.len() as i32;
 
         let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
         window.create_buffer(file, qhandle);
@@ -169,7 +168,7 @@ impl NotificationStack {
                 .unwrap();
         }
 
-        notification.data
+        notifications
     }
 
     fn write_stack_to_file(stack: &[NotificationRect], file: &mut File) {
@@ -230,6 +229,21 @@ impl NotificationStack {
         } else {
             false
         }
+    }
+
+    fn deinit_window(&mut self) {
+        unsafe {
+            let window = self.window.as_mut().unwrap_unchecked();
+            window.surface.as_ref().unwrap_unchecked().destroy();
+            self.event_queue
+                .as_mut()
+                .unwrap_unchecked()
+                .roundtrip(window)
+                .unwrap();
+        }
+        self.window = None;
+        self.event_queue = None;
+        self.qhandle = None;
     }
 }
 
