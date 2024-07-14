@@ -34,7 +34,6 @@ impl Renderer {
     }
 
     pub(crate) fn run(&mut self) {
-        let mut created = false;
         let mut notifications_to_create = vec![];
         let mut notifications_to_close = vec![];
 
@@ -53,16 +52,16 @@ impl Renderer {
 
             if !notifications_to_create.is_empty() {
                 self.notification_stack
-                    .create_notification_rects(notifications_to_create);
+                    .create_notifications(notifications_to_create);
                 notifications_to_create = vec![];
-                created = true;
             }
 
-            if !created && !notifications_to_close.is_empty() {
+            if !notifications_to_close.is_empty() {
                 self.notification_stack
                     .close_notifications(&notifications_to_close);
                 notifications_to_close.clear();
             }
+            self.notification_stack.remove_expired();
 
             while let Some(message) = self.notification_stack.pop_event() {
                 self.channel.send_to_server(message).unwrap();
@@ -71,7 +70,6 @@ impl Renderer {
             self.notification_stack.handle_actions();
             self.notification_stack.dispatch();
 
-            created = false;
             std::thread::sleep(Duration::from_millis(50));
             std::hint::spin_loop();
         }

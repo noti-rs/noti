@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc};
+use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
 
 use crate::{
     config::{self, CONFIG},
@@ -57,7 +57,7 @@ impl NotificationStack {
         })
     }
 
-    pub(crate) fn create_notification_rects(&mut self, notifications: Vec<Notification>) {
+    pub(crate) fn create_notifications(&mut self, notifications: Vec<Notification>) {
         let init = self.init_window();
 
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
@@ -84,6 +84,8 @@ impl NotificationStack {
         window.create_buffer(file, qhandle);
         window.resize_layer_surface();
 
+        self.full_commit();
+
         self.stack.extend(rects);
     }
 
@@ -97,11 +99,57 @@ impl NotificationStack {
             .rev()
             .collect();
 
+        if indices_to_remove.is_empty() {
+            return;
+        }
+
         self.remove_rects(&indices_to_remove);
         indices.iter().for_each(|&id| {
             self.events.push(RendererMessage::ClosedNotification {
                 id,
                 reason: crate::data::dbus::ClosingReason::CallCloseNotification,
+            })
+        })
+    }
+
+    pub(crate) fn remove_expired(&mut self) {
+        if self.stack.is_empty() {
+            return;
+        }
+
+        let indices_to_remove: Vec<usize> = self
+            .stack
+            .iter()
+            .enumerate()
+            .filter_map(|(i, rect)| match &rect.data.expire_timeout {
+                notification::Timeout::Millis(millis) => {
+                    if rect.created_at.elapsed().as_millis() > *millis as u128 {
+                        Some(i)
+                    } else {
+                        None
+                    }
+                }
+                notification::Timeout::Never => None,
+                notification::Timeout::Configurable => {
+                    let timeout = CONFIG.display_by_app(&rect.data.app_name).timeout();
+                    if timeout != 0 && rect.created_at.elapsed().as_millis() > timeout as u128 {
+                        Some(i)
+                    } else {
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        if indices_to_remove.is_empty() {
+            return;
+        }
+
+        let notifications = self.remove_rects(&indices_to_remove);
+        notifications.into_iter().for_each(|notification| {
+            self.events.push(RendererMessage::ClosedNotification {
+                id: notification.id,
+                reason: crate::data::dbus::ClosingReason::Expired,
             })
         })
     }
@@ -129,7 +177,7 @@ impl NotificationStack {
                     })
                 {
                     let notifications = self.remove_rects(&[count - i - 1]);
-                    notifications.iter().for_each(|notification| {
+                    notifications.into_iter().for_each(|notification| {
                         self.events.push(RendererMessage::ClosedNotification {
                             id: notification.id,
                             reason: crate::data::dbus::ClosingReason::DimissedByUser,
@@ -138,44 +186,6 @@ impl NotificationStack {
                 }
             }
         }
-    }
-
-    fn remove_rects(&mut self, indices_to_remove: &[usize]) -> Vec<Notification> {
-        let notifications = indices_to_remove
-            .iter()
-            .map(|id| self.stack.remove(*id).data)
-            .collect();
-
-        if self.stack.len() == 0 {
-            self.deinit_window();
-            return notifications;
-        }
-
-        let mut file = tempfile::tempfile().unwrap();
-        Self::write_stack_to_file(&self.stack, &mut file);
-
-        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
-        window.height -= CONFIG.general().height() as i32 * notifications.len() as i32;
-
-        let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
-        window.create_buffer(file, qhandle);
-        window.resize_layer_surface();
-        unsafe {
-            self.event_queue
-                .as_mut()
-                .unwrap_unchecked()
-                .roundtrip(window)
-                .unwrap();
-        }
-
-        notifications
-    }
-
-    fn write_stack_to_file(stack: &[NotificationRect], file: &mut File) {
-        stack
-            .iter()
-            .rev()
-            .for_each(|rect| file.write_all(&rect.frame_buffer).unwrap());
     }
 
     pub(crate) fn dispatch(&mut self) -> bool {
@@ -207,6 +217,49 @@ impl NotificationStack {
             true
         } else {
             false
+        }
+    }
+
+    fn remove_rects(&mut self, indices_to_remove: &[usize]) -> Vec<Notification> {
+        let notifications = indices_to_remove
+            .iter()
+            .map(|id| self.stack.remove(*id).data)
+            .collect();
+
+        if self.stack.len() == 0 {
+            self.deinit_window();
+            return notifications;
+        }
+
+        let mut file = tempfile::tempfile().unwrap();
+        Self::write_stack_to_file(&self.stack, &mut file);
+
+        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
+        window.height -= CONFIG.general().height() as i32 * notifications.len() as i32;
+
+        let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
+        window.create_buffer(file, qhandle);
+        window.resize_layer_surface();
+
+        self.full_commit();
+
+        notifications
+    }
+
+    fn write_stack_to_file(stack: &[NotificationRect], file: &mut File) {
+        stack
+            .iter()
+            .rev()
+            .for_each(|rect| file.write_all(&rect.framebuffer).unwrap());
+    }
+
+    fn full_commit(&mut self) {
+        unsafe {
+            self.event_queue
+                .as_mut()
+                .unwrap_unchecked()
+                .roundtrip(self.window.as_mut().unwrap_unchecked())
+                .unwrap();
         }
     }
 
@@ -351,7 +404,8 @@ impl PointerState {
 
 struct NotificationRect {
     data: Notification,
-    frame_buffer: Vec<u8>,
+    created_at: time::Instant,
+    framebuffer: Vec<u8>,
     font_collection: Option<Arc<FontCollection>>,
 }
 
@@ -359,7 +413,8 @@ impl NotificationRect {
     fn init(notification: Notification) -> Self {
         Self {
             data: notification,
-            frame_buffer: vec![],
+            created_at: time::Instant::now(),
+            framebuffer: vec![],
             font_collection: None,
         }
     }
@@ -380,7 +435,7 @@ impl NotificationRect {
         let background: Bgra = colors.background().into();
         let foreground: Bgra = colors.foreground().into();
 
-        self.frame_buffer = vec![background.clone(); width as usize * height as usize]
+        self.framebuffer = vec![background.clone(); width as usize * height as usize]
             .into_iter()
             .flat_map(|bgra| bgra.to_slice())
             .collect();
@@ -400,7 +455,7 @@ impl NotificationRect {
 
         border.draw(|x, y, bgra| unsafe {
             let position = y * stride + x * 4;
-            *TryInto::<&mut [u8; 4]>::try_into(&mut self.frame_buffer[position..position + 4])
+            *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
                 .unwrap_unchecked() = bgra.to_slice()
         });
 
@@ -425,7 +480,7 @@ impl NotificationRect {
                 stride,
                 |position, bgra| unsafe {
                     *TryInto::<&mut [u8; 4]>::try_into(
-                        &mut self.frame_buffer[position..position + 4],
+                        &mut self.framebuffer[position..position + 4],
                     )
                     .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
                 },
@@ -462,7 +517,7 @@ impl NotificationRect {
                 let position = (y * stride as isize + x_offset as isize + x * 4) as usize;
                 unsafe {
                     *TryInto::<&mut [u8; 4]>::try_into(
-                        &mut self.frame_buffer[position..position + 4],
+                        &mut self.framebuffer[position..position + 4],
                     )
                     .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
                 }
@@ -499,14 +554,14 @@ impl NotificationRect {
                     + x * 4) as usize;
                 unsafe {
                     *TryInto::<&mut [u8; 4]>::try_into(
-                        &mut self.frame_buffer[position..position + 4],
+                        &mut self.framebuffer[position..position + 4],
                     )
                     .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
                 }
             },
         );
 
-        tmp.write_all(&self.frame_buffer).unwrap();
+        tmp.write_all(&self.framebuffer).unwrap();
     }
 }
 
