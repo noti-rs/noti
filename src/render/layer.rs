@@ -78,15 +78,21 @@ impl NotificationStack {
         }
 
         let mut file = tempfile::tempfile().unwrap();
-        rects.iter_mut().for_each(|rect| rect.draw(&mut file));
-        Self::write_stack_to_file(&self.stack, &mut file);
+        let anchor = CONFIG.general().anchor();
+        if anchor.is_top() {
+            rects.iter_mut().for_each(|rect| rect.draw(&mut file));
+            Self::write_stack_to_file(&self.stack, anchor, &mut file);
+        } else {
+            Self::write_stack_to_file(&self.stack, anchor, &mut file);
+            rects.iter_mut().rev().for_each(|rect| rect.draw(&mut file));
+        }
 
         window.create_buffer(file, qhandle);
         window.resize_layer_surface();
 
         self.full_commit();
 
-        self.stack.extend(rects);
+        self.stack.extend(rects.into_iter().rev());
     }
 
     pub(crate) fn close_notifications(&mut self, indices: &[u32]) {
@@ -232,7 +238,7 @@ impl NotificationStack {
         }
 
         let mut file = tempfile::tempfile().unwrap();
-        Self::write_stack_to_file(&self.stack, &mut file);
+        Self::write_stack_to_file(&self.stack, CONFIG.general().anchor(), &mut file);
 
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
         window.height -= CONFIG.general().height() as i32 * notifications.len() as i32;
@@ -246,11 +252,14 @@ impl NotificationStack {
         notifications
     }
 
-    fn write_stack_to_file(stack: &[NotificationRect], file: &mut File) {
-        stack
-            .iter()
-            .rev()
-            .for_each(|rect| file.write_all(&rect.framebuffer).unwrap());
+    fn write_stack_to_file(stack: &[NotificationRect], anchor: &config::Anchor, file: &mut File) {
+        if anchor.is_top() {
+            stack.iter()
+        } else {
+            stack.iter()
+        }
+        .rev()
+        .for_each(|rect| file.write_all(&rect.framebuffer).unwrap());
     }
 
     fn full_commit(&mut self) {
