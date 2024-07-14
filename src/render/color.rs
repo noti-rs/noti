@@ -1,5 +1,7 @@
 use std::ops::{Mul, MulAssign};
 
+use crate::config::Color;
+
 #[derive(Clone, Default)]
 pub(crate) struct Bgra {
     pub(crate) blue: f32,
@@ -15,6 +17,15 @@ impl Bgra {
             green: 0.0,
             red: 0.0,
             alpha: 0.0,
+        }
+    }
+
+    pub(crate) fn new_black() -> Self {
+        Self {
+            blue: 0.0,
+            green: 0.0,
+            red: 0.0,
+            alpha: 1.0,
         }
     }
 
@@ -59,6 +70,24 @@ impl From<&[f32; 4]> for Bgra {
             green: value[1],
             red: value[2],
             alpha: value[3],
+        }
+    }
+}
+
+impl From<&Color> for Bgra {
+    fn from(
+        &Color {
+            red,
+            green,
+            blue,
+            alpha,
+        }: &Color,
+    ) -> Self {
+        Bgra {
+            blue: blue as f32 / 255.0,
+            green: green as f32 / 255.0,
+            red: red as f32 / 255.0,
+            alpha: alpha as f32 / 255.0,
         }
     }
 }

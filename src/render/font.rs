@@ -19,9 +19,9 @@ pub(crate) struct FontCollection {
 }
 
 impl FontCollection {
-    pub(crate) fn load_by_font_name(font_name: String) -> Result<Self> {
+    pub(crate) fn load_by_font_name(font_name: &str) -> Result<Self> {
         let process_result = Command::new("fc-list")
-            .args([&font_name, "--format", "%{file}:%{style}\n"])
+            .args([font_name, "--format", "%{file}:%{style}\n"])
             .output()?;
 
         let output: String = process_result

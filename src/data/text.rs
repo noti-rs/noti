@@ -56,7 +56,7 @@ impl Parser {
         });
 
         Text {
-            body: self.body,
+            body: self.body.trim().to_string(),
             entities: self.entities,
         }
     }
@@ -86,11 +86,13 @@ impl Parser {
     fn handle_closing_tag(&mut self) {
         if let Some((start_tag, start_pos)) = self.stack.pop() {
             let length = self.pos - start_pos;
-            self.entities.push(Entity {
-                offset: start_pos,
-                length,
-                kind: start_tag.kind,
-            });
+            if length > 0 && !self.body[start_pos..self.pos].trim().is_empty() {
+                self.entities.push(Entity {
+                    offset: start_pos,
+                    length,
+                    kind: start_tag.kind,
+                });
+            }
         }
     }
 
@@ -105,11 +107,14 @@ impl Parser {
     fn close_unmatched_tags(&mut self) {
         while let Some((start_tag, start_pos)) = self.stack.pop() {
             let length = self.pos - start_pos;
-            self.entities.push(Entity {
-                offset: start_pos,
-                length,
-                kind: start_tag.kind,
-            });
+
+            if length > 0 && !self.body[start_pos..self.pos].trim().is_empty() {
+                self.entities.push(Entity {
+                    offset: start_pos,
+                    length,
+                    kind: start_tag.kind,
+                });
+            }
         }
     }
 }
@@ -135,6 +140,7 @@ pub(crate) enum EntityKind {
     }, // <img src="./path/to/image.png" alt="..."/>
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Tag {
     kind: EntityKind,
     is_closing: bool,
@@ -212,26 +218,26 @@ mod tests {
 
     #[test]
     fn text_with_tags() {
-        let input = String::from("test <b>text</b> <i>parsing</i> <u>!!!</u>");
+        let input = String::from("test<b>text</b> <i>parsing</i><u>!!!</u>");
         println!("input: {input}");
         let text = Text::parse(input);
         assert_eq!(
             text,
             Text {
-                body: String::from("test text parsing !!!"),
+                body: String::from("testtext parsing!!!"),
                 entities: vec![
                     Entity {
-                        offset: 5,
+                        offset: 4,
                         length: 4,
                         kind: EntityKind::Bold,
                     },
                     Entity {
-                        offset: 10,
+                        offset: 9,
                         length: 7,
                         kind: EntityKind::Italic,
                     },
                     Entity {
-                        offset: 18,
+                        offset: 16,
                         length: 3,
                         kind: EntityKind::Underline,
                     },
@@ -360,7 +366,7 @@ mod tests {
 
     #[test]
     fn text_with_img() {
-        let input = String::from("image:<img src=\"/path/to/image.png\"></img>");
+        let input = String::from("image:<img src=\"/path/to/image.png\"/>");
         let text = Text::parse(input);
         assert_eq!(
             text,
@@ -385,7 +391,7 @@ mod tests {
         assert_eq!(
             text,
             Text {
-                body: String::from(" some text"),
+                body: String::from("some text"),
                 entities: vec![Entity {
                     offset: 0,
                     length: 0,
@@ -426,7 +432,7 @@ mod tests {
         assert_eq!(
             text,
             Text {
-                body: String::from(" hi "),
+                body: String::from("hi"),
                 entities: vec![
                     Entity {
                         offset: 0,
@@ -439,6 +445,32 @@ mod tests {
                         kind: EntityKind::Bold
                     },
                 ],
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_empty_tags() {
+        let input = String::from("test<b></b> <i> </i> <u>         </u>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("test"),
+                entities: vec![],
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_spaces() {
+        let input = String::from("test       asdasd");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("test       asdasd"),
+                entities: vec![],
             }
         )
     }

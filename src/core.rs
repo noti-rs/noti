@@ -41,6 +41,7 @@ pub async fn run() -> Result<()> {
             }
         }
 
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
         std::hint::spin_loop();
     }
 }

@@ -1,6 +1,7 @@
 use super::{image::ImageData, text::Text};
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display};
+use std::collections::HashMap;
 use zbus::zvariant::Value;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -12,6 +13,7 @@ pub struct Notification {
     pub body: Text,
     pub expire_timeout: Timeout,
     pub hints: Hints,
+    pub actions: Vec<NotificationAction>,
     pub is_read: bool,
     pub created_at: u64,
 }
@@ -82,6 +84,29 @@ impl From<&HashMap<&str, Value<'_>>> for Hints {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NotificationAction {
+    action_key: String,
+    localized_string: String,
+}
+
+impl NotificationAction {
+    pub fn from_vec(vec: &Vec<&str>) -> Vec<Self> {
+        let mut actions: Vec<Self> = Vec::new();
+
+        if vec.len() >= 2 {
+            for chunk in vec.chunks(2) {
+                actions.push(Self {
+                    action_key: chunk[0].into(),
+                    localized_string: chunk[1].into(),
+                });
+            }
+        }
+
+        actions
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Coordinates {
     pub x: i32,
@@ -109,7 +134,7 @@ pub enum Category {
     Presence(CategoryEvent),
     Transfer(CategoryEvent),
     #[default]
-    None,
+    Unknown,
 }
 
 impl Category {
@@ -143,7 +168,7 @@ impl From<&str> for Category {
             "transfer" => Self::Transfer(CategoryEvent::Generic),
             "transfer.complete" => Self::Transfer(CategoryEvent::Complete),
             "transfer.error" => Self::Transfer(CategoryEvent::Error),
-            _ => Self::None,
+            _ => Self::Unknown,
         }
     }
 }
@@ -164,7 +189,7 @@ pub enum CategoryEvent {
     Complete,
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, Display)]
 pub enum Timeout {
     Millis(u32),
     Never,
@@ -172,13 +197,18 @@ pub enum Timeout {
     Configurable,
 }
 
-impl Display for Timeout {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("{self:?}"))
+impl From<i32> for Timeout {
+    fn from(value: i32) -> Self {
+        match value {
+            t if t < -1 => todo!(),
+            -1 => Self::Never,
+            0 => Self::Configurable,
+            t => Self::Millis(t as u32),
+        }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, Display)]
 pub enum Urgency {
     Low,
     #[default]
@@ -188,20 +218,14 @@ pub enum Urgency {
 
 impl Urgency {
     pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
-        u32::try_from(hint)
+        u8::try_from(hint)
             .ok()
             .and_then(|val| Some(Self::from(val)))
     }
 }
 
-impl Display for Urgency {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("{self:?}").to_lowercase())
-    }
-}
-
-impl From<u32> for Urgency {
-    fn from(value: u32) -> Self {
+impl From<u8> for Urgency {
+    fn from(value: u8) -> Self {
         match value {
             0 => Self::Low,
             1 => Self::Normal,

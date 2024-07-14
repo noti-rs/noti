@@ -2,7 +2,7 @@ use std::{collections::VecDeque, sync::Arc};
 
 use fontdue::Metrics;
 
-use crate::{data::text::Text, render::font::FontStyle};
+use crate::{config::TextAlignment, data::text::Text, render::font::FontStyle};
 
 use super::{color::Bgra, font::FontCollection, image::Image};
 
@@ -11,6 +11,7 @@ pub(crate) struct TextRect {
     words: Vec<WordRect>,
     line_spacing: usize,
     padding: usize,
+    fg_color: Bgra,
 }
 
 impl TextRect {
@@ -27,6 +28,7 @@ impl TextRect {
         let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
+            fg_color: Bgra::new_black(),
             ..Default::default()
         }
     }
@@ -129,11 +131,15 @@ impl TextRect {
         self.padding = padding;
     }
 
+    pub(crate) fn set_foreground(&mut self, color: Bgra) {
+        self.fg_color = color;
+    }
+
     pub(crate) fn draw<O: FnMut(isize, isize, Bgra)>(
         &self,
         width: usize,
         height: usize,
-        text_alignment: TextAlignment,
+        text_alignment: &TextAlignment,
         mut callback: O,
     ) -> usize {
         const SPACEBAR_WIDTH: isize = 15;
@@ -192,8 +198,13 @@ impl TextRect {
 
             for word in words {
                 word.glyphs.iter().for_each(|local_glyph| {
-                    let (x_shift, _y_shift) =
-                        local_glyph.draw(x, y as isize, line_height as isize, &mut callback);
+                    let (x_shift, _y_shift) = local_glyph.draw(
+                        x,
+                        y as isize,
+                        line_height as isize,
+                        &self.fg_color,
+                        &mut callback,
+                    );
                     x += x_shift;
                 });
 
@@ -231,6 +242,7 @@ impl LocalGlyph {
         x_offset: isize,
         y_offset: isize,
         line_height: isize,
+        fg_color: &Bgra,
         callback: &mut O,
     ) -> (isize, isize) {
         match self {
@@ -251,8 +263,8 @@ impl LocalGlyph {
 
                 for glyph_y in y_diff..height + y_diff {
                     for glyph_x in x_diff..width + x_diff {
-                        let mut bgra = Bgra::new();
-                        bgra.alpha = *coverage_iter.next().unwrap() as f32 / 255.0;
+                        let bgra =
+                            fg_color.clone() * (*coverage_iter.next().unwrap() as f32 / 255.0);
                         callback(x_offset + glyph_x, y_offset as isize + glyph_y, bgra);
                     }
                 }
@@ -307,14 +319,4 @@ impl WordRect {
             glyphs: outlined_glyphs,
         }
     }
-}
-
-#[derive(Default)]
-#[allow(unused)]
-pub(crate) enum TextAlignment {
-    Center,
-    #[default]
-    Left,
-    Right,
-    SpaceBetween,
 }
