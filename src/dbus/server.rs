@@ -75,12 +75,12 @@ impl Handler {
         expire_timeout: i32,
     ) -> Result<u32> {
         let id = match replaces_id {
-            0 => UNIQUE_ID.load(Ordering::Relaxed),
+            0 => UNIQUE_ID.fetch_add(1, Ordering::Relaxed),
             _ => replaces_id,
         };
 
         #[rustfmt::skip]
-        let created_at = SystemTime::now() .duration_since(UNIX_EPOCH) .unwrap() .as_secs();
+        let created_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let hints = Hints::from(&hints);
         let actions = NotificationAction::from_vec(&actions);
         let body = Text::parse(body);

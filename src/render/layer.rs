@@ -1,9 +1,10 @@
-use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc};
+use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
 
 use crate::{
     config::{self, CONFIG},
     data::{
         aliases::Result,
+        internal_messages::RendererMessage,
         notification::{self, Notification},
     },
     render::border::BorderBuilder,
@@ -15,25 +16,25 @@ use wayland_client::{
         wl_pointer::{self, ButtonState},
         wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
     },
-    Connection, Dispatch, EventQueue, WEnum,
+    Connection, Dispatch, EventQueue, QueueHandle, WEnum,
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1,
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use super::{
-    color::Bgra,
-    font::FontCollection,
-    image::Image,
-    text::{self, TextRect},
-};
+use super::{color::Bgra, font::FontCollection, image::Image, text::TextRect};
 
 pub(crate) struct NotificationStack {
     connection: Connection,
+    event_queue: Option<EventQueue<Window>>,
+    qhandle: Option<QueueHandle<Window>>,
+    window: Option<Window>,
+
     font_collection: Arc<FontCollection>,
 
-    stack: Vec<(EventQueue<NotificationRect>, NotificationRect)>,
+    stack: Vec<NotificationRect>,
+    events: Vec<RendererMessage>,
 }
 
 impl NotificationStack {
@@ -45,49 +46,273 @@ impl NotificationStack {
 
         Ok(Self {
             connection,
+            event_queue: None,
+            qhandle: None,
+            window: None,
+
             font_collection,
+
             stack: vec![],
+            events: vec![],
         })
     }
 
-    pub(crate) fn create_notification_rect(&mut self, notification: Notification) {
-        let event_queue = self.connection.new_event_queue();
-        let qh = event_queue.handle();
-        let display = self.connection.display();
+    pub(crate) fn create_notifications(&mut self, notifications: Vec<Notification>) {
+        let init = self.init_window();
 
-        display.get_registry(&qh, ());
-        let mut notification_rect = NotificationRect::init(notification);
-        notification_rect.font_collection = Some(self.font_collection.clone());
+        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
+        let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
-        self.stack.push((event_queue, notification_rect));
+        let mut rects: Vec<NotificationRect> = notifications
+            .into_iter()
+            .map(|notification| {
+                let mut notification_rect = NotificationRect::init(notification);
+                notification_rect.font_collection = Some(self.font_collection.clone());
+                notification_rect
+            })
+            .collect();
+
+        if !init {
+            let height = CONFIG.general().height() as i32;
+            window.height += height * rects.len() as i32;
+        }
+
+        let mut file = tempfile::tempfile().unwrap();
+        let anchor = CONFIG.general().anchor();
+        if anchor.is_top() {
+            rects.iter_mut().for_each(|rect| rect.draw(&mut file));
+            Self::write_stack_to_file(&self.stack, anchor, &mut file);
+        } else {
+            Self::write_stack_to_file(&self.stack, anchor, &mut file);
+            rects.iter_mut().rev().for_each(|rect| rect.draw(&mut file));
+        }
+
+        window.create_buffer(file, qhandle);
+        window.resize_layer_surface();
+
+        self.full_commit();
+
+        self.stack.extend(rects.into_iter().rev());
     }
 
-    pub(crate) fn dispatch(&mut self) {
-        self.stack
-            .iter_mut()
-            .for_each(|(event_queue, notification_rect)| {
-                let dispatched_count = event_queue
-                    .dispatch_pending(notification_rect)
-                    .expect("Successful dispatch");
+    pub(crate) fn close_notifications(&mut self, indices: &[u32]) {
+        let indices_to_remove: Vec<usize> = self
+            .stack
+            .iter()
+            .enumerate()
+            .filter(|(_, notification_rect)| indices.contains(&notification_rect.data.id))
+            .map(|(i, _)| i)
+            .rev()
+            .collect();
 
-                if dispatched_count > 0 {
-                    return;
+        if indices_to_remove.is_empty() {
+            return;
+        }
+
+        self.remove_rects(&indices_to_remove);
+        indices.iter().for_each(|&id| {
+            self.events.push(RendererMessage::ClosedNotification {
+                id,
+                reason: crate::data::dbus::ClosingReason::CallCloseNotification,
+            })
+        })
+    }
+
+    pub(crate) fn remove_expired(&mut self) {
+        if self.stack.is_empty() {
+            return;
+        }
+
+        let indices_to_remove: Vec<usize> = self
+            .stack
+            .iter()
+            .enumerate()
+            .filter_map(|(i, rect)| match &rect.data.expire_timeout {
+                notification::Timeout::Millis(millis) => {
+                    if rect.created_at.elapsed().as_millis() > *millis as u128 {
+                        Some(i)
+                    } else {
+                        None
+                    }
                 }
+                notification::Timeout::Never => None,
+                notification::Timeout::Configurable => {
+                    let timeout = CONFIG.display_by_app(&rect.data.app_name).timeout();
+                    if timeout != 0 && rect.created_at.elapsed().as_millis() > timeout as u128 {
+                        Some(i)
+                    } else {
+                        None
+                    }
+                }
+            })
+            .collect();
 
-                event_queue.flush().expect("Successful event queue flush");
-                let guard = event_queue.prepare_read().expect("Get read events guard");
-                let _ = guard.read();
-            });
+        if indices_to_remove.is_empty() {
+            return;
+        }
+
+        let notifications = self.remove_rects(&indices_to_remove);
+        notifications.into_iter().for_each(|notification| {
+            self.events.push(RendererMessage::ClosedNotification {
+                id: notification.id,
+                reason: crate::data::dbus::ClosingReason::Expired,
+            })
+        })
+    }
+
+    pub(crate) fn pop_event(&mut self) -> Option<RendererMessage> {
+        self.events.pop()
+    }
+
+    pub(crate) fn handle_actions(&mut self) {
+        //TODO: change it to actions
+
+        if let Some(window) = self.window.as_mut() {
+            if window.pointer_state.lb_pressed {
+                window.pointer_state.lb_pressed = false;
+
+                let rect_height = CONFIG.general().height() as usize;
+                let count = window.height as usize / rect_height;
+
+                if let Some((i, _)) = (0..window.height as usize)
+                    .step_by(rect_height)
+                    .enumerate()
+                    .take(count)
+                    .find(|&(_, height)| {
+                        (height..height + rect_height).contains(&(window.pointer_state.y as usize))
+                    })
+                {
+                    let notifications = self.remove_rects(&[count - i - 1]);
+                    notifications.into_iter().for_each(|notification| {
+                        self.events.push(RendererMessage::ClosedNotification {
+                            id: notification.id,
+                            reason: crate::data::dbus::ClosingReason::DismissedByUser,
+                        })
+                    })
+                }
+            }
+        }
+    }
+
+    pub(crate) fn dispatch(&mut self) -> bool {
+        if self.event_queue.is_none() {
+            return false;
+        }
+
+        let event_queue = unsafe { self.event_queue.as_mut().unwrap_unchecked() };
+        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
+
+        let dispatched_count = event_queue
+            .dispatch_pending(window)
+            .expect("Successful dispatch");
+
+        if dispatched_count > 0 {
+            return true;
+        }
+
+        event_queue.flush().expect("Successful event queue flush");
+        let guard = event_queue.prepare_read().expect("Get read events guard");
+        let Ok(count) = guard.read() else {
+            return false;
+        };
+
+        if count > 0 {
+            event_queue
+                .dispatch_pending(window)
+                .expect("Successful dispatch");
+            true
+        } else {
+            false
+        }
+    }
+
+    fn remove_rects(&mut self, indices_to_remove: &[usize]) -> Vec<Notification> {
+        let notifications = indices_to_remove
+            .iter()
+            .map(|id| self.stack.remove(*id).data)
+            .collect();
+
+        if self.stack.len() == 0 {
+            self.deinit_window();
+            return notifications;
+        }
+
+        let mut file = tempfile::tempfile().unwrap();
+        Self::write_stack_to_file(&self.stack, CONFIG.general().anchor(), &mut file);
+
+        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
+        window.height -= CONFIG.general().height() as i32 * notifications.len() as i32;
+
+        let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
+        window.create_buffer(file, qhandle);
+        window.resize_layer_surface();
+
+        self.full_commit();
+
+        notifications
+    }
+
+    fn write_stack_to_file(stack: &[NotificationRect], anchor: &config::Anchor, file: &mut File) {
+        if anchor.is_top() {
+            stack.iter()
+        } else {
+            stack.iter()
+        }
+        .rev()
+        .for_each(|rect| file.write_all(&rect.framebuffer).unwrap());
+    }
+
+    fn full_commit(&mut self) {
+        unsafe {
+            self.event_queue
+                .as_mut()
+                .unwrap_unchecked()
+                .roundtrip(self.window.as_mut().unwrap_unchecked())
+                .unwrap();
+        }
+    }
+
+    fn init_window(&mut self) -> bool {
+        if let None = self.window {
+            let mut event_queue = self.connection.new_event_queue();
+            let qhandle = event_queue.handle();
+            let display = self.connection.display();
+            display.get_registry(&qhandle, ());
+
+            let mut window = Window::init();
+            while !window.configured {
+                let _ = event_queue.blocking_dispatch(&mut window);
+            }
+
+            self.event_queue = Some(event_queue);
+            self.qhandle = Some(qhandle);
+            self.window = Some(window);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn deinit_window(&mut self) {
+        unsafe {
+            let window = self.window.as_mut().unwrap_unchecked();
+            window.surface.as_ref().unwrap_unchecked().destroy();
+            self.event_queue
+                .as_mut()
+                .unwrap_unchecked()
+                .roundtrip(window)
+                .unwrap();
+        }
+        self.window = None;
+        self.event_queue = None;
+        self.qhandle = None;
     }
 }
 
-struct NotificationRect {
+struct Window {
     width: i32,
     height: i32,
     margin: Margin,
-
-    data: Notification,
-    font_collection: Option<Arc<FontCollection>>,
 
     shm: Option<wl_shm::WlShm>,
     buffer: Option<wl_buffer::WlBuffer>,
@@ -96,20 +321,18 @@ struct NotificationRect {
     layer_surface: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
 
     configured: bool,
-    alive: bool,
-
     pointer_state: PointerState,
 }
 
-impl NotificationRect {
-    fn init(notification: Notification) -> Self {
-        let general_cfg = CONFIG.general();
+impl Window {
+    fn init() -> Self {
+        let width = CONFIG.general().width() as i32;
+        let height = CONFIG.general().height() as i32;
+
         Self {
-            width: general_cfg.width() as i32,
-            height: general_cfg.height() as i32,
+            width,
+            height,
             margin: Margin::new(),
-            data: notification,
-            font_collection: None,
 
             shm: None,
             buffer: None,
@@ -118,13 +341,99 @@ impl NotificationRect {
             layer_surface: None,
 
             configured: false,
-            alive: true,
-
             pointer_state: Default::default(),
         }
     }
 
-    fn draw(&self, tmp: &mut File) {
+    fn create_buffer(&mut self, file: File, qhandle: &QueueHandle<Window>) {
+        let pool = self.shm.as_ref().unwrap().create_pool(
+            file.as_fd(),
+            self.width * self.height * 4,
+            qhandle,
+            (),
+        );
+
+        self.buffer = Some(pool.create_buffer(
+            0,
+            self.width,
+            self.height,
+            self.width * 4,
+            wl_shm::Format::Argb8888,
+            qhandle,
+            (),
+        ));
+    }
+
+    fn resize_layer_surface(&mut self) {
+        let layer_surface = unsafe { self.layer_surface.as_ref().unwrap_unchecked() };
+        layer_surface.set_size(self.width as u32, self.height as u32);
+        let surface = unsafe { self.surface.as_ref().unwrap_unchecked() };
+        surface.attach(self.buffer.as_ref(), 0, 0);
+        surface.commit();
+    }
+}
+
+struct Margin {
+    left: i32,
+    right: i32,
+    top: i32,
+    bottom: i32,
+}
+
+impl Margin {
+    fn new() -> Self {
+        Margin {
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+        }
+    }
+
+    fn apply(&self, layer_surface: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1) {
+        layer_surface.set_margin(self.top, self.right, self.bottom, self.left);
+    }
+}
+
+#[derive(Default)]
+struct PointerState {
+    x: f64,
+    y: f64,
+
+    lb_pressed: bool,
+    rb_pressed: bool,
+    mb_pressed: bool,
+}
+
+impl PointerState {
+    const LEFT_BTN: u32 = 272;
+    const RIGHT_BTN: u32 = 273;
+    const MIDDLE_BTN: u32 = 274;
+}
+
+struct NotificationRect {
+    data: Notification,
+    created_at: time::Instant,
+    framebuffer: Vec<u8>,
+    font_collection: Option<Arc<FontCollection>>,
+}
+
+impl NotificationRect {
+    fn init(notification: Notification) -> Self {
+        Self {
+            data: notification,
+            created_at: time::Instant::now(),
+            framebuffer: vec![],
+            font_collection: None,
+        }
+    }
+
+    fn draw(&mut self, tmp: &mut File) {
+        let (width, height) = (
+            CONFIG.general().width() as i32,
+            CONFIG.general().height() as i32,
+        );
+
         let display = CONFIG.display_by_app(&self.data.app_name);
         let colors = match self.data.hints.urgency {
             notification::Urgency::Low => display.colors().low(),
@@ -135,27 +444,27 @@ impl NotificationRect {
         let background: Bgra = colors.background().into();
         let foreground: Bgra = colors.foreground().into();
 
-        let mut buf: Vec<u8> = vec![background.clone(); self.width as usize * self.height as usize]
+        self.framebuffer = vec![background.clone(); width as usize * height as usize]
             .into_iter()
             .flat_map(|bgra| bgra.to_slice())
             .collect();
 
         let border_cfg = display.border();
-        let stride = self.width as usize * 4;
+        let stride = width as usize * 4;
 
         let border = BorderBuilder::default()
             .width(border_cfg.size() as usize)
             .radius(display.rounding() as usize)
             .color(border_cfg.color().into())
             .background_color(background.clone())
-            .frame_width(self.width as usize)
-            .frame_height(self.height as usize)
+            .frame_width(width as usize)
+            .frame_height(height as usize)
             .build()
             .unwrap();
 
         border.draw(|x, y, bgra| unsafe {
             let position = y * stride + x * 4;
-            *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
+            *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
                 .unwrap_unchecked() = bgra.to_slice()
         });
 
@@ -169,18 +478,20 @@ impl NotificationRect {
         let mut img_width = image.width();
         let img_height = image.height();
 
-        if img_height
-            .is_some_and(|heigth| heigth <= self.height as usize - border_cfg.size() as usize * 2)
-        {
-            let y_offset = img_height.map(|height| self.height as usize / 2 - height / 2);
+        if img_height.is_some_and(|img_height| {
+            img_height <= height as usize - border_cfg.size() as usize * 2
+        }) {
+            let y_offset = img_height.map(|img_height| height as usize / 2 - img_height / 2);
 
             image.draw(
                 padding,
                 y_offset.unwrap_or_default(),
                 stride,
                 |position, bgra| unsafe {
-                    *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
-                        .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
+                    *TryInto::<&mut [u8; 4]>::try_into(
+                        &mut self.framebuffer[position..position + 4],
+                    )
+                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
                 },
             );
         } else {
@@ -205,17 +516,19 @@ impl NotificationRect {
         summary.set_foreground(foreground.clone());
 
         let y_offset = summary.draw(
-            self.width as usize
+            width as usize
                 - img_width
                     .map(|width| width + padding * 2)
                     .unwrap_or_default(),
-            self.height as usize,
+            height as usize,
             display.title().alignment(),
             |x, y, bgra| {
                 let position = (y * stride as isize + x_offset as isize + x * 4) as usize;
                 unsafe {
-                    *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
-                        .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
+                    *TryInto::<&mut [u8; 4]>::try_into(
+                        &mut self.framebuffer[position..position + 4],
+                    )
+                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
                 }
             },
         );
@@ -238,56 +551,30 @@ impl NotificationRect {
         text.set_line_spacing(display.body().line_spacing() as usize);
         text.set_foreground(foreground);
         text.draw(
-            self.width as usize
+            width as usize
                 - img_width
                     .map(|width| width + padding * 2)
                     .unwrap_or_default(),
-            self.height as usize - y_offset,
+            height as usize - y_offset,
             display.body().alignment(),
             |x, y, bgra| {
                 let position = ((y + y_offset as isize) * stride as isize
                     + x_offset as isize
                     + x * 4) as usize;
                 unsafe {
-                    *TryInto::<&mut [u8; 4]>::try_into(&mut buf[position..position + 4])
-                        .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
+                    *TryInto::<&mut [u8; 4]>::try_into(
+                        &mut self.framebuffer[position..position + 4],
+                    )
+                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
                 }
             },
         );
 
-        tmp.write_all(&buf).unwrap();
+        tmp.write_all(&self.framebuffer).unwrap();
     }
 }
 
-struct Margin {
-    left: i32,
-    right: i32,
-    top: i32,
-    bottom: i32,
-}
-
-impl Margin {
-    fn new() -> Self {
-        Margin {
-            left: 0,
-            right: 25,
-            top: 25,
-            bottom: 0,
-        }
-    }
-
-    fn apply(&self, layer_surface: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1) {
-        layer_surface.set_margin(self.top, self.right, self.bottom, self.left);
-    }
-}
-
-#[derive(Default)]
-struct PointerState {
-    x: f64,
-    y: f64,
-}
-
-impl Dispatch<wl_registry::WlRegistry, ()> for NotificationRect {
+impl Dispatch<wl_registry::WlRegistry, ()> for Window {
     fn event(
         state: &mut Self,
         registry: &wl_registry::WlRegistry,
@@ -302,7 +589,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for NotificationRect {
             version,
         } = event
         {
-            match &interface[..] {
+            match interface.as_ref() {
                 "wl_compositor" => {
                     let compositor = registry.bind::<wl_compositor::WlCompositor, _, _>(
                         name,
@@ -383,37 +670,14 @@ impl Dispatch<wl_registry::WlRegistry, ()> for NotificationRect {
     }
 }
 
-delegate_noop!(NotificationRect: ignore wl_compositor::WlCompositor);
-delegate_noop!(NotificationRect: ignore wl_surface::WlSurface);
-delegate_noop!(NotificationRect: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
-delegate_noop!(NotificationRect: ignore wl_shm_pool::WlShmPool);
-delegate_noop!(NotificationRect: ignore wl_buffer::WlBuffer);
+delegate_noop!(Window: ignore wl_compositor::WlCompositor);
+delegate_noop!(Window: ignore wl_surface::WlSurface);
+delegate_noop!(Window: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+delegate_noop!(Window: ignore wl_shm::WlShm);
+delegate_noop!(Window: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(Window: ignore wl_buffer::WlBuffer);
 
-impl Dispatch<wl_shm::WlShm, ()> for NotificationRect {
-    fn event(
-        state: &mut Self,
-        shm: &wl_shm::WlShm,
-        _event: <wl_shm::WlShm as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
-    ) {
-        let mut file = tempfile::tempfile().unwrap();
-        state.draw(&mut file);
-        let pool = shm.create_pool(file.as_fd(), state.width * state.height * 4, qhandle, ());
-        state.buffer = Some(pool.create_buffer(
-            0,
-            state.width,
-            state.height,
-            state.width * 4,
-            wl_shm::Format::Argb8888,
-            qhandle,
-            (),
-        ));
-    }
-}
-
-impl Dispatch<wl_seat::WlSeat, ()> for NotificationRect {
+impl Dispatch<wl_seat::WlSeat, ()> for Window {
     fn event(
         _state: &mut Self,
         seat: &wl_seat::WlSeat,
@@ -433,7 +697,7 @@ impl Dispatch<wl_seat::WlSeat, ()> for NotificationRect {
     }
 }
 
-impl Dispatch<wl_pointer::WlPointer, ()> for NotificationRect {
+impl Dispatch<wl_pointer::WlPointer, ()> for Window {
     fn event(
         state: &mut Self,
         _pointer: &wl_pointer::WlPointer,
@@ -462,34 +726,24 @@ impl Dispatch<wl_pointer::WlPointer, ()> for NotificationRect {
                 button,
                 state: WEnum::Value(ButtonState::Pressed),
                 ..
-            } => {
-                const LEFT_BTN: u32 = 272;
-                const RIGHT_BTN: u32 = 273;
-                const MIDDLE_BTN: u32 = 274;
-
-                match button {
-                    LEFT_BTN => {
-                        println!("Pressed!")
-                    }
-                    RIGHT_BTN => {
-                        state
-                            .layer_surface
-                            .as_ref()
-                            .unwrap()
-                            .set_margin(175, 25, 0, 0);
-                        state.surface.as_ref().unwrap().commit();
-                    }
-                    MIDDLE_BTN => (),
-                    _ => (),
+            } => match button {
+                PointerState::LEFT_BTN => {
+                    state.pointer_state.lb_pressed = true;
                 }
-            }
-            // wl_pointer::Event::Frame => todo!(),
+                PointerState::RIGHT_BTN => {
+                    state.pointer_state.rb_pressed = true;
+                }
+                PointerState::MIDDLE_BTN => {
+                    state.pointer_state.mb_pressed = true;
+                }
+                _ => (),
+            },
             _ => (),
         }
     }
 }
 
-impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for NotificationRect {
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Window {
     fn event(
         state: &mut Self,
         layer_surface: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
@@ -514,12 +768,8 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for NotificationRec
                 state.width = width as i32;
                 state.height = height as i32;
             }
-            state.configured = true;
 
-            if let Some(surface) = state.surface.as_ref() {
-                surface.attach(state.buffer.as_ref(), 0, 0);
-                surface.commit();
-            }
+            state.configured = true;
         }
     }
 }

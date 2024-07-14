@@ -201,8 +201,8 @@ impl From<i32> for Timeout {
     fn from(value: i32) -> Self {
         match value {
             t if t < -1 => todo!(),
-            -1 => Self::Never,
-            0 => Self::Configurable,
+            0 => Self::Never,
+            -1 => Self::Configurable,
             t => Self::Millis(t as u32),
         }
     }
