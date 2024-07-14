@@ -180,7 +180,7 @@ impl NotificationStack {
                     notifications.into_iter().for_each(|notification| {
                         self.events.push(RendererMessage::ClosedNotification {
                             id: notification.id,
-                            reason: crate::data::dbus::ClosingReason::DimissedByUser,
+                            reason: crate::data::dbus::ClosingReason::DismissedByUser,
                         })
                     })
                 }
