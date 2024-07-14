@@ -63,15 +63,11 @@ pub struct TomlConfig {
 
 impl TomlConfig {
     fn parse() -> Self {
-        let config_dirs = [
-            format!("{}/{}/", env!("XDG_CONFIG_HOME"), env!("CARGO_PKG_NAME")),
-            format!("{}/.config/{}/", env!("HOME"), env!("CARGO_PKG_NAME")),
-        ];
-
-        config_dirs
-            .iter()
+        let pkg_name = env!("CARGO_PKG_NAME");
+        std::env::var("XDG_CONFIG_HOME")
+            .or(std::env::var("HOME").map(|home_path| home_path + "/.config"))
+            .map(|config_path| format!("{config_path}/{pkg_name}/"))
             .map(|str| Path::new(&str).join("config.toml"))
-            .find(|path| path.exists())
             .map(|config_path| fs::read_to_string(&config_path).unwrap())
             .map(|content| toml::from_str(&content).unwrap())
             .unwrap_or(Default::default())
