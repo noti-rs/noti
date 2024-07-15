@@ -11,14 +11,14 @@ pub(crate) struct Border {
     frame_height: usize,
 
     #[builder(setter(into))]
-    width: usize,
+    size: usize,
     #[builder(setter(into))]
     radius: usize,
 }
 
 impl Border {
     pub(crate) fn draw<O: FnMut(usize, usize, Bgra)>(&self, mut callback: O) {
-        let coverage = match (self.width, self.radius) {
+        let coverage = match (self.size, self.radius) {
             (0, 0) => return,
             (width, 0) => self.get_bordered_coverage(width),
             (0, radius) => self.get_rounding_coverage(radius),
@@ -67,30 +67,42 @@ impl Border {
             }
         }
 
-        if self.width != 0 {
-            for y in 0..self.width {
-                for x in coverage_size..self.frame_width - coverage_size {
-                    callback(x, y, self.color.clone())
-                }
-            }
+        if self.size != 0 {
+            // Top
+            self.draw_rectangle(
+                coverage_size,
+                0,
+                self.frame_width - coverage_size * 2,
+                self.size,
+                &mut callback,
+            );
 
-            for y in self.frame_height - self.width..self.frame_height {
-                for x in coverage_size..self.frame_width - coverage_size {
-                    callback(x, y, self.color.clone())
-                }
-            }
+            // Bottom
+            self.draw_rectangle(
+                coverage_size,
+                self.frame_height - self.size,
+                self.frame_width - coverage_size * 2,
+                self.size,
+                &mut callback,
+            );
 
-            for x in 0..self.width {
-                for y in coverage_size..self.frame_height - coverage_size {
-                    callback(x, y, self.color.clone())
-                }
-            }
+            // Left
+            self.draw_rectangle(
+                0,
+                coverage_size,
+                self.size,
+                self.frame_height - coverage_size * 2,
+                &mut callback,
+            );
 
-            for x in self.frame_width - self.width..self.frame_width {
-                for y in coverage_size..self.frame_height - coverage_size {
-                    callback(x, y, self.color.clone())
-                }
-            }
+            // Right
+            self.draw_rectangle(
+                self.frame_width - self.size,
+                coverage_size,
+                self.size,
+                self.frame_height - coverage_size * 2,
+                &mut callback,
+            );
         }
     }
 
@@ -158,6 +170,21 @@ impl Border {
             inner_diff
         } else {
             1.0
+        }
+    }
+
+    fn draw_rectangle<O: FnMut(usize, usize, Bgra)>(
+        &self,
+        x_offset: usize,
+        y_offset: usize,
+        width: usize,
+        height: usize,
+        callback: &mut O,
+    ) {
+        for x in x_offset..width + x_offset {
+            for y in y_offset..height + y_offset {
+                callback(x, y, self.color.clone())
+            }
         }
     }
 }
