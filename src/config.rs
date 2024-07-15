@@ -225,7 +225,6 @@ impl From<String> for Anchor {
 pub struct DisplayConfig {
     image_size: Option<u16>,
 
-    rounding: Option<u8>,
     padding: Option<u8>,
 
     border: Option<Border>,
@@ -241,10 +240,6 @@ pub struct DisplayConfig {
 impl DisplayConfig {
     pub fn image_size(&self) -> u16 {
         self.image_size.unwrap()
-    }
-
-    pub fn rounding(&self) -> u8 {
-        self.rounding.unwrap()
     }
 
     pub fn padding(&self) -> u8 {
@@ -278,10 +273,6 @@ impl DisplayConfig {
     fn fill_empty_by_default(&mut self) {
         if self.image_size.is_none() {
             self.image_size = Some(64);
-        }
-
-        if self.rounding.is_none() {
-            self.rounding = Some(0);
         }
 
         if self.padding.is_none() {
@@ -452,12 +443,17 @@ impl From<String> for Color {
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct Border {
     size: Option<u8>,
+    radius: Option<u8>,
     color: Option<Color>,
 }
 
 impl Border {
     pub fn size(&self) -> u8 {
         self.size.unwrap()
+    }
+
+    pub fn radius(&self) -> u8 {
+        self.radius.unwrap()
     }
 
     pub fn color(&self) -> &Color {
@@ -467,6 +463,10 @@ impl Border {
     fn fill_empty_by_default(&mut self) {
         if self.size.is_none() {
             self.size = Some(0);
+        }
+
+        if self.radius.is_none() {
+            self.radius = Some(0);
         }
 
         if self.color.is_none() {
@@ -545,12 +545,13 @@ impl AppConfig {
         if let Some(display) = self.display.as_mut() {
             display.image_size = display.image_size.or(other.image_size);
 
-            display.rounding = display.rounding.or(other.rounding);
             display.padding = display.padding.or(other.padding);
 
             if let Some(border) = display.border.as_mut() {
                 let other_border = other.border(); // The other type shall have border
+
                 border.size = border.size.or(other_border.size);
+                border.radius = border.radius.or(other_border.radius);
                 border.color = border.color.clone().or(other_border.color.clone());
             } else {
                 display.border = other.border.clone();

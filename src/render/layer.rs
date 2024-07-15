@@ -453,8 +453,8 @@ impl NotificationRect {
         let stride = width as usize * 4;
 
         let border = BorderBuilder::default()
-            .width(border_cfg.size() as usize)
-            .radius(display.rounding() as usize)
+            .size(border_cfg.size() as usize)
+            .radius(border_cfg.radius() as usize)
             .color(border_cfg.color().into())
             .background_color(background.clone())
             .frame_width(width as usize)

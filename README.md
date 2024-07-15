@@ -42,8 +42,6 @@ height = 150
 
 [display]
 image_size = 64
-
-rounding = 10
 padding = 8
 
 timeout = 2000
@@ -58,12 +56,13 @@ foreground = "#1E1E2E"
 
 [display.border]
 size = 4
+radius = 10
 color = "#000"
 
 [[app]]
 name = "Telegram Desktop"
 [app.display]
-rounding = 8
+border = { radius = 8 }
 markup = true
 
 [app.display.body]
