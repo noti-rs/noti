@@ -103,15 +103,15 @@ impl Border {
     fn get_corner_coverage(&self, radius: usize) -> Vec<Vec<Option<Bgra>>> {
         let mut coverage = vec![vec![None; radius]; radius];
         self.traverse_circle_with(radius, |inner_x, inner_y, rev_x, rev_y| {
-            let cell_coverage = Self::get_coverage_by(radius as f32, inner_x as f32, inner_y as f32);
+            let cell_coverage = Self::get_coverage_by(radius as f32, rev_x as f32, rev_y as f32);
 
             if cell_coverage == 1.0 {
                 return false;
             }
 
             let color = self.background_color.clone() * cell_coverage;
-            coverage[rev_x][rev_y] = Some(color.clone());
-            coverage[rev_y][rev_x] = Some(color);
+            coverage[inner_x][inner_y] = Some(color.clone());
+            coverage[inner_y][inner_x] = Some(color);
 
             true
         });
@@ -177,7 +177,7 @@ impl Border {
         if inner_hypot >= radius {
             0.0
         } else if outer_hypot >= radius {
-            inner_diff
+            inner_diff.clamp(0.0, 1.0)
         } else {
             1.0
         }
