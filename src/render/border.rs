@@ -16,64 +16,45 @@ pub(crate) struct Border {
     radius: usize,
 }
 
+enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
 impl Border {
     pub(crate) fn draw<O: FnMut(usize, usize, Bgra)>(&self, mut callback: O) {
         let coverage = match (self.size, self.radius) {
             (0, 0) => return,
             (width, 0) => self.get_bordered_coverage(width),
-            (0, radius) => self.get_rounding_coverage(radius),
-            (width, radius) => self.get_bordered_rounding_coverage(width, radius),
+            (0, radius) => self.get_corner_coverage(radius),
+            (width, radius) => self.get_bordered_corner_coverage(width, radius),
         };
 
         let coverage_size = coverage.len();
-
-        for (frame_x, coverage_row) in (0..).zip(&coverage) {
-            for (frame_y, coverage_cell) in (0..).zip(coverage_row) {
-                if let Some(coverage) = coverage_cell {
-                    callback(frame_x, frame_y, coverage.clone());
-                } else {
-                    break;
-                }
-            }
-        }
-
-        for (frame_x, coverage_row) in
-            ((self.frame_width - coverage_size..self.frame_width).rev()).zip(&coverage)
-        {
-            for (frame_y, coverage_cell) in (0..coverage_size).zip(coverage_row) {
-                if let Some(coverage) = coverage_cell {
-                    callback(frame_x, frame_y, coverage.clone());
-                } else {
-                    break;
-                }
-            }
-        }
-
-        for (frame_x, coverage_row) in
-            ((self.frame_width - coverage_size..self.frame_width).rev()).zip(&coverage)
-        {
-            for (frame_y, coverage_cell) in
-                ((self.frame_height - coverage_size..self.frame_height).rev()).zip(coverage_row)
-            {
-                if let Some(coverage) = coverage_cell {
-                    callback(frame_x, frame_y, coverage.clone());
-                } else {
-                    break;
-                }
-            }
-        }
-
-        for (frame_x, coverage_row) in (0..coverage_size).zip(&coverage) {
-            for (frame_y, coverage_cell) in
-                ((self.frame_height - coverage_size..self.frame_height).rev()).zip(coverage_row)
-            {
-                if let Some(coverage) = coverage_cell {
-                    callback(frame_x, frame_y, coverage.clone());
-                } else {
-                    break;
-                }
-            }
-        }
+        Self::draw_corner(0, 0, &coverage, Corner::TopLeft, &mut callback);
+        Self::draw_corner(
+            self.frame_width - coverage_size,
+            0,
+            &coverage,
+            Corner::TopRight,
+            &mut callback,
+        );
+        Self::draw_corner(
+            self.frame_width - coverage_size,
+            self.frame_height - coverage_size,
+            &coverage,
+            Corner::BottomRight,
+            &mut callback,
+        );
+        Self::draw_corner(
+            0,
+            self.frame_height - coverage_size,
+            &coverage,
+            Corner::BottomLeft,
+            &mut callback,
+        );
 
         if self.size != 0 {
             // Top
@@ -114,11 +95,12 @@ impl Border {
         }
     }
 
+    #[inline]
     fn get_bordered_coverage(&self, width: usize) -> Vec<Vec<Option<Bgra>>> {
         vec![vec![Some(self.color.clone()); width]; width]
     }
 
-    fn get_rounding_coverage(&self, radius: usize) -> Vec<Vec<Option<Bgra>>> {
+    fn get_corner_coverage(&self, radius: usize) -> Vec<Vec<Option<Bgra>>> {
         let mut coverage = vec![vec![None; radius]; radius];
         for (x, rev_x) in (0..radius).rev().zip(0..radius) {
             for (y, rev_y) in (0..radius - rev_x).rev().zip(rev_x..radius) {
@@ -136,11 +118,7 @@ impl Border {
         coverage
     }
 
-    fn get_bordered_rounding_coverage(
-        &self,
-        width: usize,
-        radius: usize,
-    ) -> Vec<Vec<Option<Bgra>>> {
+    fn get_bordered_corner_coverage(&self, width: usize, radius: usize) -> Vec<Vec<Option<Bgra>>> {
         let mut coverage = vec![vec![None; radius]; radius];
         let inner_radius = radius.saturating_sub(width);
 
@@ -171,6 +149,7 @@ impl Border {
         coverage
     }
 
+    #[inline]
     fn get_coverage_by(radius: f32, x: f32, y: f32) -> f32 {
         let inner_hypot = f32::hypot(x, y);
         let inner_diff = radius - inner_hypot;
@@ -185,6 +164,40 @@ impl Border {
         }
     }
 
+    #[inline]
+    fn draw_corner<O: FnMut(usize, usize, Bgra)>(
+        x_offset: usize,
+        y_offset: usize,
+        coverage: &Vec<Vec<Option<Bgra>>>,
+        corner_type: Corner,
+        callback: &mut O,
+    ) {
+        let coverage_size = coverage.len();
+        let mut x_range = x_offset..x_offset + coverage_size;
+        let y_range = y_offset..y_offset + coverage_size;
+
+        let x_range: &mut dyn Iterator<Item = usize> = match corner_type {
+            Corner::TopLeft | Corner::BottomLeft => &mut x_range,
+            Corner::TopRight | Corner::BottomRight => &mut x_range.rev(),
+        };
+
+        for (x, coverage_row) in x_range.zip(coverage) {
+            let y_range: &mut dyn Iterator<Item = usize> = match corner_type {
+                Corner::TopLeft | Corner::TopRight => &mut y_range.clone(),
+                Corner::BottomLeft | Corner::BottomRight => &mut y_range.clone().rev(),
+            };
+
+            for (y, coverage_cell) in y_range.zip(coverage_row) {
+                if let Some(color) = coverage_cell {
+                    callback(x, y, color.clone());
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    #[inline]
     fn draw_rectangle<O: FnMut(usize, usize, Bgra)>(
         &self,
         x_offset: usize,
