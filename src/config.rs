@@ -403,6 +403,22 @@ pub struct Color {
     pub alpha: u8,
 }
 
+impl Color {
+    fn normalize(self) -> Self {
+        if self.alpha == 255 {
+            return self;
+        }
+
+        let alpha = self.alpha as f32 / 255.0;
+        Self {
+            red: (self.red as f32 * alpha) as u8,
+            green: (self.green as f32 * alpha) as u8,
+            blue: (self.blue as f32 * alpha) as u8,
+            alpha: self.alpha,
+        }
+    }
+}
+
 impl From<String> for Color {
     fn from(value: String) -> Self {
         if value.len() == 4 {
@@ -428,6 +444,7 @@ impl From<String> for Color {
                     255
                 },
             }
+            .normalize()
         }
     }
 }
