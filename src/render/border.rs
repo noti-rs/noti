@@ -102,18 +102,19 @@ impl Border {
 
     fn get_corner_coverage(&self, radius: usize) -> Vec<Vec<Option<Bgra>>> {
         let mut coverage = vec![vec![None; radius]; radius];
-        for (x, rev_x) in (0..radius).rev().zip(0..radius) {
-            for (y, rev_y) in (0..radius - rev_x).rev().zip(rev_x..radius) {
-                let cell_coverage = Self::get_coverage_by(radius as f32, x as f32, y as f32);
-                if cell_coverage == 1.0 {
-                    break;
-                }
+        self.traverse_circle_with(radius, |inner_x, inner_y, rev_x, rev_y| {
+            let cell_coverage = Self::get_coverage_by(radius as f32, inner_x as f32, inner_y as f32);
 
-                let color = self.background_color.clone() * cell_coverage;
-                coverage[rev_x][rev_y] = Some(color.clone());
-                coverage[rev_y][rev_x] = Some(color);
+            if cell_coverage == 1.0 {
+                return false;
             }
-        }
+
+            let color = self.background_color.clone() * cell_coverage;
+            coverage[rev_x][rev_y] = Some(color.clone());
+            coverage[rev_y][rev_x] = Some(color);
+
+            true
+        });
 
         coverage
     }
@@ -122,31 +123,49 @@ impl Border {
         let mut coverage = vec![vec![None; radius]; radius];
         let inner_radius = radius.saturating_sub(width);
 
-        for (x, rev_x) in (0..radius).rev().zip(0..radius) {
-            for (y, rev_y) in (0..radius - rev_x).rev().zip(rev_x..radius) {
-                let (x_f32, y_f32) = (x as f32, y as f32);
-                let outer_color =
-                    self.color.clone() * Self::get_coverage_by(radius as f32, x_f32, y_f32);
+        self.traverse_circle_with(radius, |inner_x, inner_y, rev_x, rev_y| {
+            let (x_f32, y_f32) = (rev_x as f32, rev_y as f32);
+            let outer_color =
+                self.color.clone() * Self::get_coverage_by(radius as f32, x_f32, y_f32);
 
-                let inner_color = if inner_radius != 0 {
-                    let inner_cell_coverage =
-                        Self::get_coverage_by(inner_radius as f32, x_f32, y_f32);
-                    if inner_cell_coverage == 1.0 {
-                        break;
-                    }
+            let inner_color = if inner_radius != 0 {
+                let inner_cell_coverage = Self::get_coverage_by(inner_radius as f32, x_f32, y_f32);
+                if inner_cell_coverage == 1.0 {
+                    return false;
+                }
 
-                    self.background_color.clone() * inner_cell_coverage
-                } else {
-                    Bgra::new()
-                };
+                self.background_color.clone() * inner_cell_coverage
+            } else {
+                Bgra::new()
+            };
 
-                let color = inner_color.overlay_on(&outer_color);
-                coverage[rev_x][rev_y] = Some(color.clone());
-                coverage[rev_y][rev_x] = Some(color);
-            }
-        }
+            let color = inner_color.overlay_on(&outer_color);
+            coverage[inner_x][inner_y] = Some(color.clone());
+            coverage[inner_y][inner_x] = Some(color);
+
+            true
+        });
 
         coverage
+    }
+
+    fn traverse_circle_with<Calc: FnMut(usize, usize, usize, usize) -> bool>(
+        &self,
+        radius: usize,
+        mut calc: Calc,
+    ) {
+        for x in 0..radius {
+            let rev_x = radius - x - 1;
+
+            for y in 0..radius {
+                let rev_y = radius - y - 1;
+                let to_continue = calc(x, y, rev_x, rev_y);
+
+                if !to_continue {
+                    break;
+                }
+            }
+        }
     }
 
     #[inline]
