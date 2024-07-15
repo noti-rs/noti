@@ -27,42 +27,50 @@ impl Border {
 
         let coverage_size = coverage.len();
 
-        for (frame_y, y) in (0..coverage_size).zip((0..coverage_size).rev()) {
-            for (frame_x, x) in (0..coverage_size).zip((0..coverage_size).rev()) {
-                if let Some(coverage) = coverage[x][y].as_ref() {
+        for (frame_x, coverage_row) in (0..).zip(&coverage) {
+            for (frame_y, coverage_cell) in (0..).zip(coverage_row) {
+                if let Some(coverage) = coverage_cell {
                     callback(frame_x, frame_y, coverage.clone());
+                } else {
+                    break;
                 }
             }
         }
 
-        for (frame_y, y) in (0..coverage_size).zip((0..coverage_size).rev()) {
-            for (frame_x, x) in
-                (self.frame_width - coverage_size..self.frame_width).zip(0..coverage_size)
-            {
-                if let Some(coverage) = coverage[x][y].as_ref() {
-                    callback(frame_x, frame_y, coverage.clone());
-                }
-            }
-        }
-
-        for (frame_y, y) in
-            (self.frame_height - coverage_size..self.frame_height).zip(0..coverage_size)
+        for (frame_x, coverage_row) in
+            ((self.frame_width - coverage_size..self.frame_width).rev()).zip(&coverage)
         {
-            for (frame_x, x) in
-                (self.frame_width - coverage_size..self.frame_width).zip(0..coverage_size)
-            {
-                if let Some(coverage) = coverage[x][y].as_ref() {
+            for (frame_y, coverage_cell) in (0..coverage_size).zip(coverage_row) {
+                if let Some(coverage) = coverage_cell {
                     callback(frame_x, frame_y, coverage.clone());
+                } else {
+                    break;
                 }
             }
         }
 
-        for (frame_y, y) in
-            (self.frame_height - coverage_size..self.frame_height).zip(0..coverage_size)
+        for (frame_x, coverage_row) in
+            ((self.frame_width - coverage_size..self.frame_width).rev()).zip(&coverage)
         {
-            for (frame_x, x) in (0..coverage_size).zip((0..coverage_size).rev()) {
-                if let Some(coverage) = coverage[x][y].as_ref() {
+            for (frame_y, coverage_cell) in
+                ((self.frame_height - coverage_size..self.frame_height).rev()).zip(coverage_row)
+            {
+                if let Some(coverage) = coverage_cell {
                     callback(frame_x, frame_y, coverage.clone());
+                } else {
+                    break;
+                }
+            }
+        }
+
+        for (frame_x, coverage_row) in (0..coverage_size).zip(&coverage) {
+            for (frame_y, coverage_cell) in
+                ((self.frame_height - coverage_size..self.frame_height).rev()).zip(coverage_row)
+            {
+                if let Some(coverage) = coverage_cell {
+                    callback(frame_x, frame_y, coverage.clone());
+                } else {
+                    break;
                 }
             }
         }
@@ -112,14 +120,16 @@ impl Border {
 
     fn get_rounding_coverage(&self, radius: usize) -> Vec<Vec<Option<Bgra>>> {
         let mut coverage = vec![vec![None; radius]; radius];
-        for y in (0..radius).rev() {
-            for x in (0..radius).rev() {
+        for (x, rev_x) in (0..radius).rev().zip(0..radius) {
+            for (y, rev_y) in (0..radius - rev_x).rev().zip(rev_x..radius) {
                 let cell_coverage = Self::get_coverage_by(radius as f32, x as f32, y as f32);
                 if cell_coverage == 1.0 {
                     break;
                 }
 
-                coverage[x][y] = Some(self.background_color.clone() * cell_coverage);
+                let color = self.background_color.clone() * cell_coverage;
+                coverage[rev_x][rev_y] = Some(color.clone());
+                coverage[rev_y][rev_x] = Some(color);
             }
         }
 
@@ -134,8 +144,8 @@ impl Border {
         let mut coverage = vec![vec![None; radius]; radius];
         let inner_radius = radius.saturating_sub(width);
 
-        for y in (0..radius).rev() {
-            for x in (0..radius).rev() {
+        for (x, rev_x) in (0..radius).rev().zip(0..radius) {
+            for (y, rev_y) in (0..radius - rev_x).rev().zip(rev_x..radius) {
                 let (x_f32, y_f32) = (x as f32, y as f32);
                 let outer_color =
                     self.color.clone() * Self::get_coverage_by(radius as f32, x_f32, y_f32);
@@ -152,7 +162,9 @@ impl Border {
                     Bgra::new()
                 };
 
-                coverage[x][y] = Some(inner_color.overlay_on(&outer_color));
+                let color = inner_color.overlay_on(&outer_color);
+                coverage[rev_x][rev_y] = Some(color.clone());
+                coverage[rev_y][rev_x] = Some(color);
             }
         }
 
