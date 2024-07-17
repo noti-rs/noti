@@ -16,7 +16,6 @@ Install binary via `cargo install`:
 ```bash
 cargo install --git https://github.com/noti-rs/noti/
 ```
-
 ### Running Noti
 
 After installation, you can start Noti with:
@@ -36,6 +35,7 @@ Noti can be configured via a configuration file located at `~/.config/noti/confi
 font = [ "JetBrainsMono Nerd Font", 16 ]
 anchor = "top-right"
 offset = [15, 15]
+gap = 10
 
 width = 300
 height = 150
