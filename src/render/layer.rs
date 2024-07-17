@@ -74,13 +74,13 @@ impl NotificationStack {
             })
             .collect();
 
-        let mut file = tempfile::tempfile().unwrap();
-        let anchor = CONFIG.general().anchor();
-
         if !init {
             let height = CONFIG.general().height() as i32;
             window.height += height * rects.len() as i32;
         }
+
+        let mut file = tempfile::tempfile().unwrap();
+        let anchor = CONFIG.general().anchor();
 
         if anchor.is_top() {
             rects.iter_mut().for_each(|rect| {
