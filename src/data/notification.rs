@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use zbus::zvariant::Value;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Notification {
     pub id: u32,
     pub app_name: String,
@@ -84,7 +84,7 @@ impl From<&HashMap<&str, Value<'_>>> for Hints {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NotificationAction {
     action_key: String,
     localized_string: String,

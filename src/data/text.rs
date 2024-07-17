@@ -2,7 +2,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, iter::Peekable, str::Chars};
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct Text {
     pub(crate) body: String,
     pub(crate) entities: Vec<Entity>,
@@ -119,14 +119,14 @@ impl Parser {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct Entity {
-    pub(crate)offset: usize,
-    pub(crate)length: usize,
-    pub(crate)kind: EntityKind,
+    pub(crate) offset: usize,
+    pub(crate) length: usize,
+    pub(crate) kind: EntityKind,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub(crate) enum EntityKind {
     Bold,      // <b> ... </b>
     Italic,    // <i> ... </i>

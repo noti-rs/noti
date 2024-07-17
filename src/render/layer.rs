@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
+use std::{fmt::Debug, fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
 
 use crate::{
     config::{self, CONFIG},
@@ -63,29 +63,53 @@ impl NotificationStack {
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
         let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
-        let mut rects: Vec<NotificationRect> = notifications
-            .into_iter()
-            .map(|notification| {
-                let mut notification_rect = NotificationRect::init(notification);
+        let mut file = tempfile::tempfile().unwrap();
+        let anchor = CONFIG.general().anchor();
+
+        for notification in &notifications {
+            if let Some(index) = self
+                .stack
+                .iter()
+                .position(|rect| rect.data.id == notification.id)
+            {
+                let rect = &mut self.stack[index];
+                rect.update_data(notification.clone());
+                rect.font_collection = Some(self.font_collection.clone());
+                rect.draw();
+            }
+        }
+
+        let mut rects: Vec<NotificationRect> = Vec::new();
+        for notification in notifications {
+            if !self
+                .stack
+                .iter()
+                .any(|rect| rect.data.id == notification.id)
+            {
+                let mut notification_rect = NotificationRect::init(notification.clone());
                 notification_rect.font_collection = Some(self.font_collection.clone());
-                notification_rect
-            })
-            .collect();
+                rects.push(notification_rect);
+            }
+        }
 
         if !init {
             let height = CONFIG.general().height() as i32;
             window.height += height * rects.len() as i32;
         }
 
-        let mut file = tempfile::tempfile().unwrap();
-        let anchor = CONFIG.general().anchor();
         if anchor.is_top() {
-            rects.iter_mut().for_each(|rect| rect.draw(&mut file));
-            Self::write_stack_to_file(&self.stack, anchor, &mut file);
+            rects.iter_mut().for_each(|rect| {
+                rect.draw();
+                rect.write_to_file(&mut file);
+            });
         } else {
-            Self::write_stack_to_file(&self.stack, anchor, &mut file);
-            rects.iter_mut().rev().for_each(|rect| rect.draw(&mut file));
+            rects.iter_mut().for_each(|rect| {
+                rect.draw();
+                rect.write_to_file(&mut file);
+            });
         }
+
+        Self::write_stack_to_file(&self.stack, anchor, &mut file);
 
         window.create_buffer(file, qhandle);
         window.resize_layer_surface();
@@ -259,7 +283,7 @@ impl NotificationStack {
             stack.iter()
         }
         .rev()
-        .for_each(|rect| file.write_all(&rect.framebuffer).unwrap());
+        .for_each(|rect| rect.write_to_file(file));
     }
 
     fn full_commit(&mut self) {
@@ -411,6 +435,7 @@ impl PointerState {
     const MIDDLE_BTN: u32 = 274;
 }
 
+#[derive(Clone)]
 struct NotificationRect {
     data: Notification,
     created_at: time::Instant,
@@ -428,7 +453,7 @@ impl NotificationRect {
         }
     }
 
-    fn draw(&mut self, tmp: &mut File) {
+    fn draw(&mut self) {
         let (width, height) = (
             CONFIG.general().width() as i32,
             CONFIG.general().height() as i32,
@@ -495,8 +520,10 @@ impl NotificationRect {
                 },
             );
         } else {
-            eprintln!("Image height exceeds the possible height!\n\
-                Please set a higher value of height or decrease the value of image_size in config.toml.");
+            eprintln!(
+                "Image height exceeds the possible height!\n\
+                Please set a higher value of height or decrease the value of image_size in config.toml."
+            );
             img_width = None;
         }
 
@@ -569,8 +596,15 @@ impl NotificationRect {
                 }
             },
         );
+    }
 
-        tmp.write_all(&self.framebuffer).unwrap();
+    fn update_data(&mut self, notification: Notification) {
+        self.data = notification;
+    }
+
+    #[inline]
+    pub(crate) fn write_to_file(&self, file: &mut File) {
+        file.write_all(&self.framebuffer).unwrap();
     }
 }
 
