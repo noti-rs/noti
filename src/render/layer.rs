@@ -1,4 +1,4 @@
-use std::{fmt::Debug, fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
+use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
 
 use crate::{
     config::{self, CONFIG},
@@ -57,40 +57,25 @@ impl NotificationStack {
         })
     }
 
-    pub(crate) fn create_notifications(&mut self, notifications: Vec<Notification>) {
+    pub(crate) fn create_notifications(&mut self, mut notifications: Vec<Notification>) {
         let init = self.init_window();
+
+        self.replace_by_indices(&mut notifications);
 
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
         let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
+        let mut rects: Vec<NotificationRect> = notifications
+            .into_iter()
+            .map(|notification| {
+                let mut notification_rect = NotificationRect::init(notification);
+                notification_rect.font_collection = Some(self.font_collection.clone());
+                notification_rect
+            })
+            .collect();
+
         let mut file = tempfile::tempfile().unwrap();
         let anchor = CONFIG.general().anchor();
-
-        for notification in &notifications {
-            if let Some(index) = self
-                .stack
-                .iter()
-                .position(|rect| rect.data.id == notification.id)
-            {
-                let rect = &mut self.stack[index];
-                rect.update_data(notification.clone());
-                rect.font_collection = Some(self.font_collection.clone());
-                rect.draw();
-            }
-        }
-
-        let mut rects: Vec<NotificationRect> = Vec::new();
-        for notification in notifications {
-            if !self
-                .stack
-                .iter()
-                .any(|rect| rect.data.id == notification.id)
-            {
-                let mut notification_rect = NotificationRect::init(notification.clone());
-                notification_rect.font_collection = Some(self.font_collection.clone());
-                rects.push(notification_rect);
-            }
-        }
 
         if !init {
             let height = CONFIG.general().height() as i32;
@@ -102,14 +87,14 @@ impl NotificationStack {
                 rect.draw();
                 rect.write_to_file(&mut file);
             });
+            Self::write_stack_to_file(&self.stack, anchor, &mut file);
         } else {
-            rects.iter_mut().for_each(|rect| {
+            Self::write_stack_to_file(&self.stack, anchor, &mut file);
+            rects.iter_mut().rev().for_each(|rect| {
                 rect.draw();
                 rect.write_to_file(&mut file);
             });
         }
-
-        Self::write_stack_to_file(&self.stack, anchor, &mut file);
 
         window.create_buffer(file, qhandle);
         window.resize_layer_surface();
@@ -247,6 +232,26 @@ impl NotificationStack {
             true
         } else {
             false
+        }
+    }
+
+    fn replace_by_indices(&mut self, notifications: &mut Vec<Notification>) {
+        let matching_indices: Vec<(usize, usize)> = notifications
+            .iter()
+            .enumerate()
+            .filter_map(|(i, notification)| {
+                self.stack
+                    .iter()
+                    .position(|rect| rect.data.id == notification.id)
+                    .map(|stack_index| (i, stack_index))
+            })
+            .collect();
+
+        for (notification_index, stack_index) in matching_indices {
+            let notification = notifications.remove(notification_index);
+            let rect = &mut self.stack[stack_index];
+            rect.update_data(notification);
+            rect.draw();
         }
     }
 
@@ -435,7 +440,6 @@ impl PointerState {
     const MIDDLE_BTN: u32 = 274;
 }
 
-#[derive(Clone)]
 struct NotificationRect {
     data: Notification,
     created_at: time::Instant,
