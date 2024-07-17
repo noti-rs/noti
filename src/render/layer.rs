@@ -247,7 +247,7 @@ impl NotificationStack {
             })
             .collect();
 
-        for (notification_index, stack_index) in matching_indices {
+        for (notification_index, stack_index) in matching_indices.into_iter().rev() {
             let notification = notifications.remove(notification_index);
             let rect = &mut self.stack[stack_index];
             rect.update_data(notification);
