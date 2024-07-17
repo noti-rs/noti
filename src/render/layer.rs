@@ -57,8 +57,10 @@ impl NotificationStack {
         })
     }
 
-    pub(crate) fn create_notifications(&mut self, notifications: Vec<Notification>) {
+    pub(crate) fn create_notifications(&mut self, mut notifications: Vec<Notification>) {
         let init = self.init_window();
+
+        self.replace_by_indices(&mut notifications);
 
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
         let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
@@ -79,12 +81,19 @@ impl NotificationStack {
 
         let mut file = tempfile::tempfile().unwrap();
         let anchor = CONFIG.general().anchor();
+
         if anchor.is_top() {
-            rects.iter_mut().for_each(|rect| rect.draw(&mut file));
+            rects.iter_mut().for_each(|rect| {
+                rect.draw();
+                rect.write_to_file(&mut file);
+            });
             Self::write_stack_to_file(&self.stack, anchor, &mut file);
         } else {
             Self::write_stack_to_file(&self.stack, anchor, &mut file);
-            rects.iter_mut().rev().for_each(|rect| rect.draw(&mut file));
+            rects.iter_mut().rev().for_each(|rect| {
+                rect.draw();
+                rect.write_to_file(&mut file);
+            });
         }
 
         window.create_buffer(file, qhandle);
@@ -226,6 +235,26 @@ impl NotificationStack {
         }
     }
 
+    fn replace_by_indices(&mut self, notifications: &mut Vec<Notification>) {
+        let matching_indices: Vec<(usize, usize)> = notifications
+            .iter()
+            .enumerate()
+            .filter_map(|(i, notification)| {
+                self.stack
+                    .iter()
+                    .position(|rect| rect.data.id == notification.id)
+                    .map(|stack_index| (i, stack_index))
+            })
+            .collect();
+
+        for (notification_index, stack_index) in matching_indices.into_iter().rev() {
+            let notification = notifications.remove(notification_index);
+            let rect = &mut self.stack[stack_index];
+            rect.update_data(notification);
+            rect.draw();
+        }
+    }
+
     fn remove_rects(&mut self, indices_to_remove: &[usize]) -> Vec<Notification> {
         let notifications = indices_to_remove
             .iter()
@@ -259,7 +288,7 @@ impl NotificationStack {
             stack.iter()
         }
         .rev()
-        .for_each(|rect| file.write_all(&rect.framebuffer).unwrap());
+        .for_each(|rect| rect.write_to_file(file));
     }
 
     fn full_commit(&mut self) {
@@ -428,7 +457,7 @@ impl NotificationRect {
         }
     }
 
-    fn draw(&mut self, tmp: &mut File) {
+    fn draw(&mut self) {
         let (width, height) = (
             CONFIG.general().width() as i32,
             CONFIG.general().height() as i32,
@@ -495,8 +524,10 @@ impl NotificationRect {
                 },
             );
         } else {
-            eprintln!("Image height exceeds the possible height!\n\
-                Please set a higher value of height or decrease the value of image_size in config.toml.");
+            eprintln!(
+                "Image height exceeds the possible height!\n\
+                Please set a higher value of height or decrease the value of image_size in config.toml."
+            );
             img_width = None;
         }
 
@@ -569,8 +600,15 @@ impl NotificationRect {
                 }
             },
         );
+    }
 
-        tmp.write_all(&self.framebuffer).unwrap();
+    fn update_data(&mut self, notification: Notification) {
+        self.data = notification;
+    }
+
+    #[inline]
+    pub(crate) fn write_to_file(&self, file: &mut File) {
+        file.write_all(&self.framebuffer).unwrap();
     }
 }
 

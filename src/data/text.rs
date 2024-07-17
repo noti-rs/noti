@@ -121,9 +121,9 @@ impl Parser {
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entity {
-    pub(crate)offset: usize,
-    pub(crate)length: usize,
-    pub(crate)kind: EntityKind,
+    pub(crate) offset: usize,
+    pub(crate) length: usize,
+    pub(crate) kind: EntityKind,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
