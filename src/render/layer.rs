@@ -86,18 +86,10 @@ impl NotificationStack {
         }
 
         self.stack.extend(rects.into_iter());
+        Self::sort(&mut self.stack, CONFIG.general().sort());
 
         let mut file = tempfile::tempfile().unwrap();
         let gap_buffer = Self::allocate_gap_buffer(window.width, gap);
-
-        let sort = CONFIG.general().sort();
-        match sort {
-            Sorting::ById => self.stack.sort_by(|a, b| a.data.id.cmp(&b.data.id)),
-            Sorting::ByUrgency => self
-                .stack
-                .sort_by(|a, b| a.data.hints.urgency.cmp(&b.data.hints.urgency)),
-            Sorting::NoSort => {}
-        };
 
         Self::write_stack_to_file(
             &self.stack,
@@ -110,6 +102,16 @@ impl NotificationStack {
         window.resize_layer_surface();
 
         self.full_commit();
+    }
+
+    fn sort(stack: &mut Vec<NotificationRect>, ordering: &Sorting) {
+        match ordering {
+            Sorting::ById => stack.sort_by(|a, b| a.data.id.cmp(&b.data.id)),
+            Sorting::ByUrgency => {
+                stack.sort_by(|a, b| a.data.hints.urgency.cmp(&b.data.hints.urgency))
+            }
+            Sorting::NoSort => {}
+        };
     }
 
     pub(crate) fn close_notifications(&mut self, indices: &[u32]) {
