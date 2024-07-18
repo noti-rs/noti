@@ -16,6 +16,7 @@ Install binary via `cargo install`:
 ```bash
 cargo install --git https://github.com/noti-rs/noti/
 ```
+
 ### Running Noti
 
 After installation, you can start Noti with:
