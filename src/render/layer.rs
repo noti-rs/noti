@@ -65,18 +65,19 @@ impl NotificationStack {
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
         let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
-        let mut rects: Vec<NotificationRect> = notifications
+        let rects: Vec<NotificationRect> = notifications
             .into_iter()
             .map(|notification| {
                 let mut notification_rect = NotificationRect::init(notification);
                 notification_rect.font_collection = Some(self.font_collection.clone());
+                notification_rect.draw();
                 notification_rect
             })
             .collect();
 
         let gap = CONFIG.general().gap();
-
         let height = CONFIG.general().height() as i32;
+
         if init {
             window.height = rects.len() as i32 * height as i32
                 + rects.len().saturating_sub(1) as i32 * gap as i32;
@@ -84,39 +85,22 @@ impl NotificationStack {
             window.height += rects.len() as i32 * (height as i32 + gap as i32);
         }
 
+        self.stack.extend(rects.into_iter());
+
         let mut file = tempfile::tempfile().unwrap();
-        let anchor = CONFIG.general().anchor();
+        let gap_buffer = Self::allocate_gap_buffer(window.width, gap);
 
-        let rowstride = CONFIG.general().width() as i32 * 4;
-        let gap = CONFIG.general().gap() as usize * rowstride as usize;
-        let gap_buffer = vec![0; gap as usize];
-
-        if anchor.is_top() {
-            rects.iter_mut().rev().for_each(|rect| {
-                rect.draw();
-                rect.write_to_file(&mut file);
-                file.write_all(&gap_buffer).unwrap();
-            });
-            Self::write_stack_to_file(&self.stack, anchor, &mut file, gap_buffer.as_slice());
-        } else {
-            Self::write_stack_to_file(&self.stack, anchor, &mut file, gap_buffer.as_slice());
-            let rects_len = rects.len();
-            rects.iter_mut().enumerate().for_each(|(i, rect)| {
-                rect.draw();
-                rect.write_to_file(&mut file);
-                if i < rects_len - 1 {
-                    file.write_all(&gap_buffer).unwrap();
-                }
-            });
-        }
+        Self::write_stack_to_file(
+            &self.stack,
+            CONFIG.general().anchor(),
+            &gap_buffer,
+            &mut file,
+        );
 
         window.create_buffer(file, qhandle);
-
         window.resize_layer_surface();
 
         self.full_commit();
-
-        self.stack.extend(rects.into_iter());
     }
 
     pub(crate) fn close_notifications(&mut self, indices: &[u32]) {
@@ -284,29 +268,19 @@ impl NotificationStack {
             return notifications;
         }
 
-        let mut file = tempfile::tempfile().unwrap();
-
-        let rowstride = CONFIG.general().width() as i32 * 4;
-        let gap = CONFIG.general().gap() as usize * rowstride as usize;
-        let gap_buffer = vec![0; gap as usize];
-
-        Self::write_stack_to_file(
-            &self.stack,
-            CONFIG.general().anchor(),
-            &mut file,
-            gap_buffer.as_slice(),
-        );
-
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
-        let gap = CONFIG.general().gap() as i32;
+        let gap = CONFIG.general().gap();
         window.height -=
             notifications.len() as i32 * (CONFIG.general().height() as i32 + gap as i32);
 
+        let mut file = tempfile::tempfile().unwrap();
+        let gap_buffer = Self::allocate_gap_buffer(window.width, gap);
+
         Self::write_stack_to_file(
             &self.stack,
             CONFIG.general().anchor(),
+            &gap_buffer,
             &mut file,
-            gap_buffer.as_slice(),
         );
 
         let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
@@ -321,22 +295,32 @@ impl NotificationStack {
     fn write_stack_to_file(
         stack: &[NotificationRect],
         anchor: &config::Anchor,
-        file: &mut File,
         gap_buffer: &[u8],
+        file: &mut File,
     ) {
         if anchor.is_top() {
             stack.iter().rev().enumerate().for_each(|(i, rect)| {
-                file.write_all(&rect.framebuffer).unwrap();
-                if i < stack.len() - 1 {
+                rect.write_to_file(file);
+
+                if i < stack.len().saturating_sub(1) {
                     file.write_all(gap_buffer).unwrap();
                 }
             })
         } else {
-            stack.iter().for_each(|rect| {
-                file.write_all(&rect.framebuffer).unwrap();
-                file.write_all(gap_buffer).unwrap();
+            stack.iter().enumerate().for_each(|(i, rect)| {
+                rect.write_to_file(file);
+
+                if i < stack.len().saturating_sub(1) {
+                    file.write_all(gap_buffer).unwrap();
+                }
             })
         }
+    }
+
+    fn allocate_gap_buffer(window_width: i32, gap: u8) -> Vec<u8> {
+        let rowstride = window_width as usize * 4;
+        let gap_size = gap as usize * rowstride;
+        vec![0; gap_size as usize]
     }
 
     fn full_commit(&mut self) {
