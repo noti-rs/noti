@@ -86,6 +86,9 @@ pub struct GeneralConfig {
 
     anchor: Anchor,
     offset: (u8, u8),
+
+    #[serde(default = "GeneralConfig::default_gap")]
+    gap: u8,
 }
 
 impl GeneralConfig {
@@ -109,12 +112,20 @@ impl GeneralConfig {
         self.offset
     }
 
+    pub fn gap(&self) -> u8 {
+        self.gap
+    }
+
     fn default_width() -> u16 {
         300
     }
 
     fn default_height() -> u16 {
         150
+    }
+
+    fn default_gap() -> u8 {
+        10
     }
 }
 
