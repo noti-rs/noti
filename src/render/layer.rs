@@ -180,18 +180,17 @@ impl NotificationStack {
                 window.pointer_state.lb_pressed = false;
 
                 let rect_height = CONFIG.general().height() as usize;
+                let gap = CONFIG.general().gap() as usize;
                 let count = window.height as usize / rect_height;
 
-                if let Some((i, _)) =
-                    (0..window.height as usize)
-                        .enumerate()
-                        .take(count)
-                        .find(|&(index, _)| {
-                            let gap = CONFIG.general().gap();
-                            let rect_top = index * (rect_height + gap as usize);
-                            let rect_bottom = rect_top + rect_height;
-                            (rect_top..rect_bottom).contains(&(window.pointer_state.y as usize))
-                        })
+                if let Some((i, _)) = (0..window.height as usize)
+                    .step_by(rect_height + gap)
+                    .enumerate()
+                    .take(count)
+                    .find(|&(_, rect_top)| {
+                        let rect_bottom = rect_top + rect_height;
+                        (rect_top..rect_bottom).contains(&(window.pointer_state.y as usize))
+                    })
                 {
                     let notifications = self.remove_rects(&[i]);
                     notifications.into_iter().for_each(|notification| {
