@@ -182,18 +182,23 @@ impl NotificationStack {
 
                 let rect_height = CONFIG.general().height() as usize;
                 let gap = CONFIG.general().gap() as usize;
-                let count = window.height as usize / rect_height;
                 let anchor = CONFIG.general().anchor();
 
                 if let Some(i) = (0..window.height as usize)
                     .step_by(rect_height + gap)
                     .enumerate()
-                    .take(count)
+                    .take(self.stack.len())
                     .find(|&(_, rect_top)| {
                         let rect_bottom = rect_top + rect_height;
                         (rect_top..rect_bottom).contains(&(window.pointer_state.y as usize))
                     })
-                    .map(|(i, _)| if anchor.is_top() { count - i - 1 } else { i })
+                    .map(|(i, _)| {
+                        if anchor.is_top() {
+                            self.stack.len() - i - 1
+                        } else {
+                            i
+                        }
+                    })
                 {
                     let notifications = self.remove_rects(&[i]);
                     notifications.into_iter().for_each(|notification| {
