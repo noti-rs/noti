@@ -86,9 +86,9 @@ pub struct GeneralConfig {
 
     anchor: Anchor,
     offset: (u8, u8),
-
     #[serde(default = "GeneralConfig::default_gap")]
     gap: u8,
+    sort: Sorting,
 }
 
 impl GeneralConfig {
@@ -114,6 +114,10 @@ impl GeneralConfig {
 
     pub fn gap(&self) -> u8 {
         self.gap
+    }
+
+    pub fn sort(&self) -> &Sorting {
+        &self.sort
     }
 
     fn default_width() -> u16 {
@@ -228,6 +232,25 @@ impl From<String> for Anchor {
                 - right\n\
                 Used: {other}"
             ),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(from = "String")]
+pub enum Sorting {
+    ById,
+    ByUrgency,
+    #[default]
+    NoSort,
+}
+
+impl From<String> for Sorting {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "id" => Self::ById,
+            "urgency" => Self::ByUrgency,
+            _ => Self::NoSort,
         }
     }
 }

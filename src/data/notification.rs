@@ -1,7 +1,7 @@
 use super::{image::ImageData, text::Text};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 use zbus::zvariant::Value;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -221,6 +221,17 @@ impl Urgency {
         u8::try_from(hint)
             .ok()
             .and_then(|val| Some(Self::from(val)))
+    }
+
+    pub fn cmp(&self, other: &Urgency) -> Ordering {
+        use Urgency::*;
+        match (self, other) {
+            (Critical, Critical) | (Normal, Normal) | (Low, Low) => Ordering::Equal,
+            (Critical, _) => Ordering::Greater,
+            (_, Critical) => Ordering::Less,
+            (Normal, _) => Ordering::Greater,
+            (_, Normal) => Ordering::Less,
+        }
     }
 }
 

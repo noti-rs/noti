@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
 
 use crate::{
-    config::{self, CONFIG},
+    config::{self, Sorting, CONFIG},
     data::{
         aliases::Result,
         internal_messages::RendererMessage,
@@ -89,6 +89,15 @@ impl NotificationStack {
 
         let mut file = tempfile::tempfile().unwrap();
         let gap_buffer = Self::allocate_gap_buffer(window.width, gap);
+
+        let sort = CONFIG.general().sort();
+        match sort {
+            Sorting::ById => self.stack.sort_by(|a, b| a.data.id.cmp(&b.data.id)),
+            Sorting::ByUrgency => self
+                .stack
+                .sort_by(|a, b| a.data.hints.urgency.cmp(&b.data.hints.urgency)),
+            Sorting::NoSort => {}
+        };
 
         Self::write_stack_to_file(
             &self.stack,
