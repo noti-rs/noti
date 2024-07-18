@@ -153,6 +153,7 @@ impl NotificationStack {
                     }
                 }
             })
+            .rev()
             .collect();
 
         if indices_to_remove.is_empty() {
