@@ -165,9 +165,6 @@ To the image applies `margin`, `size` and `alignment` properties.
 
 The text content containt the title and the body elements. As written above, to these elements can be applied `aligment`, `margin` properties.
 
-- [Title](#title)
-- [Body](#body)
-
 For text introduced the `justification` which means horizontal alignment for text. The difference between it and the alignment above is that text justification is separately applied to text.
 Let's imagine that here a remaining space in which text can be placed and here no margins. But the application can't be sure that text can fit the remaining space so it start compilation process for text after which can have some information about maximum width and height of compiled text.
 Usually given with and height is smaller than remaining space and for that smaller space used [alignment](#alignment). But in this smaller space need to justify text by horizontal - left, center or right.
@@ -177,7 +174,28 @@ Maybe hard to understand what means by text, so please the image a bit below
 ![Difference between alignment and justification](diff_between_alignment_and_justification.png)
 
 To all fragments applied the same alignment - center by horizontal and vertical space. However the text in all fragments are differents because of justification.
+Except the properties above, specifically for text elements introduced `line_spacing` that means the margin between wrapped text lines and `style` which means the font style like 'bold', 'italic', 'regular' and 'bold italic'.
+The other font styles are not applicable because of complexity to pick right font and memory expensivity.
+
+Let's go through all possible text elements.
+
+- [Title](#title)
+- [Body](#body)
 
 #### Title
 
 Usually it contains the notification summary. The property name 'title' was picked because it more general than summary and may contain the application name in particular cases.
+
+As mentioned above, the title compiles firstly then the body compiles. So the rectangle area of the title element may be bigger or smaller than body.
+
+#### Body
+
+Usually it contains the content of notification like received text message or important information. Also for body applies the `markup` property, because the body can contain the HTML-like tags:
+
+- \<b\> - bold style
+- \<i\> - italic style
+- \<u\> - underline style
+- \<a href="https://google.com/"\> - the link
+- \<img src="path/to/image" alt="image description"\> - the image inside text
+
+You can turn off the `markup` property by setting `false` value.
