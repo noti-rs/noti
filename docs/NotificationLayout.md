@@ -195,7 +195,7 @@ Usually it contains the content of notification like received text message or im
 - \<b\> - bold style
 - \<i\> - italic style
 - \<u\> - underline style
-- \<a href="https://google.com/"\> - the link
+- \<a href="https://google.com"\> - the link
 - \<img src="path/to/image" alt="image description"\> - the image inside text
 
 You can turn off the `markup` property by setting `false` value.
