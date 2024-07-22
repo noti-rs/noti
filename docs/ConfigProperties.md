@@ -131,11 +131,11 @@ This property mostly described in [banner layout](BannerLayout.md#border).
 
 The `Border` table:
 
-| Key    | Type    | Short description                                      |
-| :----- | :------ | :----------------------------------------------------- |
-| size   | `u8`    | The width of stroke which is outlines around the banne |
-| radius | `u8`    | the border radius for corner rounding                  |
-| color  | `Color` | The stroke color                                       |
+| Key    | Type    | Short description                                      | Default value |
+| :----- | :------ | :----------------------------------------------------- | :-----------: |
+| size   | `u8`    | The width of stroke which is outlines around the banne |       0       |
+| radius | `u8`    | the border radius for corner rounding                  |       0       |
+| color  | `Color` | The stroke color                                       |   "#000000"   |
 
 ### Colors
 
@@ -144,18 +144,18 @@ colors for all them separately.
 
 The `UrgencyColors` table:
 
-| Key      | Type     | Short description                        |
-| :------- | :------- | :--------------------------------------- |
-| low      | `Colors` | The colors for 'low' urgency banner      |
-| normal   | `Colors` | The colors for 'normal' urgency banner   |
-| critical | `Colors` | The colors for 'critical' urgency banner |
+| Key      | Type     | Short description                        |                   Default value                    |
+| :------- | :------- | :--------------------------------------- | :------------------------------------------------: |
+| low      | `Colors` | The colors for 'low' urgency banner      | { background = "#FFFFFF", foreground = "#000000" } |
+| normal   | `Colors` | The colors for 'normal' urgency banner   | { background = "#FFFFFF", foreground = "#000000" } |
+| critical | `Colors` | The colors for 'critical' urgency banner | { background = "#FFFFFF", foreground = "#FF0000" } |
 
 The `Colors` table:
 
-| Key        | Type    | Short description                        |
-| :--------- | :------ | :--------------------------------------- |
-| background | `Color` | The background color of banner           |
-| foreground | `Color` | The foreground color which used for text |
+| Key        | Type    | Short description                        | Default value |
+| :--------- | :------ | :--------------------------------------- | :-----------: |
+| background | `Color` | The background color of banner           |   "#FFFFFF"   |
+| foreground | `Color` | The foreground color which used for text |   "#000000"   |
 
 ### Text
 
@@ -164,11 +164,11 @@ into `Text` section.
 
 The `Text` table:
 
-| Key           | Type     | Short description                            |
-| :------------ | :------- | :------------------------------------------- |
-| margin        | `Offset` | The text offset from edges of remaining area |
-| justification | `String` | The text justification                       |
-| line_spacing  | `u8`     | The gap between wrapped text lines           |
+| Key           | Type     | Short description                            | Default value |
+| :------------ | :------- | :------------------------------------------- | :-----------: |
+| margin        | `Offset` | The text offset from edges of remaining area |       0       |
+| justification | `String` | The text justification                       |    "left"     |
+| line_spacing  | `u8`     | The gap between wrapped text lines           |       0       |
 
 Currently available text justification values:
 
