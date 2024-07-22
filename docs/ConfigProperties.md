@@ -26,18 +26,14 @@ In definitions we may put the link to other property or other definition when we
 
 The 'general' word means that it applies to application or all banners together. Here a table of possible general properties and below we'll go through all properties.
 
-<div align = "center">
-
-| Property name     | Type           | Default value   |
-| :---------------- | :------------- | --------------- |
+| Property name     | Type           |  Default value  |
+| :---------------- | :------------- | :-------------: |
 | [font](#font)     | `[String, u8]` | "Noto Sans", 12 |
-| [width](#width)   | `u16`          | 300             |
-| [height](#height) | `u16`          | 150             |
-| [anchor](#anchor) | `String`       | "top right"     |
-| [gap](#gap)       | `u8`           | 10              |
-| [offset](#offset) | `[u8, u8]`     | [0, 0]          |
-
-</div>
+| [width](#width)   | `u16`          |       300       |
+| [height](#height) | `u16`          |       150       |
+| [anchor](#anchor) | `String`       |   "top right"   |
+| [gap](#gap)       | `u8`           |       10        |
+| [offset](#offset) | `[u8, u8]`     |     [0, 0]      |
 
 ### Font
 
@@ -88,31 +84,27 @@ To change the visual styles of banners use `display` table. You cad define
 the values of `display` table for all the appications at the same time and
 use specific values per application by [app config](#apps).
 
-If you curious about banner layout, please visit [the other document](#NotificationLayout.md)
+If you curious about banner layout, please visit [the other document](#BannerLayout.md)
 which is maded specifically for it.
 
 The display properties affects only and only for a banner, not the window entire.
 The currently possible properties of `display` table:
 
-<div align="center">
-
 | Property name             | Type                                                                   | Default value |
-| :------------------------ | :--------------------------------------------------------------------- | ------------- |
-| [image_size](#image-size) | `u16`                                                                  | 64            |
-| [padding](#padding)       | `u8` or `[u8, u8]` or `[u8, u8, u8]` or `[u8, u8, u8, u8]` or `Offset` | 0             |
-| [border](#border)         | `Border`                                                               | -             |
-| [colors](#colors)         | `UrgencyColors`                                                        | -             |
-| [title](#text)            | `Text`                                                                 | -             |
-| [body](#text)             | `Text`                                                                 | -             |
-| [markup](#markup)         | `bool`                                                                 | true          |
-| [timeout](#timeout)       | `u16`                                                                  | 0             |
-
-</div>
+| :------------------------ | :--------------------------------------------------------------------- | :-----------: |
+| [image_size](#image-size) | `u16`                                                                  |      64       |
+| [padding](#padding)       | `u8` or `[u8, u8]` or `[u8, u8, u8]` or `[u8, u8, u8, u8]` or `Offset` |       0       |
+| [border](#border)         | `Border`                                                               |       -       |
+| [colors](#colors)         | `UrgencyColors`                                                        |       -       |
+| [title](#text)            | `Text`                                                                 |       -       |
+| [body](#text)             | `Text`                                                                 |       -       |
+| [markup](#markup)         | `bool`                                                                 |     true      |
+| [timeout](#timeout)       | `u16`                                                                  |       0       |
 
 The `Offset` table:
 
 | Key        | Type | Short description                                                          |
-| ---------- | ---- | -------------------------------------------------------------------------- |
+| :--------- | :--- | :------------------------------------------------------------------------- |
 | top        | `u8` | Offset from top                                                            |
 | right      | `u8` | Offset from right                                                          |
 | bottom     | `u8` | Offset from bottom                                                         |
@@ -123,24 +115,24 @@ The `Offset` table:
 ### Image size
 
 Usually the notification can contain the image or icon and it draws at the right of
-banner. More about it in [notification layout](NotificationLayout.md#image)
+banner. More about it in [banner layout](BannerLayout.md#image)
 
 The image size defines in `px` measurement.
 
 ### Padding
 
 The offset from outer edges of banner.
-This property mostly described in [notification layout](NotificationLayout.md#padding).
+This property mostly described in [banner layout](BannerLayout.md#padding).
 
 ### Border
 
 The notification banner's border.
-This property mostly described in [notification layout](NotificationLayout.md#border).
+This property mostly described in [banner layout](BannerLayout.md#border).
 
 The `Border` table:
 
 | Key    | Type    | Short description                                      |
-| ------ | ------- | ------------------------------------------------------ |
+| :----- | :------ | :----------------------------------------------------- |
 | size   | `u8`    | The width of stroke which is outlines around the banne |
 | radius | `u8`    | the border radius for corner rounding                  |
 | color  | `Color` | The stroke color                                       |
@@ -153,7 +145,7 @@ colors for all them separately.
 The `UrgencyColors` table:
 
 | Key      | Type     | Short description                        |
-| -------- | -------- | ---------------------------------------- |
+| :------- | :------- | :--------------------------------------- |
 | low      | `Colors` | The colors for 'low' urgency banner      |
 | normal   | `Colors` | The colors for 'normal' urgency banner   |
 | critical | `Colors` | The colors for 'critical' urgency banner |
@@ -161,7 +153,7 @@ The `UrgencyColors` table:
 The `Colors` table:
 
 | Key        | Type    | Short description                        |
-| ---------- | ------- | ---------------------------------------- |
+| :--------- | :------ | :--------------------------------------- |
 | background | `Color` | The background color of banner           |
 | foreground | `Color` | The foreground color which used for text |
 
@@ -173,7 +165,7 @@ into `Text` section.
 The `Text` table:
 
 | Key           | Type     | Short description                            |
-| ------------- | -------- | -------------------------------------------- |
+| :------------ | :------- | :------------------------------------------- |
 | margin        | `Offset` | The text offset from edges of remaining area |
 | justification | `String` | The text justification                       |
 | line_spacing  | `u8`     | The gap between wrapped text lines           |
@@ -185,13 +177,13 @@ Currently available text justification values:
 - `"right"`
 - `"space between"`
 
-For more explanation how the text draws, please visit [the other documentation about text](NotificationLayout.md#text).
+For more explanation how the text draws, please visit [the other documentation about text](BannerLayout.md#text).
 
 ### Markup
 
 Enables text styling using HTML tags.
 
-This property mostly described in [notification layout](NotificationLayout.md#body).
+This property mostly described in [banner layout](BannerLayout.md#body).
 
 ### Timeout
 
@@ -205,7 +197,7 @@ The value `0` means will never expired.
 This application have huge feature named "app-config" in which you can redefine `display`
 table specifically for particular application.
 
-Not nesseccary to redefine fully `display` table because it inerhits from general 
+Not nesseccary to redefine fully `display` table because it inerhits from general
 `display` table.
 
 The format of defining `display` config per application:

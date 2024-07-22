@@ -1,4 +1,4 @@
-# Notification layout
+# Banner layout
 
 - [The Layout](#the-layout)
 - [Rules](#rules)
@@ -14,9 +14,9 @@
 In general the notification is drawn by specific rules to get beautiful result. Firstly, please see the image below. It have some visual helpful information with which you will understand better about what describes.
 The most styles are similar to CSS styles, but they are not the same.
 
-For the strict information about all properties follow to the [list of config properties](./ConfigProperties.md).
+For the strict information about all properties follow to the [list of config properties](ConfigProperties.md).
 
-![Notification layout](layout.png)
+![Banner layout](layout.png)
 
 ## Rules
 
