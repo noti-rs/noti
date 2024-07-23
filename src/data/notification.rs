@@ -208,7 +208,7 @@ impl From<i32> for Timeout {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, Display)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, Display, PartialEq, Eq)]
 pub enum Urgency {
     Low,
     #[default]
@@ -221,17 +221,6 @@ impl Urgency {
         u8::try_from(hint)
             .ok()
             .and_then(|val| Some(Self::from(val)))
-    }
-
-    pub fn cmp(&self, other: &Urgency) -> Ordering {
-        use Urgency::*;
-        match (self, other) {
-            (Critical, Critical) | (Normal, Normal) | (Low, Low) => Ordering::Equal,
-            (Critical, _) => Ordering::Greater,
-            (_, Critical) => Ordering::Less,
-            (Normal, _) => Ordering::Greater,
-            (_, Normal) => Ordering::Less,
-        }
     }
 }
 
@@ -246,6 +235,16 @@ impl From<u8> for Urgency {
     }
 }
 
+impl From<&Urgency> for u8 {
+    fn from(value: &Urgency) -> Self {
+        match value {
+            Urgency::Low => 0,
+            Urgency::Normal => 1,
+            Urgency::Critical => 2,
+        }
+    }
+}
+
 impl From<&str> for Urgency {
     fn from(value: &str) -> Self {
         match value.to_lowercase().as_str() {
@@ -254,5 +253,17 @@ impl From<&str> for Urgency {
             "critical" => Self::Critical,
             _ => Self::default(),
         }
+    }
+}
+
+impl Ord for Urgency {
+    fn cmp(&self, other: &Self) -> Ordering {
+        Into::<u8>::into(self).cmp(&other.into())
+    }
+}
+
+impl PartialOrd for Urgency {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
