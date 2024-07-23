@@ -37,7 +37,7 @@ font = [ "JetBrainsMono Nerd Font", 16 ]
 anchor = "top-right"
 offset = [15, 15]
 gap = 10
-sort = "urgency"
+sorting = "urgency"
 
 width = 300
 height = 150
