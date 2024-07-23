@@ -47,6 +47,11 @@ impl Spacing {
     pub fn left(&self) -> u8 {
         self.left
     }
+
+    pub fn shrink(&self, width: &mut usize, height: &mut usize) {
+        *width -= self.left as usize + self.right as usize;
+        *height -= self.top as usize + self.bottom as usize;
+    }
 }
 
 impl From<i64> for Spacing {

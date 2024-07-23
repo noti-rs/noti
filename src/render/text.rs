@@ -2,7 +2,11 @@ use std::{collections::VecDeque, sync::Arc};
 
 use fontdue::Metrics;
 
-use crate::{config::TextAlignment, data::text::Text, render::font::FontStyle};
+use crate::{
+    config::{spacing::Spacing, TextAlignment},
+    data::text::Text,
+    render::font::FontStyle,
+};
 
 use super::{color::Bgra, font::FontCollection, image::Image};
 
@@ -10,7 +14,7 @@ use super::{color::Bgra, font::FontCollection, image::Image};
 pub(crate) struct TextRect {
     words: Vec<WordRect>,
     line_spacing: usize,
-    padding: usize,
+    margin: Spacing,
     fg_color: Bgra,
 }
 
@@ -127,8 +131,8 @@ impl TextRect {
         self.line_spacing = line_spacing;
     }
 
-    pub(crate) fn set_padding(&mut self, padding: usize) {
-        self.padding = padding;
+    pub(crate) fn set_margin(&mut self, margin: &Spacing) {
+        self.margin = margin.clone();
     }
 
     pub(crate) fn set_foreground(&mut self, color: Bgra) {
@@ -143,7 +147,7 @@ impl TextRect {
         mut callback: O,
     ) -> usize {
         const SPACEBAR_WIDTH: isize = 15;
-        let bottom = height - self.padding;
+        let bottom = height - self.margin.bottom() as usize;
 
         let (bottom_spacing, line_height) = self
             .words
@@ -154,14 +158,15 @@ impl TextRect {
 
         let total_height = bottom_spacing + line_height as usize;
 
-        let mut actual_height = self.padding;
+        let mut actual_height = self.margin.top() as usize;
         let mut word_index = 0;
 
-        for y in (self.padding as isize..bottom as isize)
+        for y in (self.margin.top() as isize..bottom as isize)
             .step_by(total_height + self.line_spacing)
             .take_while(|y| bottom - *y as usize > total_height)
         {
-            let mut remaining_width = (width - self.padding * 2) as isize;
+            let mut remaining_width =
+                (width - self.margin.left() as usize - self.margin.right() as usize) as isize;
             let mut words = vec![];
             while let Some(word) = self.words.get(word_index) {
                 let new_width =
@@ -194,7 +199,7 @@ impl TextRect {
                     },
                 ),
             };
-            x += self.padding as isize;
+            x += self.margin.left() as isize;
 
             for word in words {
                 word.glyphs.iter().for_each(|local_glyph| {
@@ -214,7 +219,7 @@ impl TextRect {
             actual_height += total_height + self.line_spacing;
         }
 
-        if actual_height > self.padding {
+        if actual_height > self.margin.top() as usize {
             actual_height -= self.line_spacing;
         }
 

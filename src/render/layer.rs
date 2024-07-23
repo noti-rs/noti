@@ -499,9 +499,9 @@ impl NotificationRect {
     }
 
     fn draw(&mut self) {
-        let (width, height) = (
-            CONFIG.general().width() as i32,
-            CONFIG.general().height() as i32,
+        let (mut width, mut height) = (
+            CONFIG.general().width() as usize,
+            CONFIG.general().height() as usize,
         );
 
         let display = CONFIG.display_by_app(&self.data.app_name);
@@ -538,7 +538,8 @@ impl NotificationRect {
                 .unwrap_unchecked() = bgra.to_slice()
         });
 
-        let padding = display.padding() as usize + border_cfg.size() as usize;
+        let padding = display.padding();
+        padding.shrink(&mut width, &mut height);
 
         let image =
             Image::from_image_data(self.data.hints.image_data.as_ref(), display.image_size())
@@ -554,8 +555,8 @@ impl NotificationRect {
             let y_offset = img_height.map(|img_height| height as usize / 2 - img_height / 2);
 
             image.draw(
-                padding,
-                y_offset.unwrap_or_default(),
+                padding.left() as usize,
+                padding.top() as usize + y_offset.unwrap_or_default(),
                 stride,
                 |position, bgra| unsafe {
                     *TryInto::<&mut [u8; 4]>::try_into(
@@ -581,21 +582,23 @@ impl NotificationRect {
         );
 
         let x_offset = img_width
-            .map(|width| (width + padding * 2) * 4)
+            .map(|width| (width + padding.left() as usize) * 4)
             .unwrap_or_default();
-        summary.set_padding(padding);
-        summary.set_line_spacing(display.title().line_spacing() as usize);
+
+        let title_cfg = display.title();
+
+        summary.set_margin(title_cfg.margin());
+        summary.set_line_spacing(title_cfg.line_spacing() as usize);
         summary.set_foreground(foreground.clone());
 
-        let y_offset = summary.draw(
-            width as usize
-                - img_width
-                    .map(|width| width + padding * 2)
-                    .unwrap_or_default(),
+        let summary_height = summary.draw(
+            width - img_width.unwrap_or_default(),
             height as usize,
             display.title().alignment(),
             |x, y, bgra| {
-                let position = (y * stride as isize + x_offset as isize + x * 4) as usize;
+                let position = ((y + padding.top() as isize) * stride as isize
+                    + x_offset as isize
+                    + x * 4) as usize;
                 unsafe {
                     *TryInto::<&mut [u8; 4]>::try_into(
                         &mut self.framebuffer[position..position + 4],
@@ -604,6 +607,7 @@ impl NotificationRect {
                 }
             },
         );
+        height -= summary_height;
 
         let mut text = if display.markup() {
             TextRect::from_text(
@@ -619,15 +623,17 @@ impl NotificationRect {
             )
         };
 
-        text.set_padding(padding);
-        text.set_line_spacing(display.body().line_spacing() as usize);
+        let body_cfg = display.body();
+
+        text.set_margin(body_cfg.margin());
+        text.set_line_spacing(body_cfg.line_spacing() as usize);
         text.set_foreground(foreground);
+
+        let y_offset = padding.top() as usize + summary_height;
+
         text.draw(
-            width as usize
-                - img_width
-                    .map(|width| width + padding * 2)
-                    .unwrap_or_default(),
-            height as usize - y_offset,
+            width - img_width.unwrap_or_default(),
+            height,
             display.body().alignment(),
             |x, y, bgra| {
                 let position = ((y + y_offset as isize) * stride as isize

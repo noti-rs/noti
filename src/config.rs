@@ -8,6 +8,7 @@ pub mod sorting;
 mod offset;
 use offset::Offset;
 mod spacing;
+pub mod spacing;
 use spacing::Spacing;
 
 pub static CONFIG: Lazy<Config> = Lazy::new(Config::init);
@@ -527,6 +528,10 @@ pub enum TextAlignment {
 }
 
 impl TextProperty {
+    pub fn margin(&self) -> &Spacing {
+        self.margin.as_ref().unwrap()
+    }
+
     pub fn alignment(&self) -> &TextAlignment {
         self.alignment.as_ref().unwrap()
     }
