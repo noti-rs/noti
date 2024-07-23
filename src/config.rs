@@ -2,6 +2,10 @@ use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::{collections::HashMap, fs, path::Path, str::Chars};
 
+use self::sorting::Sorting;
+
+pub mod sorting;
+
 pub static CONFIG: Lazy<Config> = Lazy::new(Config::init);
 
 #[derive(Debug)]
@@ -88,7 +92,8 @@ pub struct GeneralConfig {
     offset: (u8, u8),
     #[serde(default = "GeneralConfig::default_gap")]
     gap: u8,
-    sort: Sorting,
+
+    sorting: Sorting,
 }
 
 impl GeneralConfig {
@@ -116,8 +121,8 @@ impl GeneralConfig {
         self.gap
     }
 
-    pub fn sort(&self) -> &Sorting {
-        &self.sort
+    pub fn sorting(&self) -> &Sorting {
+        &self.sorting
     }
 
     fn default_width() -> u16 {
@@ -232,25 +237,6 @@ impl From<String> for Anchor {
                 - right\n\
                 Used: {other}"
             ),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Default, Clone)]
-#[serde(from = "String")]
-pub enum Sorting {
-    ById,
-    ByUrgency,
-    #[default]
-    NoSort,
-}
-
-impl From<String> for Sorting {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "id" => Self::ById,
-            "urgency" => Self::ByUrgency,
-            _ => Self::NoSort,
         }
     }
 }

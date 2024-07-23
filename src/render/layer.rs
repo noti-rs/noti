@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
 
 use crate::{
-    config::{self, Sorting, CONFIG},
+    config::{self, sorting::Sorting, CONFIG},
     data::{
         aliases::Result,
         internal_messages::RendererMessage,
@@ -86,7 +86,8 @@ impl NotificationStack {
         }
 
         self.stack.extend(rects.into_iter());
-        Self::sort(&mut self.stack, CONFIG.general().sort());
+        self.stack
+            .sort_by(CONFIG.general().sorting().get_cmp::<NotificationRect>());
 
         let mut file = tempfile::tempfile().unwrap();
         let gap_buffer = Self::allocate_gap_buffer(window.width, gap);
@@ -102,16 +103,6 @@ impl NotificationStack {
         window.resize_layer_surface();
 
         self.full_commit();
-    }
-
-    fn sort(stack: &mut Vec<NotificationRect>, ordering: &Sorting) {
-        match ordering {
-            Sorting::ById => stack.sort_by(|a, b| a.data.id.cmp(&b.data.id)),
-            Sorting::ByUrgency => {
-                stack.sort_by(|a, b| a.data.hints.urgency.cmp(&b.data.hints.urgency))
-            }
-            Sorting::NoSort => {}
-        };
     }
 
     pub(crate) fn close_notifications(&mut self, indices: &[u32]) {
@@ -659,6 +650,12 @@ impl NotificationRect {
     #[inline]
     pub(crate) fn write_to_file(&self, file: &mut File) {
         file.write_all(&self.framebuffer).unwrap();
+    }
+}
+
+impl<'a> From<&'a NotificationRect> for &'a Notification {
+    fn from(value: &'a NotificationRect) -> Self {
+        &value.data
     }
 }
 
