@@ -406,7 +406,7 @@ pub struct Color {
 }
 
 impl Color {
-    fn normalize(self) -> Self {
+    fn pre_mul_alpha(self) -> Self {
         if self.alpha == 255 {
             return self;
         }
@@ -423,10 +423,15 @@ impl Color {
 
 impl From<String> for Color {
     fn from(value: String) -> Self {
+        const BASE: u32 = 16;
+
         if value.len() == 4 {
             let mut chars = value.chars();
             chars.next(); // Skip the hashtag
-            let next_digit = |chars: &mut Chars| chars.next().unwrap().to_digit(16).unwrap() as u8;
+            let next_digit = |chars: &mut Chars| {
+                let digit = chars.next().unwrap().to_digit(BASE).unwrap() as u8;
+                digit * BASE as u8 + digit
+            };
 
             Color {
                 red: next_digit(&mut chars),
@@ -437,16 +442,16 @@ impl From<String> for Color {
         } else {
             let data = &value[1..];
             Color {
-                red: u8::from_str_radix(&data[0..2], 16).unwrap(),
-                green: u8::from_str_radix(&data[2..4], 16).unwrap(),
-                blue: u8::from_str_radix(&data[4..6], 16).unwrap(),
+                red: u8::from_str_radix(&data[0..2], BASE).unwrap(),
+                green: u8::from_str_radix(&data[2..4], BASE).unwrap(),
+                blue: u8::from_str_radix(&data[4..6], BASE).unwrap(),
                 alpha: if data.len() == 8 {
-                    u8::from_str_radix(&data[6..8], 16).unwrap()
+                    u8::from_str_radix(&data[6..8], BASE).unwrap()
                 } else {
                     255
                 },
             }
-            .normalize()
+            .pre_mul_alpha()
         }
     }
 }
