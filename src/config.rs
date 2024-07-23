@@ -7,6 +7,8 @@ use self::sorting::Sorting;
 pub mod sorting;
 mod offset;
 use offset::Offset;
+mod spacing;
+use spacing::Spacing;
 
 pub static CONFIG: Lazy<Config> = Lazy::new(Config::init);
 
@@ -252,7 +254,7 @@ impl From<String> for Anchor {
 pub struct DisplayConfig {
     image_size: Option<u16>,
 
-    padding: Option<Offset>,
+    padding: Option<Spacing>,
 
     border: Option<Border>,
 
@@ -269,7 +271,7 @@ impl DisplayConfig {
         self.image_size.unwrap()
     }
 
-    pub fn padding(&self) -> &Offset {
+    pub fn padding(&self) -> &Spacing {
         self.padding.as_ref().unwrap()
     }
 
@@ -509,7 +511,7 @@ impl Border {
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct TextProperty {
-    margin: Option<Offset>,
+    margin: Option<Spacing>,
     alignment: Option<TextAlignment>,
     line_spacing: Option<u8>,
 }

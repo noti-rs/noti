@@ -2,16 +2,18 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use serde::{de::Visitor, Deserialize};
 
-
 #[derive(Debug, Default, Clone)]
-pub struct Offset {
+pub struct Spacing {
     top: u8,
     right: u8,
     bottom: u8,
     left: u8,
 }
 
-impl Offset {
+impl Spacing {
+    const POSSIBLE_KEYS: [&'static str; 6] =
+        ["top", "right", "bottom", "left", "vertical", "horizontal"];
+
     fn all_directional(val: u8) -> Self {
         Self {
             top: val,
@@ -47,24 +49,24 @@ impl Offset {
     }
 }
 
-impl From<i64> for Offset {
+impl From<i64> for Spacing {
     fn from(value: i64) -> Self {
-        Offset::all_directional(value.clamp(0, u8::MAX as i64) as u8)
+        Spacing::all_directional(value.clamp(0, u8::MAX as i64) as u8)
     }
 }
 
-impl From<Vec<u8>> for Offset {
+impl From<Vec<u8>> for Spacing {
     fn from(value: Vec<u8>) -> Self {
         match value.len() {
-            1 => Offset::all_directional(value[0]),
-            2 => Offset::cross(value[0], value[1]),
-            3 => Offset {
+            1 => Spacing::all_directional(value[0]),
+            2 => Spacing::cross(value[0], value[1]),
+            3 => Spacing {
                 top: value[0],
                 right: value[1],
                 left: value[1],
                 bottom: value[2],
             },
-            4 => Offset {
+            4 => Spacing {
                 top: value[0],
                 right: value[1],
                 bottom: value[2],
@@ -75,7 +77,7 @@ impl From<Vec<u8>> for Offset {
     }
 }
 
-impl From<HashMap<String, u8>> for Offset {
+impl From<HashMap<String, u8>> for Spacing {
     fn from(map: HashMap<String, u8>) -> Self {
         let vertical = map.get("vertical");
         let horizontal = map.get("horizontal");
@@ -93,7 +95,7 @@ impl From<HashMap<String, u8>> for Offset {
     }
 }
 
-impl<'de> Deserialize<'de> for Offset {
+impl<'de> Deserialize<'de> for Spacing {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -113,7 +115,41 @@ where
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             formatter,
-            "Expected the padding value as table or CSS-like value - [top, right, left, bottom]"
+            r#"either u8, [u8, u8], [u8, u8, u8], [u8, u8, u8, u8] or Table.
+
+Example:
+
+# All-directional margin
+margin = 3
+
+# The application can also apply the CSS-like values:
+# Applies vertical and horizontal paddings respectively
+padding = [0, 5]
+
+# Applies top, horizontal and bottom paddings respectively
+margin = [3, 2, 5]
+
+# Applies top, right, bottom, left paddings respectively
+padding = [1, 2, 3, 4]
+
+# When you want to declare in explicit way:
+
+# Sets only top padding
+padding = {{ top = 3 }}
+
+# Sets only top and right padding
+padding = {{ top = 5, right = 6 }}
+
+# Insead of
+# padding = {{ top = 5, right = 6, bottom = 5 }}
+# Write
+padding = {{ vertical = 5, right = 6 }}
+
+# If gots collision of values the error will throws because of ambuguity
+# padding = {{ top = 5, vertical = 6 }}
+
+# You can apply the same way for margin
+margin = {{ top = 5, horizontal = 10 }}"#
         )
     }
 
@@ -143,12 +179,10 @@ where
     where
         A: serde::de::MapAccess<'de>,
     {
-        const POSSIBLE_KEYS: [&str; 6] =
-            ["top", "right", "bottom", "left", "horizontal", "vertical"];
         let mut custom_padding = HashMap::new();
 
         while let Some((key, value)) = map.next_entry::<String, u8>()? {
-            if !POSSIBLE_KEYS.contains(&key.as_str()) {
+            if !Spacing::POSSIBLE_KEYS.contains(&key.as_str()) {
                 return Err(serde::de::Error::invalid_value(
                     serde::de::Unexpected::Str(key.as_str()),
                     &self,
