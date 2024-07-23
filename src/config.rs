@@ -73,7 +73,12 @@ impl TomlConfig {
             .map(|config_path| format!("{config_path}/{pkg_name}/"))
             .map(|str| Path::new(&str).join("config.toml"))
             .map(|config_path| fs::read_to_string(&config_path).unwrap())
-            .map(|content| toml::from_str(&content).unwrap())
+            .map(|content| {
+                toml::from_str(&content).unwrap_or_else(|err| {
+                    eprintln!("{err}");
+                    std::process::exit(1);
+                })
+            })
             .unwrap_or(Default::default())
     }
 }
