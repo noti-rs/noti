@@ -591,24 +591,18 @@ impl NotificationRect {
         summary.set_margin(title_cfg.margin());
         summary.set_line_spacing(title_cfg.line_spacing() as usize);
         summary.set_foreground(foreground.clone());
+        summary.compile(width - img_width.unwrap_or_default(), height);
+        height -= summary.height();
 
-        let summary_height = summary.draw(
-            width - img_width.unwrap_or_default(),
-            height as usize,
-            display.title().alignment(),
-            |x, y, bgra| {
-                let position = ((y + padding.top() as isize) * stride as isize
-                    + x_offset as isize
-                    + x * 4) as usize;
-                unsafe {
-                    *TryInto::<&mut [u8; 4]>::try_into(
-                        &mut self.framebuffer[position..position + 4],
-                    )
+        summary.draw(display.title().alignment(), |x, y, bgra| {
+            let position = ((y + padding.top() as isize) * stride as isize
+                + x_offset as isize
+                + x * 4) as usize;
+            unsafe {
+                *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
                     .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
-                }
-            },
-        );
-        height -= summary_height;
+            }
+        });
 
         let mut text = if display.markup() {
             TextRect::from_text(
@@ -629,25 +623,18 @@ impl NotificationRect {
         text.set_margin(body_cfg.margin());
         text.set_line_spacing(body_cfg.line_spacing() as usize);
         text.set_foreground(foreground);
+        text.compile(width - img_width.unwrap_or_default(), height);
 
-        let y_offset = padding.top() as usize + summary_height;
+        let y_offset = padding.top() as usize + summary.height();
 
-        text.draw(
-            width - img_width.unwrap_or_default(),
-            height,
-            display.body().alignment(),
-            |x, y, bgra| {
-                let position = ((y + y_offset as isize) * stride as isize
-                    + x_offset as isize
-                    + x * 4) as usize;
-                unsafe {
-                    *TryInto::<&mut [u8; 4]>::try_into(
-                        &mut self.framebuffer[position..position + 4],
-                    )
+        text.draw(display.body().alignment(), |x, y, bgra| {
+            let position =
+                ((y + y_offset as isize) * stride as isize + x_offset as isize + x * 4) as usize;
+            unsafe {
+                *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
                     .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
-                }
-            },
-        );
+            }
+        });
     }
 
     fn update_data(&mut self, notification: Notification) {
