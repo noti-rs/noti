@@ -1,13 +1,12 @@
 use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
 
 use crate::{
-    config::{self, sorting::Sorting, CONFIG},
+    config::{self, CONFIG},
     data::{
         aliases::Result,
         internal_messages::RendererMessage,
         notification::{self, Notification},
     },
-    render::border::BorderBuilder,
 };
 use wayland_client::{
     delegate_noop,
@@ -23,7 +22,9 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use super::{color::Bgra, font::FontCollection, image::Image, text::TextRect};
+use super::{
+    border::BorderBuilder, color::Bgra, font::FontCollection, image::Image, text::TextRect,
+};
 
 pub(crate) struct NotificationStack {
     connection: Connection,

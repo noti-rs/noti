@@ -2,11 +2,14 @@ use std::thread;
 
 use tokio::sync::mpsc::unbounded_channel;
 
+mod render;
+
 use crate::{
     data::{aliases::Result, dbus::Action},
     dbus::server::Server,
-    render::Renderer,
 };
+
+use render::Renderer;
 
 pub async fn run() -> Result<()> {
     let (sender, mut receiver) = unbounded_channel();
