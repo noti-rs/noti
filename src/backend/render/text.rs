@@ -11,10 +11,20 @@ use super::{color::Bgra, font::FontCollection, font::FontStyle, image::Image};
 
 #[derive(Default)]
 pub(crate) struct TextRect {
-    words: Vec<WordRect>,
+    words: VecDeque<WordRect>,
+    lines: Vec<Line>,
+
+    width: usize,
+    height: usize,
+
+    spacebar_width: usize,
+    line_height: usize,
     line_spacing: usize,
-    margin: Spacing,
+    max_bearing_y: usize,
+
     fg_color: Bgra,
+
+    margin: Spacing,
 }
 
 impl TextRect {
@@ -31,7 +41,7 @@ impl TextRect {
         let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
-            fg_color: Bgra::new_black(),
+            spacebar_width: Self::get_spacebar_width(&font_collection, px_size),
             ..Default::default()
         }
     }
@@ -79,6 +89,7 @@ impl TextRect {
         let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
+            spacebar_width: Self::get_spacebar_width(&font_collection, px_size),
             ..Default::default()
         }
     }
@@ -105,13 +116,13 @@ impl TextRect {
         }
     }
 
-    fn convert_to_words(glyph_collection: Vec<LocalGlyph>) -> Vec<WordRect> {
-        let mut words = vec![];
+    fn convert_to_words(glyph_collection: Vec<LocalGlyph>) -> VecDeque<WordRect> {
+        let mut words = VecDeque::new();
         let mut word = vec![];
         for local_glyph in glyph_collection {
             if local_glyph.is_empty() {
                 if !word.is_empty() {
-                    words.push(WordRect::from_local_glyphs(word));
+                    words.push_back(WordRect::from_local_glyphs(word));
                 }
                 word = vec![];
             } else {
@@ -120,10 +131,19 @@ impl TextRect {
         }
 
         if !word.is_empty() {
-            words.push(WordRect::from_local_glyphs(word));
+            words.push_back(WordRect::from_local_glyphs(word));
         }
 
         words
+    }
+
+    fn get_spacebar_width(font_collection: &Arc<FontCollection>, px_size: f32) -> usize {
+        font_collection
+            .font_by_style(&FontStyle::Regular)
+            .font_arc()
+            .metrics(' ', px_size)
+            .advance_width
+            .round() as usize
     }
 
     pub(crate) fn set_line_spacing(&mut self, line_spacing: usize) {
@@ -138,15 +158,9 @@ impl TextRect {
         self.fg_color = color;
     }
 
-    pub(crate) fn draw<O: FnMut(isize, isize, Bgra)>(
-        &self,
-        width: usize,
-        height: usize,
-        text_alignment: &TextAlignment,
-        mut callback: O,
-    ) -> usize {
-        const SPACEBAR_WIDTH: isize = 15;
-        let bottom = height - self.margin.bottom() as usize;
+    pub(crate) fn compile(&mut self, mut width: usize, mut height: usize) {
+        self.margin.shrink(&mut width, &mut height);
+        self.width = width;
 
         let (bottom_spacing, line_height) = self
             .words
@@ -155,57 +169,90 @@ impl TextRect {
             .reduce(|lhs, rhs| (std::cmp::max(lhs.0, rhs.0), std::cmp::max(lhs.1, rhs.1)))
             .unwrap_or_default();
 
-        let total_height = bottom_spacing + line_height as usize;
+        self.max_bearing_y = line_height;
+        self.line_height = bottom_spacing + line_height;
 
-        let mut actual_height = self.margin.top() as usize;
-        let mut word_index = 0;
+        let mut lines = vec![];
 
-        for y in (self.margin.top() as isize..bottom as isize)
-            .step_by(total_height + self.line_spacing)
-            .take_while(|y| bottom - *y as usize > total_height)
+        for y in (0..height as isize)
+            .step_by(self.line_height + self.line_spacing)
+            .take_while(|y| height - *y as usize > self.line_height)
         {
-            let mut remaining_width =
-                (width - self.margin.left() as usize - self.margin.right() as usize) as isize;
+            let mut remaining_width = width;
             let mut words = vec![];
-            while let Some(word) = self.words.get(word_index) {
-                let new_width =
-                    word.advance_width as isize + if words.len() > 1 { SPACEBAR_WIDTH } else { 0 };
-                if remaining_width < 0 || new_width > remaining_width {
+            while let Some(word) = self.words.pop_front() {
+                let inserting_width = word.advance_width
+                    + if words.len() > 1 {
+                        self.spacebar_width
+                    } else {
+                        0
+                    };
+                if inserting_width > remaining_width {
                     break;
                 }
 
                 words.push(word);
-                word_index += 1;
-                remaining_width -=
-                    word.advance_width as isize + if words.len() > 1 { SPACEBAR_WIDTH } else { 0 };
+                remaining_width -= inserting_width;
             }
 
             if words.len() == 0 {
                 break;
             }
 
+            lines.push(Line::new(
+                y as usize,
+                remaining_width as usize + self.spacebar_width * words.len().saturating_sub(1),
+                words,
+            ))
+        }
+
+        let total_lines = lines.len();
+        self.height =
+            total_lines * self.line_height + total_lines.saturating_sub(1) * self.line_spacing;
+
+        //TODO: add ellipsis to last line of word if needed
+
+        self.lines = lines;
+    }
+
+    pub(crate) fn width(&self) -> usize {
+        self.width
+    }
+
+    pub(crate) fn height(&self) -> usize {
+        self.height
+    }
+
+    pub(crate) fn draw<O: FnMut(isize, isize, Bgra)>(
+        &self,
+        text_alignment: &TextAlignment,
+        mut callback: O,
+    ) {
+        let mut y_offset = self.margin.top() as isize;
+
+        for line in &self.lines {
+            let remaining_width = line.compute_unfilled_space(self.spacebar_width) as isize;
             let (mut x, x_incrementor) = match text_alignment {
-                TextAlignment::Center => (remaining_width / 2, SPACEBAR_WIDTH),
-                TextAlignment::Left => (0, SPACEBAR_WIDTH),
-                TextAlignment::Right => (remaining_width, SPACEBAR_WIDTH),
+                TextAlignment::Center => (remaining_width / 2, self.spacebar_width as isize),
+                TextAlignment::Left => (0, self.spacebar_width as isize),
+                TextAlignment::Right => (remaining_width, self.spacebar_width as isize),
                 TextAlignment::SpaceBetween => (
                     0,
-                    if words.len() == 1 {
+                    if line.words.len() == 1 {
                         0
                     } else {
-                        let count = words.len() as isize - 1;
-                        (remaining_width + SPACEBAR_WIDTH * count) / count
+                        line.available_space as isize / line.words.len().saturating_sub(1) as isize
                     },
                 ),
             };
             x += self.margin.left() as isize;
 
-            for word in words {
+            for word in &line.words {
                 word.glyphs.iter().for_each(|local_glyph| {
                     let (x_shift, _y_shift) = local_glyph.draw(
                         x,
-                        y as isize,
-                        line_height as isize,
+                        y_offset,
+                        self.max_bearing_y as isize,
                         &self.fg_color,
                         &mut callback,
                     );
@@ -215,14 +262,30 @@ impl TextRect {
                 x += x_incrementor;
             }
 
-            actual_height += total_height + self.line_spacing;
+            y_offset += self.line_height as isize + self.line_spacing as isize;
         }
+    }
+}
 
-        if actual_height > self.margin.top() as usize {
-            actual_height -= self.line_spacing;
+struct Line {
+    y_offset: usize,
+    available_space: usize,
+
+    words: Vec<WordRect>,
+}
+
+impl Line {
+    fn new(y_offset: usize, available_space: usize, words: Vec<WordRect>) -> Self {
+        Self {
+            y_offset,
+            available_space,
+            words,
         }
+    }
 
-        actual_height
+    #[inline(always = true)]
+    fn compute_unfilled_space(&self, spacebar_width: usize) -> usize {
+        self.available_space - self.words.len().saturating_sub(1) * spacebar_width
     }
 }
 
