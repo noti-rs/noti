@@ -29,6 +29,7 @@ impl Bgra {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn new_white() -> Self {
         Self {
             blue: 1.0,
@@ -153,6 +154,7 @@ impl Rgba {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn new_white() -> Self {
         Self {
             red: 1.0,
@@ -262,6 +264,17 @@ impl MulAssign<f32> for Rgba {
 macro_rules! overlay_on {
     ($($type:path),+) => {
         $(impl $type {
+            #[allow(unused)]
+            pub(crate) fn linearly_interpolate(&self, dst: &Bgra, alpha: f32) -> Bgra {
+                Bgra {
+                    blue: self.blue * alpha + dst.blue * (1.0 - alpha),
+                    green: self.green * alpha + dst.green * (1.0 - alpha),
+                    red: self.red * alpha + dst.red * (1.0 - alpha),
+                    alpha: self.alpha * alpha + dst.alpha * (1.0 - alpha),
+                }
+            }
+
+            #[allow(unused)]
             pub(crate) fn overlay_on(self, background: &Self) -> Self {
                 let mut new_color = Self::new();
                 new_color.alpha = 1.0 - (1.0 - self.alpha) * (1.0 - background.alpha);
