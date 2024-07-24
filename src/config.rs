@@ -2,9 +2,11 @@ use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::{collections::HashMap, fs, path::Path, str::Chars};
 
-use self::sorting::Sorting;
-
 pub mod sorting;
+pub mod spacing;
+
+use sorting::Sorting;
+use spacing::Spacing;
 
 pub static CONFIG: Lazy<Config> = Lazy::new(Config::init);
 
@@ -250,7 +252,7 @@ impl From<String> for Anchor {
 pub struct DisplayConfig {
     image_size: Option<u16>,
 
-    padding: Option<u8>,
+    padding: Option<Spacing>,
 
     border: Option<Border>,
 
@@ -267,8 +269,8 @@ impl DisplayConfig {
         self.image_size.unwrap()
     }
 
-    pub fn padding(&self) -> u8 {
-        self.padding.unwrap()
+    pub fn padding(&self) -> &Spacing {
+        self.padding.as_ref().unwrap()
     }
 
     pub fn border(&self) -> &Border {
@@ -301,7 +303,7 @@ impl DisplayConfig {
         }
 
         if self.padding.is_none() {
-            self.padding = Some(0);
+            self.padding = Some(Default::default());
         }
 
         if self.border.is_none() {
@@ -507,6 +509,7 @@ impl Border {
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct TextProperty {
+    margin: Option<Spacing>,
     alignment: Option<TextAlignment>,
     line_spacing: Option<u8>,
 }
@@ -522,6 +525,10 @@ pub enum TextAlignment {
 }
 
 impl TextProperty {
+    pub fn margin(&self) -> &Spacing {
+        self.margin.as_ref().unwrap()
+    }
+
     pub fn alignment(&self) -> &TextAlignment {
         self.alignment.as_ref().unwrap()
     }
@@ -531,6 +538,10 @@ impl TextProperty {
     }
 
     pub fn fill_empty_by_default(&mut self, entity: &str) {
+        if self.margin.is_none() {
+            self.margin = Some(Default::default());
+        }
+
         if self.alignment.is_none() {
             if entity == "title" {
                 self.alignment = Some(TextAlignment::Center);
@@ -575,7 +586,7 @@ impl AppConfig {
         if let Some(display) = self.display.as_mut() {
             display.image_size = display.image_size.or(other.image_size);
 
-            display.padding = display.padding.or(other.padding);
+            display.padding = display.padding.clone().or(other.padding.clone());
 
             if let Some(border) = display.border.as_mut() {
                 let other_border = other.border(); // The other type shall have border
@@ -600,6 +611,7 @@ impl AppConfig {
             if let Some(title) = display.title.as_mut() {
                 let other_title = other.title();
 
+                title.margin = title.margin.clone().or(other_title.margin.clone());
                 title.alignment = title.alignment.clone().or(other_title.alignment.clone());
                 title.line_spacing = title.line_spacing.or(other_title.line_spacing);
             } else {
@@ -609,6 +621,7 @@ impl AppConfig {
             if let Some(body) = display.body.as_mut() {
                 let other_body = other.body();
 
+                body.margin = body.margin.clone().or(other_body.margin.clone());
                 body.alignment = body.alignment.clone().or(other_body.alignment.clone());
                 body.line_spacing = body.line_spacing.or(other_body.line_spacing);
             } else {

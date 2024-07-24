@@ -61,6 +61,12 @@ size = 4
 radius = 10
 color = "#000"
 
+[display.title]
+margin = { top = 5, left = 25 }
+
+[display.body]
+margin = { top = 12, left = 25 }
+
 [[app]]
 name = "Telegram Desktop"
 [app.display]
