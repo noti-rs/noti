@@ -2,13 +2,10 @@ use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::{collections::HashMap, fs, path::Path, str::Chars};
 
-use self::sorting::Sorting;
-
 pub mod sorting;
-mod offset;
-use offset::Offset;
-mod spacing;
 pub mod spacing;
+
+use sorting::Sorting;
 use spacing::Spacing;
 
 pub static CONFIG: Lazy<Config> = Lazy::new(Config::init);
