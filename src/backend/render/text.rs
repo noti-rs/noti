@@ -5,10 +5,9 @@ use fontdue::Metrics;
 use crate::{
     config::{spacing::Spacing, TextAlignment},
     data::text::Text,
-    render::font::FontStyle,
 };
 
-use super::{color::Bgra, font::FontCollection, image::Image};
+use super::{color::Bgra, font::FontCollection, font::FontStyle, image::Image};
 
 #[derive(Default)]
 pub(crate) struct TextRect {
