@@ -22,7 +22,7 @@ cargo install --git https://github.com/noti-rs/noti/
 After installation, you can start Noti with:
 
 ```bash
-noti
+noti run
 ```
 
 To enable Noti to start automatically with your Wayland session, add it to your session startup script.
