@@ -2,6 +2,10 @@ use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::{collections::HashMap, fs, path::Path, str::Chars};
 
+use self::sorting::Sorting;
+
+pub mod sorting;
+
 pub static CONFIG: Lazy<Config> = Lazy::new(Config::init);
 
 #[derive(Debug)]
@@ -69,7 +73,12 @@ impl TomlConfig {
             .map(|config_path| format!("{config_path}/{pkg_name}/"))
             .map(|str| Path::new(&str).join("config.toml"))
             .map(|config_path| fs::read_to_string(&config_path).unwrap())
-            .map(|content| toml::from_str(&content).unwrap())
+            .map(|content| {
+                toml::from_str(&content).unwrap_or_else(|err| {
+                    eprintln!("{err}");
+                    std::process::exit(1);
+                })
+            })
             .unwrap_or(Default::default())
     }
 }
@@ -86,9 +95,10 @@ pub struct GeneralConfig {
 
     anchor: Anchor,
     offset: (u8, u8),
-
     #[serde(default = "GeneralConfig::default_gap")]
     gap: u8,
+
+    sorting: Sorting,
 }
 
 impl GeneralConfig {
@@ -114,6 +124,10 @@ impl GeneralConfig {
 
     pub fn gap(&self) -> u8 {
         self.gap
+    }
+
+    pub fn sorting(&self) -> &Sorting {
+        &self.sorting
     }
 
     fn default_width() -> u16 {

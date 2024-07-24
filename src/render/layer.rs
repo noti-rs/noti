@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
 
 use crate::{
-    config::{self, CONFIG},
+    config::{self, sorting::Sorting, CONFIG},
     data::{
         aliases::Result,
         internal_messages::RendererMessage,
@@ -86,6 +86,8 @@ impl NotificationStack {
         }
 
         self.stack.extend(rects.into_iter());
+        self.stack
+            .sort_by(CONFIG.general().sorting().get_cmp::<NotificationRect>());
 
         let mut file = tempfile::tempfile().unwrap();
         let gap_buffer = Self::allocate_gap_buffer(window.width, gap);
@@ -648,6 +650,12 @@ impl NotificationRect {
     #[inline]
     pub(crate) fn write_to_file(&self, file: &mut File) {
         file.write_all(&self.framebuffer).unwrap();
+    }
+}
+
+impl<'a> From<&'a NotificationRect> for &'a Notification {
+    fn from(value: &'a NotificationRect) -> Self {
+        &value.data
     }
 }
 
