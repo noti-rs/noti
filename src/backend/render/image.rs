@@ -4,6 +4,7 @@ use crate::data::image::ImageData;
 
 use super::color::{Bgra, Rgba};
 
+#[derive(Clone)]
 pub(crate) enum Image {
     Exists(ImageData),
     Unknown,

@@ -591,6 +591,7 @@ impl NotificationRect {
         summary.set_margin(title_cfg.margin());
         summary.set_line_spacing(title_cfg.line_spacing() as usize);
         summary.set_foreground(foreground.clone());
+        summary.set_ellipsize_at(display.ellipsize());
         summary.compile(width - img_width.unwrap_or_default(), height);
         height -= summary.height();
 
@@ -623,6 +624,7 @@ impl NotificationRect {
         text.set_margin(body_cfg.margin());
         text.set_line_spacing(body_cfg.line_spacing() as usize);
         text.set_foreground(foreground);
+        text.set_ellipsize_at(display.ellipsize());
         text.compile(width - img_width.unwrap_or_default(), height);
 
         let y_offset = padding.top() as usize + summary.height();

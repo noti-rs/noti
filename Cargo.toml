@@ -23,3 +23,4 @@ wayland-protocols = { version = "0.32.1", features = ["client", "wayland-client"
 wayland-protocols-wlr = { version = "0.3.1", features = ["client", "wayland-client"] }
 toml = "0.8.14"
 zbus = "4.3.0"
+itertools = "0.13.0"
