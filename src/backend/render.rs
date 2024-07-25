@@ -7,17 +7,18 @@ use crate::data::{
     },
 };
 
-use self::layer::NotificationStack;
+use self::window::WindowManager;
 
+mod banner;
 mod border;
 mod color;
 mod font;
 mod image;
-mod layer;
 mod text;
+mod window;
 
 pub(crate) struct Renderer {
-    notification_stack: NotificationStack,
+    window_manager: WindowManager,
     channel: RendererInternalChannel,
 }
 
@@ -27,7 +28,7 @@ impl Renderer {
         Ok((
             server_internal_channel,
             Self {
-                notification_stack: NotificationStack::init()?,
+                window_manager: WindowManager::init()?,
                 channel: renderer_internal_channel,
             },
         ))
@@ -51,24 +52,24 @@ impl Renderer {
             }
 
             if !notifications_to_create.is_empty() {
-                self.notification_stack
+                self.window_manager
                     .create_notifications(notifications_to_create);
                 notifications_to_create = vec![];
             }
 
             if !notifications_to_close.is_empty() {
-                self.notification_stack
+                self.window_manager
                     .close_notifications(&notifications_to_close);
                 notifications_to_close.clear();
             }
-            self.notification_stack.remove_expired();
+            self.window_manager.remove_expired();
 
-            while let Some(message) = self.notification_stack.pop_event() {
+            while let Some(message) = self.window_manager.pop_event() {
                 self.channel.send_to_server(message).unwrap();
             }
 
-            self.notification_stack.handle_actions();
-            self.notification_stack.dispatch();
+            self.window_manager.handle_actions();
+            self.window_manager.dispatch();
 
             std::thread::sleep(Duration::from_millis(50));
             std::hint::spin_loop();
