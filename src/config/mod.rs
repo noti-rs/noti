@@ -253,12 +253,13 @@ pub struct DisplayConfig {
     image_size: Option<u16>,
 
     padding: Option<Spacing>,
-
     border: Option<Border>,
 
     colors: Option<UrgencyColors>,
+
     title: Option<TextProperty>,
     body: Option<TextProperty>,
+    ellipsize_at: Option<EllipsizeAt>,
     markup: Option<bool>,
 
     timeout: Option<u16>,
@@ -287,6 +288,10 @@ impl DisplayConfig {
 
     pub fn body(&self) -> &TextProperty {
         self.body.as_ref().unwrap()
+    }
+
+    pub fn ellipsize(&self) -> &EllipsizeAt {
+        self.ellipsize_at.as_ref().unwrap()
     }
 
     pub fn markup(&self) -> bool {
@@ -325,6 +330,10 @@ impl DisplayConfig {
             self.body = Some(Default::default());
         }
         self.body.as_mut().unwrap().fill_empty_by_default("body");
+
+        if self.ellipsize_at.is_none() {
+            self.ellipsize_at = Some(Default::default());
+        }
 
         if self.markup.is_none() {
             self.markup = Some(true);
@@ -575,6 +584,15 @@ impl From<String> for TextAlignment {
     }
 }
 
+#[derive(Debug, Deserialize, Default, Clone)]
+pub enum EllipsizeAt {
+    #[serde(rename = "middle")]
+    Middle,
+    #[default]
+    #[serde(rename = "end")]
+    End,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct AppConfig {
     pub name: String,
@@ -628,6 +646,7 @@ impl AppConfig {
                 display.body = other.body.clone();
             }
 
+            display.ellipsize_at = display.ellipsize_at.clone().or(other.ellipsize_at.clone());
             display.markup = display.markup.or(other.markup);
             display.timeout = display.timeout.or(other.timeout);
         } else {

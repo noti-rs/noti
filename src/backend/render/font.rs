@@ -1,5 +1,5 @@
 use derive_more::Display;
-use fontdue::FontSettings;
+use fontdue::{FontSettings, Metrics};
 use owned_ttf_parser::{AsFaceRef, OwnedFace};
 use rayon::prelude::*;
 use std::{
@@ -19,6 +19,8 @@ pub(crate) struct FontCollection {
 }
 
 impl FontCollection {
+    const ELLIPSIS: char = '…';
+
     pub(crate) fn load_by_font_name(font_name: &str) -> Result<Self> {
         let process_result = Command::new("fc-list")
             .args([font_name, "--format", "%{file}:%{style}\n"])
@@ -77,6 +79,11 @@ impl FontCollection {
         let face = self.emoji.as_ref()?.as_face_ref();
         let glyph_id = face.glyph_index(ch)?;
         Image::from_raster_glyph_image(face.glyph_raster_image(glyph_id, size)?, size as u32)
+    }
+
+    pub(crate) fn get_ellipsis(&self, px_size: f32) -> (Metrics, Vec<u8>) {
+        let font = self.font_by_style(&FontStyle::Regular).font_arc();
+        font.rasterize(Self::ELLIPSIS, px_size)
     }
 }
 
