@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc, time};
+use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc};
 
 use crate::{
     config::{self, CONFIG},
@@ -22,11 +22,9 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use super::{
-    border::BorderBuilder, color::Bgra, font::FontCollection, image::Image, text::TextRect,
-};
+use super::{banner::BannerRect, font::FontCollection};
 
-pub(crate) struct NotificationStack {
+pub(crate) struct WindowManager {
     connection: Connection,
     event_queue: Option<EventQueue<Window>>,
     qhandle: Option<QueueHandle<Window>>,
@@ -34,11 +32,11 @@ pub(crate) struct NotificationStack {
 
     font_collection: Arc<FontCollection>,
 
-    stack: Vec<NotificationRect>,
+    banner_stack: Vec<BannerRect>,
     events: Vec<RendererMessage>,
 }
 
-impl NotificationStack {
+impl WindowManager {
     pub(crate) fn init() -> Result<Self> {
         let connection = Connection::connect_to_env()?;
         let font_collection = Arc::new(FontCollection::load_by_font_name(
@@ -53,7 +51,7 @@ impl NotificationStack {
 
             font_collection,
 
-            stack: vec![],
+            banner_stack: vec![],
             events: vec![],
         })
     }
@@ -66,13 +64,13 @@ impl NotificationStack {
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
         let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
-        let rects: Vec<NotificationRect> = notifications
+        let rects: Vec<BannerRect> = notifications
             .into_iter()
             .map(|notification| {
-                let mut notification_rect = NotificationRect::init(notification);
-                notification_rect.font_collection = Some(self.font_collection.clone());
-                notification_rect.draw();
-                notification_rect
+                let mut banner_rect = BannerRect::init(notification);
+                banner_rect.set_font_collection(self.font_collection.clone());
+                banner_rect.draw();
+                banner_rect
             })
             .collect();
 
@@ -86,15 +84,15 @@ impl NotificationStack {
             window.height += rects.len() as i32 * (height as i32 + gap as i32);
         }
 
-        self.stack.extend(rects.into_iter());
-        self.stack
-            .sort_by(CONFIG.general().sorting().get_cmp::<NotificationRect>());
+        self.banner_stack.extend(rects.into_iter());
+        self.banner_stack
+            .sort_by(CONFIG.general().sorting().get_cmp::<BannerRect>());
 
         let mut file = tempfile::tempfile().unwrap();
         let gap_buffer = Self::allocate_gap_buffer(window.width, gap);
 
         Self::write_stack_to_file(
-            &self.stack,
+            &self.banner_stack,
             CONFIG.general().anchor(),
             &gap_buffer,
             &mut file,
@@ -108,10 +106,10 @@ impl NotificationStack {
 
     pub(crate) fn close_notifications(&mut self, indices: &[u32]) {
         let indices_to_remove: Vec<usize> = self
-            .stack
+            .banner_stack
             .iter()
             .enumerate()
-            .filter(|(_, notification_rect)| indices.contains(&notification_rect.data.id))
+            .filter(|(_, banner_rect)| indices.contains(&banner_rect.notification().id))
             .map(|(i, _)| i)
             .rev()
             .collect();
@@ -130,17 +128,17 @@ impl NotificationStack {
     }
 
     pub(crate) fn remove_expired(&mut self) {
-        if self.stack.is_empty() {
+        if self.banner_stack.is_empty() {
             return;
         }
 
         let indices_to_remove: Vec<usize> = self
-            .stack
+            .banner_stack
             .iter()
             .enumerate()
-            .filter_map(|(i, rect)| match &rect.data.expire_timeout {
+            .filter_map(|(i, rect)| match &rect.notification().expire_timeout {
                 notification::Timeout::Millis(millis) => {
-                    if rect.created_at.elapsed().as_millis() > *millis as u128 {
+                    if rect.created_at().elapsed().as_millis() > *millis as u128 {
                         Some(i)
                     } else {
                         None
@@ -148,8 +146,10 @@ impl NotificationStack {
                 }
                 notification::Timeout::Never => None,
                 notification::Timeout::Configurable => {
-                    let timeout = CONFIG.display_by_app(&rect.data.app_name).timeout();
-                    if timeout != 0 && rect.created_at.elapsed().as_millis() > timeout as u128 {
+                    let timeout = CONFIG
+                        .display_by_app(&rect.notification().app_name)
+                        .timeout();
+                    if timeout != 0 && rect.created_at().elapsed().as_millis() > timeout as u128 {
                         Some(i)
                     } else {
                         None
@@ -190,14 +190,14 @@ impl NotificationStack {
                 if let Some(i) = (0..window.height as usize)
                     .step_by(rect_height + gap)
                     .enumerate()
-                    .take(self.stack.len())
+                    .take(self.banner_stack.len())
                     .find(|&(_, rect_top)| {
                         let rect_bottom = rect_top + rect_height;
                         (rect_top..rect_bottom).contains(&(window.pointer_state.y as usize))
                     })
                     .map(|(i, _)| {
                         if anchor.is_top() {
-                            self.stack.len() - i - 1
+                            self.banner_stack.len() - i - 1
                         } else {
                             i
                         }
@@ -252,16 +252,16 @@ impl NotificationStack {
             .iter()
             .enumerate()
             .filter_map(|(i, notification)| {
-                self.stack
+                self.banner_stack
                     .iter()
-                    .position(|rect| rect.data.id == notification.id)
+                    .position(|rect| rect.notification().id == notification.id)
                     .map(|stack_index| (i, stack_index))
             })
             .collect();
 
         for (notification_index, stack_index) in matching_indices.into_iter().rev() {
             let notification = notifications.remove(notification_index);
-            let rect = &mut self.stack[stack_index];
+            let rect = &mut self.banner_stack[stack_index];
             rect.update_data(notification);
             rect.draw();
         }
@@ -270,10 +270,10 @@ impl NotificationStack {
     fn remove_rects(&mut self, indices_to_remove: &[usize]) -> Vec<Notification> {
         let notifications = indices_to_remove
             .iter()
-            .map(|id| self.stack.remove(*id).data)
+            .map(|id| self.banner_stack.remove(*id).destroy_and_get_notification())
             .collect();
 
-        if self.stack.len() == 0 {
+        if self.banner_stack.len() == 0 {
             self.deinit_window();
             return notifications;
         }
@@ -287,7 +287,7 @@ impl NotificationStack {
         let gap_buffer = Self::allocate_gap_buffer(window.width, gap);
 
         Self::write_stack_to_file(
-            &self.stack,
+            &self.banner_stack,
             CONFIG.general().anchor(),
             &gap_buffer,
             &mut file,
@@ -303,7 +303,7 @@ impl NotificationStack {
     }
 
     fn write_stack_to_file(
-        stack: &[NotificationRect],
+        stack: &[BannerRect],
         anchor: &config::Anchor,
         gap_buffer: &[u8],
         file: &mut File,
@@ -480,179 +480,6 @@ impl PointerState {
     const LEFT_BTN: u32 = 272;
     const RIGHT_BTN: u32 = 273;
     const MIDDLE_BTN: u32 = 274;
-}
-
-struct NotificationRect {
-    data: Notification,
-    created_at: time::Instant,
-    framebuffer: Vec<u8>,
-    font_collection: Option<Arc<FontCollection>>,
-}
-
-impl NotificationRect {
-    fn init(notification: Notification) -> Self {
-        Self {
-            data: notification,
-            created_at: time::Instant::now(),
-            framebuffer: vec![],
-            font_collection: None,
-        }
-    }
-
-    fn draw(&mut self) {
-        let (mut width, mut height) = (
-            CONFIG.general().width() as usize,
-            CONFIG.general().height() as usize,
-        );
-
-        let display = CONFIG.display_by_app(&self.data.app_name);
-        let colors = match self.data.hints.urgency {
-            notification::Urgency::Low => display.colors().low(),
-            notification::Urgency::Normal => display.colors().normal(),
-            notification::Urgency::Critical => display.colors().critical(),
-        };
-
-        let background: Bgra = colors.background().into();
-        let foreground: Bgra = colors.foreground().into();
-
-        self.framebuffer = vec![background.clone(); width as usize * height as usize]
-            .into_iter()
-            .flat_map(|bgra| bgra.to_slice())
-            .collect();
-
-        let border_cfg = display.border();
-        let stride = width as usize * 4;
-
-        let border = BorderBuilder::default()
-            .size(border_cfg.size() as usize)
-            .radius(border_cfg.radius() as usize)
-            .color(border_cfg.color().into())
-            .background_color(background.clone())
-            .frame_width(width as usize)
-            .frame_height(height as usize)
-            .build()
-            .unwrap();
-
-        border.draw(|x, y, bgra| unsafe {
-            let position = y * stride + x * 4;
-            *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
-                .unwrap_unchecked() = bgra.to_slice()
-        });
-
-        let padding = display.padding();
-        padding.shrink(&mut width, &mut height);
-
-        let image =
-            Image::from_image_data(self.data.hints.image_data.as_ref(), display.image_size())
-                .or_svg(self.data.hints.image_path.as_deref(), display.image_size());
-
-        // INFO: img_width is need for further render (Summary and Text rendering)
-        let mut img_width = image.width();
-        let img_height = image.height();
-
-        if img_height.is_some_and(|img_height| {
-            img_height <= height as usize - border_cfg.size() as usize * 2
-        }) {
-            let y_offset = img_height.map(|img_height| height as usize / 2 - img_height / 2);
-
-            image.draw(
-                padding.left() as usize,
-                padding.top() as usize + y_offset.unwrap_or_default(),
-                stride,
-                |position, bgra| unsafe {
-                    *TryInto::<&mut [u8; 4]>::try_into(
-                        &mut self.framebuffer[position..position + 4],
-                    )
-                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
-                },
-            );
-        } else {
-            eprintln!(
-                "Image height exceeds the possible height!\n\
-                Please set a higher value of height or decrease the value of image_size in config.toml."
-            );
-            img_width = None;
-        }
-
-        let font_size = CONFIG.general().font().size() as f32;
-
-        let mut summary = TextRect::from_str(
-            &self.data.summary,
-            font_size,
-            self.font_collection.as_ref().cloned().unwrap(),
-        );
-
-        let x_offset = img_width
-            .map(|width| (width + padding.left() as usize) * 4)
-            .unwrap_or_default();
-
-        let title_cfg = display.title();
-
-        summary.set_margin(title_cfg.margin());
-        summary.set_line_spacing(title_cfg.line_spacing() as usize);
-        summary.set_foreground(foreground.clone());
-        summary.set_ellipsize_at(display.ellipsize());
-        summary.compile(width - img_width.unwrap_or_default(), height);
-        height -= summary.height();
-
-        summary.draw(display.title().alignment(), |x, y, bgra| {
-            let position = ((y + padding.top() as isize) * stride as isize
-                + x_offset as isize
-                + x * 4) as usize;
-            unsafe {
-                *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
-                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
-            }
-        });
-
-        let mut text = if display.markup() {
-            TextRect::from_text(
-                &self.data.body,
-                font_size,
-                self.font_collection.as_ref().cloned().unwrap(),
-            )
-        } else {
-            TextRect::from_str(
-                &self.data.body.body,
-                font_size,
-                self.font_collection.as_ref().cloned().unwrap(),
-            )
-        };
-
-        let body_cfg = display.body();
-
-        text.set_margin(body_cfg.margin());
-        text.set_line_spacing(body_cfg.line_spacing() as usize);
-        text.set_foreground(foreground);
-        text.set_ellipsize_at(display.ellipsize());
-        text.compile(width - img_width.unwrap_or_default(), height);
-
-        let y_offset = padding.top() as usize + summary.height();
-
-        text.draw(display.body().alignment(), |x, y, bgra| {
-            let position =
-                ((y + y_offset as isize) * stride as isize + x_offset as isize + x * 4) as usize;
-            unsafe {
-                *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
-                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
-            }
-        });
-    }
-
-    fn update_data(&mut self, notification: Notification) {
-        self.data = notification;
-    }
-
-    #[inline]
-    pub(crate) fn write_to_file(&self, file: &mut File) {
-        file.write_all(&self.framebuffer).unwrap();
-    }
-}
-
-impl<'a> From<&'a NotificationRect> for &'a Notification {
-    fn from(value: &'a NotificationRect) -> Self {
-        &value.data
-    }
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for Window {
