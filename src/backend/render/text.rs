@@ -468,7 +468,7 @@ impl LocalGlyph {
     ) -> (isize, isize) {
         match self {
             LocalGlyph::Image(img) => {
-                img.draw_by_xy(|img_x, img_y, bgra| {
+                img.draw(|img_x, img_y, bgra| {
                     callback(img_x + x_offset, img_y + y_offset, bgra)
                 });
                 (

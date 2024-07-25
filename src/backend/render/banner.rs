@@ -1,8 +1,8 @@
 use std::{fs::File, io::Write, sync::Arc, time};
 
 use crate::{
-    config::CONFIG,
-    data::notification::{self, Notification},
+    config::{spacing::Spacing, Colors, DisplayConfig, CONFIG},
+    data::notification::Notification,
 };
 
 use super::{
@@ -12,7 +12,10 @@ use super::{
 pub struct BannerRect {
     data: Notification,
     created_at: time::Instant,
+
+    stride: usize,
     framebuffer: Vec<u8>,
+
     font_collection: Option<Arc<FontCollection>>,
 }
 
@@ -21,7 +24,10 @@ impl BannerRect {
         Self {
             data: notification,
             created_at: time::Instant::now(),
+
+            stride: 0,
             framebuffer: vec![],
+
             font_collection: None,
         }
     }
@@ -42,6 +48,15 @@ impl BannerRect {
         &self.created_at
     }
 
+    pub(crate) fn update_data(&mut self, notification: Notification) {
+        self.data = notification;
+    }
+
+    #[inline]
+    pub(crate) fn write_to_file(&self, file: &mut File) {
+        file.write_all(&self.framebuffer).unwrap();
+    }
+
     pub(crate) fn draw(&mut self) {
         let (mut width, mut height) = (
             CONFIG.general().width() as usize,
@@ -49,22 +64,50 @@ impl BannerRect {
         );
 
         let display = CONFIG.display_by_app(&self.data.app_name);
-        let colors = match self.data.hints.urgency {
-            notification::Urgency::Low => display.colors().low(),
-            notification::Urgency::Normal => display.colors().normal(),
-            notification::Urgency::Critical => display.colors().critical(),
-        };
+        let colors = display.colors().by_urgency(&self.data.hints.urgency);
 
         let background: Bgra = colors.background().into();
-        let foreground: Bgra = colors.foreground().into();
 
+        self.init_framebuffer(width, height, &background);
+        self.stride = width as usize * 4;
+
+        self.draw_border(width, height, &background, display);
+
+        let padding = display.padding();
+        padding.shrink(&mut width, &mut height);
+
+        let image = self.draw_image(width, height, padding, &background, display);
+        let img_width = image
+            .map(|img| img.width().unwrap_or_default())
+            .unwrap_or_default();
+        width -= img_width;
+
+        let x_offset = img_width + padding.left() as usize;
+        let mut y_offset = padding.top() as usize;
+
+        let summary = self.draw_summary(x_offset, y_offset, width, height, colors, display);
+
+        height -= summary.height();
+        y_offset += summary.height();
+
+        let _ = self.draw_text(x_offset, y_offset, width, height, colors, display);
+    }
+
+    fn init_framebuffer(&mut self, width: usize, height: usize, background: &Bgra) {
         self.framebuffer = vec![background.clone(); width as usize * height as usize]
             .into_iter()
             .flat_map(|bgra| bgra.to_slice())
             .collect();
+    }
 
+    fn draw_border(
+        &mut self,
+        width: usize,
+        height: usize,
+        background: &Bgra,
+        display: &DisplayConfig,
+    ) {
         let border_cfg = display.border();
-        let stride = width as usize * 4;
 
         let border = BorderBuilder::default()
             .size(border_cfg.size() as usize)
@@ -76,77 +119,103 @@ impl BannerRect {
             .build()
             .unwrap();
 
-        border.draw(|x, y, bgra| unsafe {
-            let position = y * stride + x * 4;
-            *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
-                .unwrap_unchecked() = bgra.to_slice()
-        });
+        border.draw(|x, y, color| self.put_color_at(x, y, color));
+    }
 
-        let padding = display.padding();
-        padding.shrink(&mut width, &mut height);
-
+    fn draw_image(
+        &mut self,
+        _width: usize,
+        height: usize,
+        padding: &Spacing,
+        background: &Bgra,
+        display: &DisplayConfig,
+    ) -> Option<Image> {
         let image =
             Image::from_image_data(self.data.hints.image_data.as_ref(), display.image_size())
                 .or_svg(self.data.hints.image_path.as_deref(), display.image_size());
 
-        // INFO: img_width is need for further render (Summary and Text rendering)
-        let mut img_width = image.width();
+        if !image.exists() {
+            return None;
+        }
+
         let img_height = image.height();
 
         if img_height.is_some_and(|img_height| {
-            img_height <= height as usize - border_cfg.size() as usize * 2
+            img_height <= height as usize - display.border().size() as usize * 2
         }) {
-            let y_offset = img_height.map(|img_height| height as usize / 2 - img_height / 2);
+            let x_offset = padding.left() as usize;
+            let y_offset = padding.top() as usize
+                + img_height
+                    .map(|img_height| height as usize / 2 - img_height / 2)
+                    .unwrap_or_default();
 
-            image.draw(
-                padding.left() as usize,
-                padding.top() as usize + y_offset.unwrap_or_default(),
-                stride,
-                |position, bgra| unsafe {
-                    *TryInto::<&mut [u8; 4]>::try_into(
-                        &mut self.framebuffer[position..position + 4],
-                    )
-                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
-                },
-            );
+            image.draw(|x, y, color| {
+                self.put_color_at(
+                    x as usize + x_offset,
+                    y as usize + y_offset,
+                    color.overlay_on(&background),
+                )
+            });
+            Some(image)
         } else {
             eprintln!(
                 "Image height exceeds the possible height!\n\
                 Please set a higher value of height or decrease the value of image_size in config.toml."
             );
-            img_width = None;
+            None
         }
+    }
 
-        let font_size = CONFIG.general().font().size() as f32;
+    fn draw_summary(
+        &mut self,
+        x_offset: usize,
+        y_offset: usize,
+        width: usize,
+        height: usize,
+        colors: &Colors,
+        display: &DisplayConfig,
+    ) -> TextRect {
+        let title_cfg = display.title();
+
+        let foreground: Bgra = colors.foreground().into();
+        let background: Bgra = colors.background().into();
 
         let mut summary = TextRect::from_str(
             &self.data.summary,
-            font_size,
+            CONFIG.general().font().size() as f32,
             self.font_collection.as_ref().cloned().unwrap(),
         );
 
-        let x_offset = img_width
-            .map(|width| (width + padding.left() as usize) * 4)
-            .unwrap_or_default();
-
-        let title_cfg = display.title();
-
         summary.set_margin(title_cfg.margin());
         summary.set_line_spacing(title_cfg.line_spacing() as usize);
-        summary.set_foreground(foreground.clone());
-        summary.set_ellipsize_at(display.ellipsize());
-        summary.compile(width - img_width.unwrap_or_default(), height);
-        height -= summary.height();
+        summary.set_foreground(foreground);
+        summary.set_ellipsize_at(display.ellipsize_at());
+        summary.compile(width, height);
 
-        summary.draw(display.title().alignment(), |x, y, bgra| {
-            let position = ((y + padding.top() as isize) * stride as isize
-                + x_offset as isize
-                + x * 4) as usize;
-            unsafe {
-                *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
-                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
-            }
+        summary.draw(display.title().alignment(), |x, y, color| {
+            self.put_color_at(
+                x as usize + x_offset,
+                y as usize + y_offset,
+                color.overlay_on(&background),
+            );
         });
+
+        summary
+    }
+
+    fn draw_text(
+        &mut self,
+        x_offset: usize,
+        y_offset: usize,
+        width: usize,
+        height: usize,
+        colors: &Colors,
+        display: &DisplayConfig,
+    ) -> TextRect {
+        let body_cfg = display.body();
+        let font_size = CONFIG.general().font().size() as f32;
+        let foreground: Bgra = colors.foreground().into();
+        let background: Bgra = colors.background().into();
 
         let mut text = if display.markup() {
             TextRect::from_text(
@@ -162,33 +231,29 @@ impl BannerRect {
             )
         };
 
-        let body_cfg = display.body();
-
         text.set_margin(body_cfg.margin());
         text.set_line_spacing(body_cfg.line_spacing() as usize);
         text.set_foreground(foreground);
-        text.set_ellipsize_at(display.ellipsize());
-        text.compile(width - img_width.unwrap_or_default(), height);
+        text.set_ellipsize_at(display.ellipsize_at());
+        text.compile(width, height);
 
-        let y_offset = padding.top() as usize + summary.height();
-
-        text.draw(display.body().alignment(), |x, y, bgra| {
-            let position =
-                ((y + y_offset as isize) * stride as isize + x_offset as isize + x * 4) as usize;
-            unsafe {
-                *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
-                    .unwrap_unchecked() = bgra.overlay_on(&background).to_slice()
-            }
+        text.draw(display.body().alignment(), |x, y, color| {
+            self.put_color_at(
+                x as usize + x_offset,
+                y as usize + y_offset,
+                color.overlay_on(&background),
+            );
         });
+
+        text
     }
 
-    pub(crate) fn update_data(&mut self, notification: Notification) {
-        self.data = notification;
-    }
-
-    #[inline]
-    pub(crate) fn write_to_file(&self, file: &mut File) {
-        file.write_all(&self.framebuffer).unwrap();
+    fn put_color_at(&mut self, x: usize, y: usize, color: Bgra) {
+        unsafe {
+            let position = y * self.stride + x * 4;
+            *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
+                .unwrap_unchecked() = color.to_slice()
+        }
     }
 }
 
