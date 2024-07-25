@@ -8,6 +8,8 @@ pub mod spacing;
 use sorting::Sorting;
 use spacing::Spacing;
 
+use crate::data::notification::Urgency;
+
 pub static CONFIG: Lazy<Config> = Lazy::new(Config::init);
 
 #[derive(Debug)]
@@ -290,7 +292,7 @@ impl DisplayConfig {
         self.body.as_ref().unwrap()
     }
 
-    pub fn ellipsize(&self) -> &EllipsizeAt {
+    pub fn ellipsize_at(&self) -> &EllipsizeAt {
         self.ellipsize_at.as_ref().unwrap()
     }
 
@@ -363,6 +365,14 @@ impl UrgencyColors {
 
     pub fn critical(&self) -> &Colors {
         self.critical.as_ref().unwrap()
+    }
+
+    pub fn by_urgency(&self, urgency: &Urgency) -> &Colors {
+        match urgency {
+            Urgency::Low => self.low(),
+            Urgency::Normal => self.normal(),
+            Urgency::Critical => self.critical(),
+        }
     }
 
     fn fill_empty_by_default(&mut self) {

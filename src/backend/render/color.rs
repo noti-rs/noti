@@ -20,6 +20,7 @@ impl Bgra {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn new_black() -> Self {
         Self {
             blue: 0.0,

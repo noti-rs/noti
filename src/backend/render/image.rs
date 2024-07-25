@@ -188,35 +188,7 @@ impl Image {
         }
     }
 
-    pub(crate) fn draw<O: FnMut(usize, Bgra)>(
-        &self,
-        x_offset: usize,
-        y_offset: usize,
-        stride: usize,
-        mut callback: O,
-    ) {
-        let image_data = if let Image::Exists(image_data) = self {
-            image_data
-        } else {
-            return;
-        };
-
-        let mut chunks = image_data
-            .data
-            .chunks_exact(image_data.channels as usize)
-            .map(Self::converter(image_data.has_alpha));
-
-        let mut position = stride * y_offset + x_offset * 4;
-        for _y in 0..image_data.height as usize {
-            for _x in 0..image_data.width as usize {
-                callback(position, chunks.next().unwrap().to_bgra());
-                position += 4;
-            }
-            position += stride - image_data.rowstride as usize;
-        }
-    }
-
-    pub(crate) fn draw_by_xy<O: FnMut(isize, isize, Bgra)>(&self, mut callback: O) {
+    pub(crate) fn draw<O: FnMut(isize, isize, Bgra)>(&self, mut callback: O) {
         let image_data = if let Image::Exists(image_data) = self {
             image_data
         } else {
