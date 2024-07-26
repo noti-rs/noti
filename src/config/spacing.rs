@@ -1,4 +1,8 @@
-use std::{collections::HashMap, marker::PhantomData};
+use std::{
+    collections::HashMap,
+    marker::PhantomData,
+    ops::{Add, AddAssign},
+};
 
 use serde::{de::Visitor, Deserialize};
 
@@ -14,7 +18,7 @@ impl Spacing {
     const POSSIBLE_KEYS: [&'static str; 6] =
         ["top", "right", "bottom", "left", "vertical", "horizontal"];
 
-    fn all_directional(val: u8) -> Self {
+    pub(crate) fn all_directional(val: u8) -> Self {
         Self {
             top: val,
             bottom: val,
@@ -23,7 +27,7 @@ impl Spacing {
         }
     }
 
-    fn cross(vertical: u8, horizontal: u8) -> Self {
+    pub(crate) fn cross(vertical: u8, horizontal: u8) -> Self {
         Self {
             top: vertical,
             bottom: vertical,
@@ -51,6 +55,41 @@ impl Spacing {
     pub fn shrink(&self, width: &mut usize, height: &mut usize) {
         *width -= self.left as usize + self.right as usize;
         *height -= self.top as usize + self.bottom as usize;
+    }
+}
+
+impl Add<Spacing> for Spacing {
+    type Output = Spacing;
+
+    fn add(self, rhs: Spacing) -> Self::Output {
+        Spacing {
+            top: self.top + rhs.top,
+            right: self.right + rhs.right,
+            bottom: self.bottom + rhs.bottom,
+            left: self.left + rhs.left,
+        }
+    }
+}
+
+impl Add<Spacing> for &Spacing {
+    type Output = Spacing;
+
+    fn add(self, rhs: Spacing) -> Self::Output {
+        Spacing {
+            top: self.top + rhs.top,
+            right: self.right + rhs.right,
+            bottom: self.bottom + rhs.bottom,
+            left: self.left + rhs.left,
+        }
+    }
+}
+
+impl AddAssign<Spacing> for Spacing {
+    fn add_assign(&mut self, rhs: Spacing) {
+        self.top += rhs.top;
+        self.right += rhs.right;
+        self.bottom += rhs.bottom;
+        self.left += rhs.left;
     }
 }
 
