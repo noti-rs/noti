@@ -7,6 +7,7 @@ use crate::{
 
 use super::{
     border::BorderBuilder, color::Bgra, font::FontCollection, image::Image, text::TextRect,
+    types::Offset,
 };
 
 #[derive(Clone)]
@@ -89,21 +90,22 @@ impl BannerRect {
         let padding = display.padding() + border_spacing;
         padding.shrink(&mut width, &mut height);
 
-        let image = self.draw_image(width, height, &padding, &background, display);
+        let mut offset: Offset = padding.into();
+
+        let image = self.draw_image(offset.clone(), width, height, &background, display);
         let img_width = image
             .map(|img| img.width().unwrap_or_default())
             .unwrap_or_default();
         width -= img_width;
 
-        let x_offset = img_width + padding.left() as usize;
-        let mut y_offset = padding.top() as usize;
+        offset.x += img_width;
 
-        let summary = self.draw_summary(x_offset, y_offset, width, height, colors, display);
+        let summary = self.draw_summary(offset.clone(), width, height, colors, display);
 
         height -= summary.height();
-        y_offset += summary.height();
+        offset.y += summary.height();
 
-        let _ = self.draw_text(x_offset, y_offset, width, height, colors, display);
+        let _ = self.draw_text(offset, width, height, colors, display);
 
         self.draw_border(
             CONFIG.general().width().into(),
@@ -144,9 +146,9 @@ impl BannerRect {
 
     fn draw_image(
         &mut self,
+        mut offset: Offset,
         _width: usize,
         height: usize,
-        padding: &Spacing,
         background: &Bgra,
         display: &DisplayConfig,
     ) -> Option<Image> {
@@ -163,16 +165,14 @@ impl BannerRect {
         if img_height.is_some_and(|img_height| {
             img_height <= height as usize - display.border().size() as usize * 2
         }) {
-            let x_offset = padding.left() as usize;
-            let y_offset = padding.top() as usize
-                + img_height
-                    .map(|img_height| height as usize / 2 - img_height / 2)
-                    .unwrap_or_default();
+            offset.y += img_height
+                .map(|img_height| height as usize / 2 - img_height / 2)
+                .unwrap_or_default();
 
             image.draw(|x, y, color| {
                 self.put_color_at(
-                    x + x_offset,
-                    y + y_offset,
+                    x + offset.x,
+                    y + offset.y,
                     Self::convert_color(color, &background),
                 );
             });
@@ -188,8 +188,7 @@ impl BannerRect {
 
     fn draw_summary(
         &mut self,
-        x_offset: usize,
-        y_offset: usize,
+        offset: Offset,
         width: usize,
         height: usize,
         colors: &Colors,
@@ -216,8 +215,8 @@ impl BannerRect {
 
         summary.draw(|x, y, color| {
             self.put_color_at(
-                x as usize + x_offset,
-                y as usize + y_offset,
+                x as usize + offset.x,
+                y as usize + offset.y,
                 Self::convert_color(color, &background),
             );
         });
@@ -227,8 +226,7 @@ impl BannerRect {
 
     fn draw_text(
         &mut self,
-        x_offset: usize,
-        y_offset: usize,
+        offset: Offset,
         width: usize,
         height: usize,
         colors: &Colors,
@@ -262,8 +260,8 @@ impl BannerRect {
 
         text.draw(|x, y, color| {
             self.put_color_at(
-                x as usize + x_offset,
-                y as usize + y_offset,
+                x as usize + offset.x,
+                y as usize + offset.y,
                 Self::convert_color(color, &background),
             );
         });

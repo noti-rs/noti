@@ -9,6 +9,7 @@ use crate::data::{
 
 use self::window::WindowManager;
 
+mod types;
 mod banner;
 mod border;
 mod color;

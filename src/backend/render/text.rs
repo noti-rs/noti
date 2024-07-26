@@ -14,6 +14,7 @@ use super::{
     color::Bgra,
     font::{FontCollection, FontStyle},
     image::Image,
+    types::Offset,
 };
 
 #[derive(Default)]
@@ -272,12 +273,11 @@ impl TextRect {
 
 impl Draw for TextRect {
     fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
-        let x_offset = self.margin.left() as usize;
-        let y_offset = self.margin.top() as usize;
+        let offset: Offset = (&self.margin).into();
 
         self.lines
             .iter()
-            .for_each(|line| line.draw(|x, y, color| output(x + x_offset, y + y_offset, color)))
+            .for_each(|line| line.draw(|x, y, color| output(x + offset.x, y + offset.y, color)))
     }
 }
 
@@ -389,7 +389,7 @@ impl LineRect {
 
 impl Draw for LineRect {
     fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
-        let (mut x, x_incrementor) = match &self.alignment {
+        let (x, x_incrementor) = match &self.alignment {
             TextAlignment::Center => (self.available_space / 2, self.spacebar_width),
             TextAlignment::Left => (0, self.spacebar_width),
             TextAlignment::Right => (self.available_space, self.spacebar_width),
@@ -403,19 +403,15 @@ impl Draw for LineRect {
             ),
         };
 
+        let mut offset = Offset::new(x, self.y_offset);
+
         for word in &self.words {
             word.glyphs.iter().for_each(|local_glyph| {
-                local_glyph.draw(
-                    x,
-                    self.y_offset,
-                    self.max_bearing_y,
-                    &self.foreground,
-                    &mut output,
-                );
-                x += local_glyph.width();
+                local_glyph.draw(&offset, self.max_bearing_y, &self.foreground, &mut output);
+                offset.x += local_glyph.width();
             });
 
-            x += x_incrementor;
+            offset.x += x_incrementor;
         }
     }
 }
@@ -532,15 +528,14 @@ impl LocalGlyph {
 
     fn draw<O: FnMut(usize, usize, DrawColor)>(
         &self,
-        x_offset: usize,
-        y_offset: usize,
+        offset: &Offset,
         max_bearing_y: usize,
         fg_color: &Bgra,
         callback: &mut O,
     ) {
         match self {
             LocalGlyph::Image(img) => {
-                img.draw(|img_x, img_y, color| callback(img_x + x_offset, img_y + y_offset, color));
+                img.draw(|img_x, img_y, color| callback(img_x + offset.x, img_y + offset.x, color));
             }
             LocalGlyph::Outline((metrics, coverage)) => {
                 let mut coverage_iter = coverage.iter();
@@ -552,8 +547,8 @@ impl LocalGlyph {
                 for glyph_y in y_diff..height + y_diff {
                     for glyph_x in x_diff..width + x_diff {
                         callback(
-                            x_offset + glyph_x,
-                            y_offset + glyph_y,
+                            offset.x + glyph_x,
+                            offset.y + glyph_y,
                             DrawColor::OverlayWithCoverage(
                                 fg_color.to_owned(),
                                 Coverage(
