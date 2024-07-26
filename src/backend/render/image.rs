@@ -2,7 +2,10 @@ use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 
 use crate::data::image::ImageData;
 
-use super::color::{Bgra, Rgba};
+use super::{
+    banner::{Draw, DrawColor},
+    color::{Bgra, Rgba},
+};
 
 #[derive(Clone)]
 pub(crate) enum Image {
@@ -188,25 +191,6 @@ impl Image {
         }
     }
 
-    pub(crate) fn draw<O: FnMut(isize, isize, Bgra)>(&self, mut callback: O) {
-        let image_data = if let Image::Exists(image_data) = self {
-            image_data
-        } else {
-            return;
-        };
-
-        let mut chunks = image_data
-            .data
-            .chunks_exact(image_data.channels as usize)
-            .map(Self::converter(image_data.has_alpha));
-
-        for y in 0..image_data.height as isize {
-            for x in 0..image_data.width as isize {
-                callback(x, y, chunks.next().unwrap().to_bgra());
-            }
-        }
-    }
-
     fn resize(width: &mut i32, height: &mut i32, new_size: u16) {
         if width > height {
             let factor = new_size as f32 / *width as f32;
@@ -229,6 +213,27 @@ impl Image {
         } else {
             |chunk: &[u8]| unsafe {
                 Rgba::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap_unchecked())
+            }
+        }
+    }
+}
+
+impl Draw for Image {
+    fn draw<Output: FnMut(usize, usize, super::banner::DrawColor)>(&self, mut output: Output) {
+        let image_data = if let Image::Exists(image_data) = self {
+            image_data
+        } else {
+            return;
+        };
+
+        let mut chunks = image_data
+            .data
+            .chunks_exact(image_data.channels as usize)
+            .map(Self::converter(image_data.has_alpha));
+
+        for y in 0..image_data.height as usize {
+            for x in 0..image_data.width as usize {
+                output(x, y, DrawColor::Overlay(chunks.next().unwrap().to_bgra()));
             }
         }
     }

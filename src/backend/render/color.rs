@@ -2,6 +2,8 @@ use std::ops::{Mul, MulAssign};
 
 use crate::config::Color;
 
+use super::banner::Coverage;
+
 #[derive(Clone, Default)]
 pub(crate) struct Bgra {
     pub(crate) blue: f32,
@@ -129,12 +131,26 @@ impl Mul<f32> for Bgra {
     }
 }
 
+impl Mul<Coverage> for Bgra {
+    type Output = Bgra;
+
+    fn mul(self, Coverage(val): Coverage) -> Self::Output {
+        self * val
+    }
+}
+
 impl MulAssign<f32> for Bgra {
     fn mul_assign(&mut self, rhs: f32) {
         self.blue *= rhs;
         self.green *= rhs;
         self.red *= rhs;
         self.alpha *= rhs;
+    }
+}
+
+impl MulAssign<Coverage> for Bgra {
+    fn mul_assign(&mut self, Coverage(val): Coverage) {
+        *self *= val
     }
 }
 

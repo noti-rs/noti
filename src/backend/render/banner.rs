@@ -9,6 +9,20 @@ use super::{
     border::BorderBuilder, color::Bgra, font::FontCollection, image::Image, text::TextRect,
 };
 
+#[derive(Clone)]
+pub(super) struct Coverage(pub(super) f32);
+
+#[derive(Clone)]
+pub(super) enum DrawColor {
+    Replace(Bgra),
+    Overlay(Bgra),
+    OverlayWithCoverage(Bgra, Coverage),
+}
+
+pub(super) trait Draw {
+    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, output: Output);
+}
+
 pub struct BannerRect {
     data: Notification,
     created_at: time::Instant,
@@ -71,8 +85,6 @@ impl BannerRect {
         self.init_framebuffer(width, height, &background);
         self.stride = width as usize * 4;
 
-        self.draw_border(width, height, &background, display);
-
         let padding = display.padding();
         padding.shrink(&mut width, &mut height);
 
@@ -91,6 +103,13 @@ impl BannerRect {
         y_offset += summary.height();
 
         let _ = self.draw_text(x_offset, y_offset, width, height, colors, display);
+
+        self.draw_border(
+            CONFIG.general().width().into(),
+            CONFIG.general().height().into(),
+            &background,
+            display,
+        );
     }
 
     fn init_framebuffer(&mut self, width: usize, height: usize, background: &Bgra) {
@@ -119,7 +138,7 @@ impl BannerRect {
             .build()
             .unwrap();
 
-        border.draw(|x, y, color| self.put_color_at(x, y, color));
+        border.draw(|x, y, color| self.put_color_at(x, y, Self::convert_color(color, background)));
     }
 
     fn draw_image(
@@ -151,10 +170,10 @@ impl BannerRect {
 
             image.draw(|x, y, color| {
                 self.put_color_at(
-                    x as usize + x_offset,
-                    y as usize + y_offset,
-                    color.overlay_on(&background),
-                )
+                    x + x_offset,
+                    y + y_offset,
+                    Self::convert_color(color, &background),
+                );
             });
             Some(image)
         } else {
@@ -190,13 +209,15 @@ impl BannerRect {
         summary.set_line_spacing(title_cfg.line_spacing() as usize);
         summary.set_foreground(foreground);
         summary.set_ellipsize_at(display.ellipsize_at());
+        summary.set_alignment(title_cfg.alignment());
+
         summary.compile(width, height);
 
-        summary.draw(display.title().alignment(), |x, y, color| {
+        summary.draw(|x, y, color| {
             self.put_color_at(
                 x as usize + x_offset,
                 y as usize + y_offset,
-                color.overlay_on(&background),
+                Self::convert_color(color, &background),
             );
         });
 
@@ -235,17 +256,28 @@ impl BannerRect {
         text.set_line_spacing(body_cfg.line_spacing() as usize);
         text.set_foreground(foreground);
         text.set_ellipsize_at(display.ellipsize_at());
+        text.set_alignment(body_cfg.alignment());
         text.compile(width, height);
 
-        text.draw(display.body().alignment(), |x, y, color| {
+        text.draw(|x, y, color| {
             self.put_color_at(
                 x as usize + x_offset,
                 y as usize + y_offset,
-                color.overlay_on(&background),
+                Self::convert_color(color, &background),
             );
         });
 
         text
+    }
+
+    fn convert_color(color: DrawColor, background: &Bgra) -> Bgra {
+        match color {
+            DrawColor::Replace(color) => color,
+            DrawColor::Overlay(foreground) => foreground.overlay_on(background),
+            DrawColor::OverlayWithCoverage(foreground, Coverage(factor)) => {
+                foreground.linearly_interpolate(background, factor)
+            }
+        }
     }
 
     fn put_color_at(&mut self, x: usize, y: usize, color: Bgra) {
