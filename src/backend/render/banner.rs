@@ -85,10 +85,11 @@ impl BannerRect {
         self.init_framebuffer(width, height, &background);
         self.stride = width as usize * 4;
 
-        let padding = display.padding();
+        let border_spacing = Spacing::all_directional(display.border().size());
+        let padding = display.padding() + border_spacing;
         padding.shrink(&mut width, &mut height);
 
-        let image = self.draw_image(width, height, padding, &background, display);
+        let image = self.draw_image(width, height, &padding, &background, display);
         let img_width = image
             .map(|img| img.width().unwrap_or_default())
             .unwrap_or_default();
