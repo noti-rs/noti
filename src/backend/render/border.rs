@@ -3,6 +3,7 @@ use derive_builder::Builder;
 use super::{
     banner::{Coverage, Draw, DrawColor},
     color::Bgra,
+    types::Offset,
 };
 
 type Matrix<T> = Vec<Vec<T>>;
@@ -143,15 +144,14 @@ impl Border {
 
     #[inline]
     fn draw_corner<Output: FnMut(usize, usize, DrawColor)>(
-        x_offset: usize,
-        y_offset: usize,
+        offset: Offset,
         corner: &Matrix<Option<DrawColor>>,
         corner_type: Corner,
         output: &mut Output,
     ) {
         let corner_size = corner.len();
-        let mut x_range = x_offset..x_offset + corner_size;
-        let y_range = y_offset..y_offset + corner_size;
+        let mut x_range = offset.x..offset.x + corner_size;
+        let y_range = offset.y..offset.y + corner_size;
 
         let x_range: &mut dyn Iterator<Item = usize> = match corner_type {
             Corner::TopLeft | Corner::BottomLeft => &mut x_range,
@@ -177,14 +177,13 @@ impl Border {
     #[inline]
     fn draw_rectangle<Output: FnMut(usize, usize, DrawColor)>(
         &self,
-        x_offset: usize,
-        y_offset: usize,
+        offset: Offset,
         width: usize,
         height: usize,
         output: &mut Output,
     ) {
-        for x in x_offset..width + x_offset {
-            for y in y_offset..height + y_offset {
+        for x in offset.x..width + offset.x {
+            for y in offset.y..height + offset.y {
                 output(x, y, DrawColor::Replace(self.color.clone()))
             }
         }
@@ -201,24 +200,24 @@ impl Draw for Border {
         };
 
         let corner_size = corner.len();
-        Self::draw_corner(0, 0, &corner, Corner::TopLeft, &mut output);
+        Self::draw_corner(Offset::no_offset(), &corner, Corner::TopLeft, &mut output);
         Self::draw_corner(
-            self.frame_width - corner_size,
-            0,
+            Offset::new_x(self.frame_width - corner_size),
             &corner,
             Corner::TopRight,
             &mut output,
         );
         Self::draw_corner(
-            self.frame_width - corner_size,
-            self.frame_height - corner_size,
+            Offset::new(
+                self.frame_width - corner_size,
+                self.frame_height - corner_size,
+            ),
             &corner,
             Corner::BottomRight,
             &mut output,
         );
         Self::draw_corner(
-            0,
-            self.frame_height - corner_size,
+            Offset::new_y(self.frame_height - corner_size),
             &corner,
             Corner::BottomLeft,
             &mut output,
@@ -227,8 +226,7 @@ impl Draw for Border {
         if self.size != 0 {
             // Top
             self.draw_rectangle(
-                corner_size,
-                0,
+                Offset::new_x(corner_size),
                 self.frame_width - corner_size * 2,
                 self.size,
                 &mut output,
@@ -236,8 +234,7 @@ impl Draw for Border {
 
             // Bottom
             self.draw_rectangle(
-                corner_size,
-                self.frame_height - self.size,
+                Offset::new(corner_size, self.frame_height - self.size),
                 self.frame_width - corner_size * 2,
                 self.size,
                 &mut output,
@@ -245,8 +242,7 @@ impl Draw for Border {
 
             // Left
             self.draw_rectangle(
-                0,
-                corner_size,
+                Offset::new_y(corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
                 &mut output,
@@ -254,8 +250,7 @@ impl Draw for Border {
 
             // Right
             self.draw_rectangle(
-                self.frame_width - self.size,
-                corner_size,
+                Offset::new(self.frame_width - self.size, corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
                 &mut output,

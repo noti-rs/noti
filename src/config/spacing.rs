@@ -92,7 +92,6 @@ impl AddAssign<Spacing> for Spacing {
         self.left += rhs.left;
     }
 }
-
 impl From<i64> for Spacing {
     fn from(value: i64) -> Self {
         Spacing::all_directional(value.clamp(0, u8::MAX as i64) as u8)
