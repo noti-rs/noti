@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, sync::Arc};
 
+use derive_builder::Builder;
 use fontdue::Metrics;
 use itertools::Itertools;
 
@@ -8,7 +9,12 @@ use crate::{
     data::text::Text,
 };
 
-use super::{color::Bgra, font::FontCollection, font::FontStyle, image::Image};
+use super::{
+    banner::{Coverage, Draw, DrawColor},
+    color::Bgra,
+    font::{FontCollection, FontStyle},
+    image::Image,
+};
 
 #[derive(Default)]
 pub(crate) struct TextRect {
@@ -24,6 +30,7 @@ pub(crate) struct TextRect {
 
     ellipsize_at: EllipsizeAt,
     ellipsis: LocalGlyph,
+    alignment: TextAlignment,
 
     fg_color: Bgra,
 
@@ -158,6 +165,10 @@ impl TextRect {
         self.ellipsize_at = ellipsize_at.clone();
     }
 
+    pub(crate) fn set_alignment(&mut self, alignment: &TextAlignment) {
+        self.alignment = alignment.to_owned();
+    }
+
     pub(crate) fn compile(&mut self, mut width: usize, mut height: usize) {
         self.width = width;
 
@@ -175,7 +186,7 @@ impl TextRect {
 
         let mut lines = vec![];
 
-        for y in (self.margin.top() as usize..height + self.margin.top() as usize)
+        for y in (0..height)
             .step_by(self.line_height + self.line_spacing)
             .take_while(|y| height - *y >= self.line_height)
         {
@@ -203,12 +214,16 @@ impl TextRect {
                 break;
             }
 
-            lines.push(LineRect::new(
-                y,
-                remaining_width,
-                self.spacebar_width,
-                words,
-            ))
+            lines.push(LineRectBuilder::create_empty()
+                .y_offset(y)
+                .available_space(remaining_width)
+                .spacebar_width(self.spacebar_width)
+                .max_bearing_y(self.max_bearing_y)
+                .alignment(self.alignment.to_owned())
+                .foreground(self.fg_color.to_owned())
+                .words(words)
+                .build()
+                .expect("Can't create a Line rect from existing components. Please contact with developers with this information."));
         }
 
         self.lines = lines;
@@ -234,7 +249,9 @@ impl TextRect {
             state = self
                 .lines
                 .last_mut()
-                .map(|last_line| last_line.ellipsize(word, self.ellipsis.clone(), &self.ellipsize_at))
+                .map(|last_line| {
+                    last_line.ellipsize(word, self.ellipsis.clone(), &self.ellipsize_at)
+                })
                 .unwrap_or_default();
         }
     }
@@ -251,75 +268,35 @@ impl TextRect {
             + self.margin.top() as usize
             + self.margin.bottom() as usize
     }
+}
 
-    pub(crate) fn draw<O: FnMut(isize, isize, Bgra)>(
-        &self,
-        text_alignment: &TextAlignment,
-        mut callback: O,
-    ) {
-        for line in &self.lines {
-            let (mut x, x_incrementor) = match text_alignment {
-                TextAlignment::Center => (
-                    line.available_space as isize / 2,
-                    self.spacebar_width as isize,
-                ),
-                TextAlignment::Left => (0, self.spacebar_width as isize),
-                TextAlignment::Right => {
-                    (line.available_space as isize, self.spacebar_width as isize)
-                }
-                TextAlignment::SpaceBetween => (
-                    0,
-                    if line.words.len() == 1 {
-                        0
-                    } else {
-                        line.blank_space() as isize / line.words.len().saturating_sub(1) as isize
-                    },
-                ),
-            };
-            x += self.margin.left() as isize;
+impl Draw for TextRect {
+    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
+        let x_offset = self.margin.left() as usize;
+        let y_offset = self.margin.top() as usize;
 
-            for word in &line.words {
-                word.glyphs.iter().for_each(|local_glyph| {
-                    let (x_shift, _y_shift) = local_glyph.draw(
-                        x,
-                        line.y_offset as isize,
-                        self.max_bearing_y as isize,
-                        &self.fg_color,
-                        &mut callback,
-                    );
-                    x += x_shift;
-                });
-
-                x += x_incrementor;
-            }
-        }
+        self.lines
+            .iter()
+            .for_each(|line| line.draw(|x, y, color| output(x + x_offset, y + y_offset, color)))
     }
 }
 
+#[derive(Builder, Default)]
+#[builder(pattern = "owned")]
 struct LineRect {
     y_offset: usize,
 
+    max_bearing_y: usize,
     available_space: usize,
     spacebar_width: usize,
+
+    foreground: Bgra,
+    alignment: TextAlignment,
 
     words: Vec<WordRect>,
 }
 
 impl LineRect {
-    fn new(
-        y_offset: usize,
-        available_space: usize,
-        spacebar_width: usize,
-        words: Vec<WordRect>,
-    ) -> Self {
-        Self {
-            y_offset,
-            available_space,
-            spacebar_width,
-            words,
-        }
-    }
-
     fn blank_space(&self) -> usize {
         self.available_space + self.spacebar_width * self.words.len().saturating_sub(1)
     }
@@ -410,94 +387,44 @@ impl LineRect {
     }
 }
 
+impl Draw for LineRect {
+    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
+        let (mut x, x_incrementor) = match &self.alignment {
+            TextAlignment::Center => (self.available_space / 2, self.spacebar_width),
+            TextAlignment::Left => (0, self.spacebar_width),
+            TextAlignment::Right => (self.available_space, self.spacebar_width),
+            TextAlignment::SpaceBetween => (
+                0,
+                if self.words.len() == 1 {
+                    0
+                } else {
+                    self.blank_space() / self.words.len().saturating_sub(1)
+                },
+            ),
+        };
+
+        for word in &self.words {
+            word.glyphs.iter().for_each(|local_glyph| {
+                local_glyph.draw(
+                    x,
+                    self.y_offset,
+                    self.max_bearing_y,
+                    &self.foreground,
+                    &mut output,
+                );
+                x += local_glyph.width();
+            });
+
+            x += x_incrementor;
+        }
+    }
+}
+
 #[derive(Default)]
 enum EllipsiationState {
     Continue(Option<WordRect>),
     #[default]
     Complete,
-}
-
-#[derive(Default, Clone)]
-enum LocalGlyph {
-    Image(Image),
-    Outline((Metrics, Vec<u8>)),
-    #[default]
-    Empty,
-}
-
-impl LocalGlyph {
-    fn is_empty(&self) -> bool {
-        if let LocalGlyph::Empty = self {
-            true
-        } else {
-            false
-        }
-    }
-
-    fn width(&self) -> usize {
-        match self {
-            LocalGlyph::Image(img) => img.width().unwrap_or_default(),
-            LocalGlyph::Outline((metrics, _)) => metrics.advance_width.round() as usize,
-            LocalGlyph::Empty => 0,
-        }
-    }
-
-    fn bottom_spacing(&self) -> usize {
-        match self {
-            LocalGlyph::Image(_) => 0,
-            LocalGlyph::Outline((metrics, _)) => metrics.ymin.abs() as usize,
-            LocalGlyph::Empty => 0,
-        }
-    }
-
-    fn bearing_y(&self) -> usize {
-        match self {
-            LocalGlyph::Image(img) => img.height().unwrap_or_default(),
-            LocalGlyph::Outline((metrics, _)) => (metrics.height as i32 + metrics.ymin) as usize,
-            LocalGlyph::Empty => todo!(),
-        }
-    }
-
-    fn draw<O: FnMut(isize, isize, Bgra)>(
-        &self,
-        x_offset: isize,
-        y_offset: isize,
-        max_bearing_y: isize,
-        fg_color: &Bgra,
-        callback: &mut O,
-    ) -> (isize, isize) {
-        match self {
-            LocalGlyph::Image(img) => {
-                img.draw(|img_x, img_y, bgra| {
-                    callback(img_x + x_offset, img_y + y_offset, bgra)
-                });
-                (
-                    img.width().unwrap_or_default() as isize,
-                    img.height().unwrap_or_default() as isize,
-                )
-            }
-            LocalGlyph::Outline((metrics, coverage)) => {
-                let mut coverage_iter = coverage.iter();
-                let (width, height) = (metrics.width as isize, metrics.height as isize);
-                let y_diff = -metrics.ymin as isize + max_bearing_y - height;
-                let x_diff = metrics.xmin as isize;
-
-                for glyph_y in y_diff..height + y_diff {
-                    for glyph_x in x_diff..width + x_diff {
-                        let bgra =
-                            fg_color.clone() * (*coverage_iter.next().unwrap() as f32 / 255.0);
-                        callback(x_offset + glyph_x, y_offset as isize + glyph_y, bgra);
-                    }
-                }
-
-                (
-                    metrics.advance_width.round() as isize,
-                    metrics.advance_height.round() as isize,
-                )
-            }
-            LocalGlyph::Empty => unreachable!(),
-        }
-    }
 }
 
 pub(crate) struct WordRect {
@@ -559,5 +486,86 @@ impl WordRect {
     #[inline(always = true)]
     fn is_blank(&self) -> bool {
         self.glyphs.is_empty()
+    }
+}
+
+#[derive(Default, Clone)]
+enum LocalGlyph {
+    Image(Image),
+    Outline((Metrics, Vec<u8>)),
+    #[default]
+    Empty,
+}
+
+impl LocalGlyph {
+    fn is_empty(&self) -> bool {
+        if let LocalGlyph::Empty = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn width(&self) -> usize {
+        match self {
+            LocalGlyph::Image(img) => img.width().unwrap_or_default(),
+            LocalGlyph::Outline((metrics, _)) => metrics.advance_width.round() as usize,
+            LocalGlyph::Empty => 0,
+        }
+    }
+
+    fn bottom_spacing(&self) -> usize {
+        match self {
+            LocalGlyph::Image(_) => 0,
+            LocalGlyph::Outline((metrics, _)) => metrics.ymin.abs() as usize,
+            LocalGlyph::Empty => 0,
+        }
+    }
+
+    fn bearing_y(&self) -> usize {
+        match self {
+            LocalGlyph::Image(img) => img.height().unwrap_or_default(),
+            LocalGlyph::Outline((metrics, _)) => (metrics.height as i32 + metrics.ymin) as usize,
+            LocalGlyph::Empty => todo!(),
+        }
+    }
+
+    fn draw<O: FnMut(usize, usize, DrawColor)>(
+        &self,
+        x_offset: usize,
+        y_offset: usize,
+        max_bearing_y: usize,
+        fg_color: &Bgra,
+        callback: &mut O,
+    ) {
+        match self {
+            LocalGlyph::Image(img) => {
+                img.draw(|img_x, img_y, color| callback(img_x + x_offset, img_y + y_offset, color));
+            }
+            LocalGlyph::Outline((metrics, coverage)) => {
+                let mut coverage_iter = coverage.iter();
+                let (width, height) = (metrics.width, metrics.height);
+                let y_diff = (max_bearing_y as i32 - height as i32 - metrics.ymin)
+                    .clamp(0, i32::MAX) as usize;
+                let x_diff = metrics.xmin.clamp(0, i32::MAX) as usize;
+
+                for glyph_y in y_diff..height + y_diff {
+                    for glyph_x in x_diff..width + x_diff {
+                        callback(
+                            x_offset + glyph_x,
+                            y_offset + glyph_y,
+                            DrawColor::OverlayWithCoverage(
+                                fg_color.to_owned(),
+                                Coverage(
+                                    unsafe { *coverage_iter.next().unwrap_unchecked() } as f32
+                                        / 255.0,
+                                ),
+                            ),
+                        );
+                    }
+                }
+            }
+            LocalGlyph::Empty => unreachable!(),
+        }
     }
 }

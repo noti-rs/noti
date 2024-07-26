@@ -1,6 +1,11 @@
 use derive_builder::Builder;
 
-use super::color::Bgra;
+use super::{
+    banner::{Coverage, Draw, DrawColor},
+    color::Bgra,
+};
+
+type Matrix<T> = Vec<Vec<T>>;
 
 #[derive(Default, Builder)]
 pub(crate) struct Border {
@@ -24,83 +29,12 @@ enum Corner {
 }
 
 impl Border {
-    pub(crate) fn draw<O: FnMut(usize, usize, Bgra)>(&self, mut callback: O) {
-        let corner = match (self.size, self.radius) {
-            (0, 0) => return,
-            (size, 0) => self.get_bordered_coverage(size),
-            (0, radius) => self.get_corner_coverage(radius),
-            (size, radius) => self.get_bordered_corner_coverage(size, radius),
-        };
-
-        let corner_size = corner.len();
-        Self::draw_corner(0, 0, &corner, Corner::TopLeft, &mut callback);
-        Self::draw_corner(
-            self.frame_width - corner_size,
-            0,
-            &corner,
-            Corner::TopRight,
-            &mut callback,
-        );
-        Self::draw_corner(
-            self.frame_width - corner_size,
-            self.frame_height - corner_size,
-            &corner,
-            Corner::BottomRight,
-            &mut callback,
-        );
-        Self::draw_corner(
-            0,
-            self.frame_height - corner_size,
-            &corner,
-            Corner::BottomLeft,
-            &mut callback,
-        );
-
-        if self.size != 0 {
-            // Top
-            self.draw_rectangle(
-                corner_size,
-                0,
-                self.frame_width - corner_size * 2,
-                self.size,
-                &mut callback,
-            );
-
-            // Bottom
-            self.draw_rectangle(
-                corner_size,
-                self.frame_height - self.size,
-                self.frame_width - corner_size * 2,
-                self.size,
-                &mut callback,
-            );
-
-            // Left
-            self.draw_rectangle(
-                0,
-                corner_size,
-                self.size,
-                self.frame_height - corner_size * 2,
-                &mut callback,
-            );
-
-            // Right
-            self.draw_rectangle(
-                self.frame_width - self.size,
-                corner_size,
-                self.size,
-                self.frame_height - corner_size * 2,
-                &mut callback,
-            );
-        }
-    }
-
     #[inline]
-    fn get_bordered_coverage(&self, width: usize) -> Vec<Vec<Option<Bgra>>> {
-        vec![vec![Some(self.color.clone()); width]; width]
+    fn get_bordered_coverage(&self, width: usize) -> Matrix<Option<DrawColor>> {
+        vec![vec![Some(DrawColor::Replace(self.color.clone())); width]; width]
     }
 
-    fn get_corner_coverage(&self, radius: usize) -> Vec<Vec<Option<Bgra>>> {
+    fn get_corner_coverage(&self, radius: usize) -> Matrix<Option<DrawColor>> {
         let mut corner = vec![vec![None; radius]; radius];
         let radius = std::cmp::min(radius, self.frame_height / 2);
 
@@ -112,8 +46,8 @@ impl Border {
             }
 
             let color = self.background_color.clone() * cell_coverage;
-            corner[inner_x][inner_y] = Some(color.clone());
-            corner[inner_y][inner_x] = Some(color);
+            corner[inner_x][inner_y] = Some(DrawColor::Replace(color.clone()));
+            corner[inner_y][inner_x] = Some(DrawColor::Replace(color));
 
             true
         });
@@ -121,7 +55,11 @@ impl Border {
         corner
     }
 
-    fn get_bordered_corner_coverage(&self, size: usize, radius: usize) -> Vec<Vec<Option<Bgra>>> {
+    fn get_bordered_corner_coverage(
+        &self,
+        size: usize,
+        radius: usize,
+    ) -> Matrix<Option<DrawColor>> {
         let radius = std::cmp::min(radius, self.frame_height / 2);
         let inner_radius = radius.saturating_sub(size);
 
@@ -139,19 +77,25 @@ impl Border {
                 let inner_cell_coverage = Self::get_coverage_by(inner_radius as f32, x_f32, y_f32);
 
                 match inner_cell_coverage {
-                    0.0 => border_color,
+                    0.0 => DrawColor::Replace(border_color),
                     1.0 => {
                         to_continue = false;
-                        self.background_color.clone()
+                        DrawColor::OverlayWithCoverage(Bgra::new(), Coverage(0.0))
+                        // self.background_color.clone()
                     }
                     cell_coverage => match (self.color.alpha, self.background_color.alpha) {
-                        (_, 0.0) => border_color * (1.0 - cell_coverage),
-                        (0.0, _) => self.background_color.clone() * cell_coverage,
-                        _ => border_color.linearly_interpolate(&self.background_color, 1.0 - cell_coverage),
+                        (_, 0.0) => DrawColor::Replace(border_color * (1.0 - cell_coverage)),
+                        (0.0, _) => {
+                            DrawColor::Replace(self.background_color.clone() * cell_coverage)
+                        }
+                        _ => DrawColor::OverlayWithCoverage(
+                            border_color,
+                            Coverage(1.0 - cell_coverage),
+                        ),
                     },
                 }
             } else {
-                border_color
+                DrawColor::Replace(border_color)
             };
 
             corner[inner_x][inner_y] = Some(color.clone());
@@ -198,12 +142,12 @@ impl Border {
     }
 
     #[inline]
-    fn draw_corner<O: FnMut(usize, usize, Bgra)>(
+    fn draw_corner<Output: FnMut(usize, usize, DrawColor)>(
         x_offset: usize,
         y_offset: usize,
-        corner: &Vec<Vec<Option<Bgra>>>,
+        corner: &Matrix<Option<DrawColor>>,
         corner_type: Corner,
-        callback: &mut O,
+        output: &mut Output,
     ) {
         let corner_size = corner.len();
         let mut x_range = x_offset..x_offset + corner_size;
@@ -222,7 +166,7 @@ impl Border {
 
             for (y, corner_cell) in y_range.zip(corner_row) {
                 if let Some(color) = corner_cell {
-                    callback(x, y, color.clone());
+                    output(x, y, color.clone());
                 } else {
                     break;
                 }
@@ -231,18 +175,91 @@ impl Border {
     }
 
     #[inline]
-    fn draw_rectangle<O: FnMut(usize, usize, Bgra)>(
+    fn draw_rectangle<Output: FnMut(usize, usize, DrawColor)>(
         &self,
         x_offset: usize,
         y_offset: usize,
         width: usize,
         height: usize,
-        callback: &mut O,
+        output: &mut Output,
     ) {
         for x in x_offset..width + x_offset {
             for y in y_offset..height + y_offset {
-                callback(x, y, self.color.clone())
+                output(x, y, DrawColor::Replace(self.color.clone()))
             }
+        }
+    }
+}
+
+impl Draw for Border {
+    fn draw<Output: FnMut(usize, usize, super::banner::DrawColor)>(&self, mut output: Output) {
+        let corner = match (self.size, self.radius) {
+            (0, 0) => return,
+            (size, 0) => self.get_bordered_coverage(size),
+            (0, radius) => self.get_corner_coverage(radius),
+            (size, radius) => self.get_bordered_corner_coverage(size, radius),
+        };
+
+        let corner_size = corner.len();
+        Self::draw_corner(0, 0, &corner, Corner::TopLeft, &mut output);
+        Self::draw_corner(
+            self.frame_width - corner_size,
+            0,
+            &corner,
+            Corner::TopRight,
+            &mut output,
+        );
+        Self::draw_corner(
+            self.frame_width - corner_size,
+            self.frame_height - corner_size,
+            &corner,
+            Corner::BottomRight,
+            &mut output,
+        );
+        Self::draw_corner(
+            0,
+            self.frame_height - corner_size,
+            &corner,
+            Corner::BottomLeft,
+            &mut output,
+        );
+
+        if self.size != 0 {
+            // Top
+            self.draw_rectangle(
+                corner_size,
+                0,
+                self.frame_width - corner_size * 2,
+                self.size,
+                &mut output,
+            );
+
+            // Bottom
+            self.draw_rectangle(
+                corner_size,
+                self.frame_height - self.size,
+                self.frame_width - corner_size * 2,
+                self.size,
+                &mut output,
+            );
+
+            // Left
+            self.draw_rectangle(
+                0,
+                corner_size,
+                self.size,
+                self.frame_height - corner_size * 2,
+                &mut output,
+            );
+
+            // Right
+            self.draw_rectangle(
+                self.frame_width - self.size,
+                corner_size,
+                self.size,
+                self.frame_height - corner_size * 2,
+                &mut output,
+            );
         }
     }
 }
