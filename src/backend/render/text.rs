@@ -25,13 +25,12 @@ pub(crate) struct TextRect {
     spacebar_width: usize,
     line_height: usize,
     line_spacing: usize,
-    ascent: usize,
 
     ellipsize_at: EllipsizeAt,
     ellipsis: Glyph,
     alignment: TextAlignment,
 
-    fg_color: Bgra,
+    foreground: Bgra,
 
     margin: Spacing,
 }
@@ -52,6 +51,7 @@ impl TextRect {
             words,
             spacebar_width: Self::get_spacebar_width(&font_collection, px_size),
             ellipsis: font_collection.get_ellipsis(px_size),
+            line_height: font_collection.max_height(px_size),
             ..Default::default()
         }
     }
@@ -101,6 +101,7 @@ impl TextRect {
             words,
             spacebar_width: Self::get_spacebar_width(&font_collection, px_size),
             ellipsis: font_collection.get_ellipsis(px_size),
+            line_height: font_collection.max_height(px_size),
             ..Default::default()
         }
     }
@@ -115,12 +116,7 @@ impl TextRect {
     }
 
     fn get_spacebar_width(font_collection: &Arc<FontCollection>, px_size: f32) -> usize {
-        font_collection
-            .font_by_style(&FontStyle::Regular)
-            .font()
-            .metrics(' ', px_size)
-            .advance_width
-            .round() as usize
+        font_collection.get_spacebar_width(px_size).round() as usize
     }
 
     pub(crate) fn set_line_spacing(&mut self, line_spacing: usize) {
@@ -132,7 +128,7 @@ impl TextRect {
     }
 
     pub(crate) fn set_foreground(&mut self, color: Bgra) {
-        self.fg_color = color;
+        self.foreground = color;
     }
 
     pub(crate) fn set_ellipsize_at(&mut self, ellipsize_at: &EllipsizeAt) {
@@ -145,18 +141,7 @@ impl TextRect {
 
     pub(crate) fn compile(&mut self, mut width: usize, mut height: usize) {
         self.width = width;
-
         self.margin.shrink(&mut width, &mut height);
-
-        let (descent, ascent) = self
-            .words
-            .iter()
-            .map(|word| (word.max_descent(), word.max_ascent()))
-            .reduce(|lhs, rhs| (std::cmp::max(lhs.0, rhs.0), std::cmp::max(lhs.1, rhs.1)))
-            .unwrap_or_default();
-
-        self.ascent = ascent;
-        self.line_height = descent + ascent;
 
         let mut lines = vec![];
 
@@ -168,7 +153,7 @@ impl TextRect {
             let mut words = vec![];
 
             while let Some(word) = self.words.front() {
-                let inserting_width = word.advance_width
+                let inserting_width = word.width()
                     + if !words.is_empty() {
                         self.spacebar_width
                     } else {
@@ -192,9 +177,7 @@ impl TextRect {
                 .y_offset(y)
                 .available_space(remaining_width)
                 .spacebar_width(self.spacebar_width)
-                .max_ascent(self.ascent)
                 .alignment(self.alignment.to_owned())
-                .foreground(self.fg_color.to_owned())
                 .words(words)
                 .build()
                 .expect("Can't create a Line rect from existing components. Please contact with developers with this information."));
@@ -202,6 +185,7 @@ impl TextRect {
 
         self.lines = lines;
         self.ellipsize();
+        self.apply_color();
     }
 
     fn ellipsize(&mut self) {
@@ -228,6 +212,12 @@ impl TextRect {
                 })
                 .unwrap_or_default();
         }
+    }
+
+    fn apply_color(&mut self) {
+        self.lines
+            .iter_mut()
+            .for_each(|line| line.set_color(self.foreground.clone()));
     }
 
     #[allow(unused)]
@@ -259,11 +249,9 @@ impl Draw for TextRect {
 struct LineRect {
     y_offset: usize,
 
-    max_ascent: usize,
     available_space: usize,
     spacebar_width: usize,
 
-    foreground: Bgra,
     alignment: TextAlignment,
 
     words: Vec<WordRect>,
@@ -296,7 +284,7 @@ impl LineRect {
     fn ellipsize_middle(&mut self, mut last_word: WordRect, ellipsis: Glyph) {
         let ellipsis_width = ellipsis.advance_width();
         while !last_word.is_blank()
-            && last_word.advance_width + self.spacebar_width + ellipsis_width > self.available_space
+            && last_word.width() + self.spacebar_width + ellipsis_width > self.available_space
         {
             last_word.pop_glyph();
         }
@@ -313,7 +301,7 @@ impl LineRect {
         let mut last_word = self.pop_word();
 
         while !last_word.is_blank()
-            && last_word.advance_width + self.spacebar_width + ellipsis_width > self.available_space
+            && last_word.width() + self.spacebar_width + ellipsis_width > self.available_space
         {
             last_word.pop_glyph();
         }
@@ -333,7 +321,7 @@ impl LineRect {
                 return EllipsiationState::Continue(Some(WordRect::new_empty()));
             };
 
-            self.available_space += last_word.advance_width + self.spacebar_width;
+            self.available_space += last_word.width() + self.spacebar_width;
             self.ellipsize_end(ellipsis)
         }
     }
@@ -345,7 +333,7 @@ impl LineRect {
             the Noti application with this information, please.",
         );
 
-        self.available_space += last_word.advance_width
+        self.available_space += last_word.width()
             + if !self.words.is_empty() {
                 self.spacebar_width
             } else {
@@ -356,7 +344,7 @@ impl LineRect {
     }
 
     fn push_word(&mut self, word: WordRect) {
-        self.available_space -= word.advance_width
+        self.available_space -= word.width()
             + if !self.words.is_empty() {
                 self.spacebar_width
             } else {
@@ -370,6 +358,12 @@ impl LineRect {
             self.available_space -= ellipsis.advance_width();
             last_word.push_glyph(ellipsis);
         }
+    }
+
+    fn set_color(&mut self, color: Bgra) {
+        self.words
+            .iter_mut()
+            .for_each(|word| word.set_color(color.clone()));
     }
 }
 
@@ -391,14 +385,12 @@ impl Draw for LineRect {
 
         let mut offset = Offset::new(x, self.y_offset);
 
-        for word in &self.words {
-            word.glyphs.iter().for_each(|local_glyph| {
-                local_glyph.draw(&offset, self.max_ascent, &self.foreground, &mut output);
-                offset.x += local_glyph.advance_width();
+        self.words.iter().for_each(|word| {
+            word.draw(|x, y, color| {
+                output(x + offset.x, y + offset.y, color);
             });
-
-            offset.x += x_incrementor;
-        }
+            offset.x += x_incrementor + word.width();
+        });
     }
 }
 
@@ -421,8 +413,12 @@ impl WordRect {
             glyphs: vec![],
         }
     }
+
     fn from_glyphs(outlined_glyphs: Vec<Glyph>) -> Self {
-        let advance_width = outlined_glyphs.iter().map(|glyph| glyph.advance_width()).sum();
+        let advance_width = outlined_glyphs
+            .iter()
+            .map(|glyph| glyph.advance_width())
+            .sum();
 
         Self {
             advance_width,
@@ -430,20 +426,16 @@ impl WordRect {
         }
     }
 
-    fn max_ascent(&self) -> usize {
+    #[inline(always = true)]
+    fn set_color(&mut self, color: Bgra) {
         self.glyphs
-            .iter()
-            .map(|glyph| glyph.ascent())
-            .max()
-            .unwrap_or_default()
+            .iter_mut()
+            .for_each(|glyph| glyph.set_color(color.clone()));
     }
 
-    fn max_descent(&self) -> usize {
-        self.glyphs
-            .iter()
-            .map(|glyph| glyph.descent().abs() as usize)
-            .max()
-            .unwrap_or_default()
+    #[inline(always = true)]
+    fn width(&self) -> usize {
+        self.advance_width
     }
 
     #[inline(always = true)]
@@ -456,7 +448,9 @@ impl WordRect {
     fn pop_glyph(&mut self) -> Option<Glyph> {
         let last_glyph = self.glyphs.pop();
         if let Some(last_glyph) = last_glyph.as_ref() {
-            self.advance_width = self.advance_width.saturating_sub(last_glyph.advance_width());
+            self.advance_width = self
+                .advance_width
+                .saturating_sub(last_glyph.advance_width());
         }
 
         last_glyph
@@ -465,5 +459,17 @@ impl WordRect {
     #[inline(always = true)]
     fn is_blank(&self) -> bool {
         self.glyphs.is_empty()
+    }
+}
+
+impl Draw for WordRect {
+    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
+        let mut offset = Offset::new_x(0);
+        self.glyphs.iter().for_each(|glyph| {
+            glyph.draw(|x, y, color| {
+                output(x + offset.x, y + offset.y, color);
+            });
+            offset.x += glyph.advance_width();
+        })
     }
 }
