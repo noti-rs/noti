@@ -1,5 +1,5 @@
+use ab_glyph::{point, Font as AbGlyphFont, OutlinedGlyph, ScaleFont};
 use derive_more::Display;
-use fontdue::{self, FontSettings};
 use owned_ttf_parser::{AsFaceRef, OwnedFace};
 use rayon::prelude::*;
 use std::{
@@ -14,7 +14,6 @@ use super::{
     banner::{Coverage, Draw, DrawColor},
     color::Bgra,
     image::Image,
-    types::Offset,
 };
 
 pub(crate) struct FontCollection {
@@ -81,12 +80,7 @@ impl FontCollection {
         ch: char,
         px_size: f32,
     ) -> Glyph {
-        let font = self.map.get(font_style).unwrap_or(
-            self.map
-                .get(&FontStyle::Regular)
-                .expect("Not found regular font in Font collection"),
-        );
-
+        let font = self.map.get(font_style).unwrap_or(self.default_font());
         let glyph = font.load_glyph(ch, px_size);
 
         if glyph.is_empty() {
@@ -98,30 +92,39 @@ impl FontCollection {
         }
     }
 
-    pub(crate) fn font_by_style(&self, font_style: &FontStyle) -> &Font {
-        self.map.get(font_style).unwrap_or(
-            self.map
-                .get(&FontStyle::Regular)
-                .expect("Not found regular font in Font collection"),
-        )
-    }
-
     pub(crate) fn emoji_image(&self, ch: char, size: u16) -> Option<Image> {
         let face = self.emoji.as_ref()?.as_face_ref();
         let glyph_id = face.glyph_index(ch)?;
         Image::from_raster_glyph_image(face.glyph_raster_image(glyph_id, size)?, size as u32)
     }
 
+    pub(crate) fn max_height(&self, px_size: f32) -> usize {
+        self.map
+            .iter()
+            .map(|(_, font)| font.get_height(px_size).round() as usize)
+            .max()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn get_spacebar_width(&self, px_size: f32) -> f32 {
+        self.default_font().get_glyph_width(' ', px_size)
+    }
+
     pub(crate) fn get_ellipsis(&self, px_size: f32) -> Glyph {
-        let font = self.font_by_style(&FontStyle::Regular);
-        font.load_glyph(Self::ELLIPSIS, px_size)
+        self.load_glyph_by_style(&FontStyle::Regular, Self::ELLIPSIS, px_size)
+    }
+
+    fn default_font(&self) -> &Font {
+        self.map
+            .get(&FontStyle::Regular)
+            .expect("Not found regular font in Font collection")
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct Font {
     style: FontStyle,
-    data: fontdue::Font,
+    data: ab_glyph::FontVec,
 }
 
 impl Font {
@@ -133,14 +136,21 @@ impl Font {
                 .unwrap_or(styles),
         );
 
-        let time = std::time::Instant::now();
-
         let bytes = std::fs::read(filepath)?;
-        let font_settings = FontSettings::default();
-        let data = fontdue::Font::from_bytes(bytes, font_settings)?;
-        dbg!(time.elapsed());
+        let data = ab_glyph::FontVec::try_from_vec(bytes)?;
 
         Ok(Self { style, data })
+    }
+
+    pub(crate) fn get_height(&self, px_size: f32) -> f32 {
+        self.data.as_scaled(px_size).height()
+    }
+
+    pub(crate) fn get_glyph_width(&self, ch: char, px_size: f32) -> f32 {
+        let scaled_font = self.data.as_scaled(px_size);
+
+        let glyph_id = scaled_font.glyph_id(ch);
+        scaled_font.h_advance(glyph_id)
     }
 
     pub(crate) fn load_glyph(&self, ch: char, px_size: f32) -> Glyph {
@@ -148,28 +158,24 @@ impl Font {
             return Glyph::Empty;
         }
 
-        let glyph_id = self.data.lookup_glyph_index(ch);
-        if glyph_id == 0 {
-            Glyph::Empty
-        } else {
-            let (metrics, coverage) = self.data.rasterize(ch, px_size);
-            Glyph::Outline {
-                metrics: Metrics {
-                    xmin: metrics.xmin,
-                    ymin: metrics.ymin,
-                    ascent: metrics.height as i32 + metrics.ymin,
-                    descent: std::cmp::min(-metrics.ymin, 0),
-                    width: metrics.width,
-                    height: metrics.height,
-                    advance_width: metrics.advance_width,
-                },
-                coverage,
-            }
-        }
-    }
+        let scaled_font = self.data.as_scaled(px_size);
+        let glyph_id = self.data.glyph_id(ch);
 
-    pub(crate) fn font(&self) -> &fontdue::Font {
-        &self.data
+        if glyph_id.0 == 0 {
+            return Glyph::Empty;
+        }
+
+        let glyph = glyph_id.with_scale_and_position(px_size, point(0.0, scaled_font.ascent()));
+
+        if let Some(outlined_glyph) = self.data.outline_glyph(glyph) {
+            Glyph::Outline {
+                advance_width: scaled_font.h_advance(outlined_glyph.glyph().id),
+                outlined_glyph,
+                color: Bgra::new(),
+            }
+        } else {
+            Glyph::Empty
+        }
     }
 }
 
@@ -177,8 +183,9 @@ impl Font {
 pub(crate) enum Glyph {
     Image(Image),
     Outline {
-        metrics: Metrics,
-        coverage: Vec<u8>,
+        color: Bgra,
+        advance_width: f32,
+        outlined_glyph: OutlinedGlyph,
     },
     #[default]
     Empty,
@@ -193,78 +200,44 @@ impl Glyph {
         }
     }
 
+    pub(crate) fn set_color(&mut self, new_color: Bgra) {
+        if let Glyph::Outline { color, .. } = self {
+            *color = new_color;
+        }
+    }
+
     pub(crate) fn advance_width(&self) -> usize {
         match self {
             Glyph::Image(img) => img.width().unwrap_or_default(),
-            Glyph::Outline { metrics, .. } => metrics.advance_width.round() as usize,
+            Glyph::Outline { advance_width, .. } => advance_width.round() as usize,
             Glyph::Empty => 0,
-        }
-    }
-
-    pub(crate) fn descent(&self) -> i32 {
-        match self {
-            Glyph::Image(_) => 0,
-            Glyph::Outline { metrics, .. } => metrics.descent,
-            Glyph::Empty => 0,
-        }
-    }
-
-    pub(crate) fn ascent(&self) -> usize {
-        match self {
-            Glyph::Image(img) => img.height().unwrap_or_default(),
-            Glyph::Outline { metrics, .. } => metrics.ascent as usize,
-            Glyph::Empty => todo!(),
-        }
-    }
-
-    pub(super) fn draw<O: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        max_bearing_y: usize,
-        fg_color: &Bgra,
-        callback: &mut O,
-    ) {
-        match self {
-            Glyph::Image(img) => {
-                img.draw(|img_x, img_y, color| callback(img_x + offset.x, img_y + offset.x, color));
-            }
-            Glyph::Outline { metrics, coverage } => {
-                let mut coverage_iter = coverage.iter();
-                let (width, height) = (metrics.width, metrics.height);
-                let y_diff = (max_bearing_y as i32 - height as i32 - metrics.ymin)
-                    .clamp(0, i32::MAX) as usize;
-                let x_diff = metrics.xmin.clamp(0, i32::MAX) as usize;
-
-                for glyph_y in y_diff..height + y_diff {
-                    for glyph_x in x_diff..width + x_diff {
-                        callback(
-                            offset.x + glyph_x,
-                            offset.y + glyph_y,
-                            DrawColor::OverlayWithCoverage(
-                                fg_color.to_owned(),
-                                Coverage(
-                                    unsafe { *coverage_iter.next().unwrap_unchecked() } as f32
-                                        / 255.0,
-                                ),
-                            ),
-                        );
-                    }
-                }
-            }
-            Glyph::Empty => unreachable!(),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Metrics {
-    pub(crate) xmin: i32,
-    pub(crate) ymin: i32,
-    pub(crate) ascent: i32,
-    pub(crate) descent: i32,
-    pub(crate) width: usize,
-    pub(crate) height: usize,
-    pub(crate) advance_width: f32,
+impl Draw for Glyph {
+    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
+        match self {
+            Glyph::Image(img) => {
+                img.draw(|img_x, img_y, color| output(img_x, img_y, color));
+            }
+            Glyph::Outline {
+                color,
+                outlined_glyph,
+                ..
+            } => {
+                let bounds = outlined_glyph.px_bounds();
+                outlined_glyph.draw(|x, y, coverage| {
+                    output(
+                        (bounds.min.x.round() as i32 + x as i32).clamp(0, i32::MAX) as usize,
+                        (bounds.min.y.round() as i32 + y as i32).clamp(0, i32::MAX) as usize,
+                        DrawColor::OverlayWithCoverage(color.to_owned(), Coverage(coverage)),
+                    )
+                })
+            }
+            Glyph::Empty => unreachable!(),
+        }
+    }
 }
 
 #[derive(Debug, Display, Hash, PartialEq, Eq, Clone)]
