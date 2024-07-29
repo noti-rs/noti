@@ -1,7 +1,6 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use derive_builder::Builder;
-use fontdue::Metrics;
 use itertools::Itertools;
 
 use crate::{
@@ -10,10 +9,9 @@ use crate::{
 };
 
 use super::{
-    banner::{Coverage, Draw, DrawColor},
+    banner::{Draw, DrawColor},
     color::Bgra,
-    font::{FontCollection, FontStyle},
-    image::Image,
+    font::{FontCollection, FontStyle, Glyph},
     types::Offset,
 };
 
@@ -27,10 +25,10 @@ pub(crate) struct TextRect {
     spacebar_width: usize,
     line_height: usize,
     line_spacing: usize,
-    max_bearing_y: usize,
+    ascent: usize,
 
     ellipsize_at: EllipsizeAt,
-    ellipsis: LocalGlyph,
+    ellipsis: Glyph,
     alignment: TextAlignment,
 
     fg_color: Bgra,
@@ -44,16 +42,16 @@ impl TextRect {
         px_size: f32,
         font_collection: Arc<FontCollection>,
     ) -> Self {
-        let glyph_collection: Vec<LocalGlyph> = string
+        let glyph_collection: Vec<Glyph> = string
             .chars()
-            .map(|ch| Self::load_glyph_by_style(ch, &FontStyle::Regular, px_size, &font_collection))
+            .map(|ch| font_collection.load_glyph_by_style(&FontStyle::Regular, ch, px_size))
             .collect();
 
         let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
             spacebar_width: Self::get_spacebar_width(&font_collection, px_size),
-            ellipsis: LocalGlyph::Outline(font_collection.get_ellipsis(px_size)),
+            ellipsis: font_collection.get_ellipsis(px_size),
             ..Default::default()
         }
     }
@@ -69,7 +67,7 @@ impl TextRect {
         let mut current_entities = VecDeque::new();
         let mut current_style = FontStyle::Regular;
 
-        let glyph_collection: Vec<LocalGlyph> = body
+        let glyph_collection: Vec<Glyph> = body
             .chars()
             .enumerate()
             .map(|(pos, ch)| {
@@ -83,8 +81,7 @@ impl TextRect {
                     }
                 }
 
-                let glyph =
-                    Self::load_glyph_by_style(ch, &current_style, px_size, &font_collection);
+                let glyph = font_collection.load_glyph_by_style(&current_style, ch, px_size);
 
                 while let Some(entity) = current_entities.front() {
                     if entity.offset + entity.length < pos {
@@ -103,48 +100,24 @@ impl TextRect {
         Self {
             words,
             spacebar_width: Self::get_spacebar_width(&font_collection, px_size),
-            ellipsis: LocalGlyph::Outline(font_collection.get_ellipsis(px_size)),
+            ellipsis: font_collection.get_ellipsis(px_size),
             ..Default::default()
         }
     }
 
-    fn load_glyph_by_style(
-        ch: char,
-        style: &FontStyle,
-        px_size: f32,
-        font_collection: &Arc<FontCollection>,
-    ) -> LocalGlyph {
-        if ch.is_whitespace() {
-            return LocalGlyph::Empty;
-        }
-
-        let font = font_collection.font_by_style(style).font_arc();
-        let glyph_id = font.lookup_glyph_index(ch);
-        if glyph_id != 0 {
-            LocalGlyph::Outline(font.rasterize_indexed(font.lookup_glyph_index(ch), px_size))
-        } else {
-            font_collection
-                .emoji_image(ch, px_size as u16)
-                .map(|image| LocalGlyph::Image(image))
-                .unwrap_or(LocalGlyph::Empty)
-        }
-    }
-
-    fn convert_to_words(glyph_collection: Vec<LocalGlyph>) -> VecDeque<WordRect> {
+    fn convert_to_words(glyph_collection: Vec<Glyph>) -> VecDeque<WordRect> {
         glyph_collection
             .into_iter()
             .chunk_by(|glyph| !glyph.is_empty())
             .into_iter()
-            .filter_map(|(matches, word)| {
-                matches.then_some(WordRect::from_local_glyphs(word.collect()))
-            })
+            .filter_map(|(matches, word)| matches.then_some(WordRect::from_glyphs(word.collect())))
             .collect()
     }
 
     fn get_spacebar_width(font_collection: &Arc<FontCollection>, px_size: f32) -> usize {
         font_collection
             .font_by_style(&FontStyle::Regular)
-            .font_arc()
+            .font()
             .metrics(' ', px_size)
             .advance_width
             .round() as usize
@@ -175,15 +148,15 @@ impl TextRect {
 
         self.margin.shrink(&mut width, &mut height);
 
-        let (bottom_spacing, line_height) = self
+        let (descent, ascent) = self
             .words
             .iter()
-            .map(|word| (word.max_bottom_spacing(), word.max_bearing_y()))
+            .map(|word| (word.max_descent(), word.max_ascent()))
             .reduce(|lhs, rhs| (std::cmp::max(lhs.0, rhs.0), std::cmp::max(lhs.1, rhs.1)))
             .unwrap_or_default();
 
-        self.max_bearing_y = line_height;
-        self.line_height = bottom_spacing + line_height;
+        self.ascent = ascent;
+        self.line_height = descent + ascent;
 
         let mut lines = vec![];
 
@@ -219,7 +192,7 @@ impl TextRect {
                 .y_offset(y)
                 .available_space(remaining_width)
                 .spacebar_width(self.spacebar_width)
-                .max_bearing_y(self.max_bearing_y)
+                .max_ascent(self.ascent)
                 .alignment(self.alignment.to_owned())
                 .foreground(self.fg_color.to_owned())
                 .words(words)
@@ -286,7 +259,7 @@ impl Draw for TextRect {
 struct LineRect {
     y_offset: usize,
 
-    max_bearing_y: usize,
+    max_ascent: usize,
     available_space: usize,
     spacebar_width: usize,
 
@@ -304,7 +277,7 @@ impl LineRect {
     fn ellipsize(
         &mut self,
         last_word: Option<WordRect>,
-        ellipsis: LocalGlyph,
+        ellipsis: Glyph,
         ellipsize_at: &EllipsizeAt,
     ) -> EllipsiationState {
         let Some(word) = last_word else {
@@ -320,8 +293,8 @@ impl LineRect {
         }
     }
 
-    fn ellipsize_middle(&mut self, mut last_word: WordRect, ellipsis: LocalGlyph) {
-        let ellipsis_width = ellipsis.width();
+    fn ellipsize_middle(&mut self, mut last_word: WordRect, ellipsis: Glyph) {
+        let ellipsis_width = ellipsis.advance_width();
         while !last_word.is_blank()
             && last_word.advance_width + self.spacebar_width + ellipsis_width > self.available_space
         {
@@ -337,11 +310,7 @@ impl LineRect {
             return;
         }
 
-        let mut last_word = self.words.pop().expect(
-            "Here must have a WordRect struct in the LineRect. \
-            But it doesn't have, so the LineRect is not correct. Please to contact the devs of \
-            the Noti application with this information, please.",
-        );
+        let mut last_word = self.pop_word();
 
         while !last_word.is_blank()
             && last_word.advance_width + self.spacebar_width + ellipsis_width > self.available_space
@@ -355,8 +324,8 @@ impl LineRect {
         self.push_word(last_word);
     }
 
-    fn ellipsize_end(&mut self, ellipsis: LocalGlyph) -> EllipsiationState {
-        if ellipsis.width() <= self.available_space {
+    fn ellipsize_end(&mut self, ellipsis: Glyph) -> EllipsiationState {
+        if ellipsis.advance_width() <= self.available_space {
             self.push_ellipsis_to_last_word(ellipsis);
             EllipsiationState::Complete
         } else {
@@ -369,6 +338,23 @@ impl LineRect {
         }
     }
 
+    fn pop_word(&mut self) -> WordRect {
+        let last_word = self.words.pop().expect(
+            "Here must have a WordRect struct in the LineRect. \
+            But it doesn't have, so the LineRect is not correct. Please to contact the devs of \
+            the Noti application with this information, please.",
+        );
+
+        self.available_space += last_word.advance_width
+            + if !self.words.is_empty() {
+                self.spacebar_width
+            } else {
+                0
+            };
+
+        last_word
+    }
+
     fn push_word(&mut self, word: WordRect) {
         self.available_space -= word.advance_width
             + if !self.words.is_empty() {
@@ -379,9 +365,9 @@ impl LineRect {
         self.words.push(word);
     }
 
-    fn push_ellipsis_to_last_word(&mut self, ellipsis: LocalGlyph) {
+    fn push_ellipsis_to_last_word(&mut self, ellipsis: Glyph) {
         if let Some(last_word) = self.words.last_mut() {
-            self.available_space -= ellipsis.width();
+            self.available_space -= ellipsis.advance_width();
             last_word.push_glyph(ellipsis);
         }
     }
@@ -407,8 +393,8 @@ impl Draw for LineRect {
 
         for word in &self.words {
             word.glyphs.iter().for_each(|local_glyph| {
-                local_glyph.draw(&offset, self.max_bearing_y, &self.foreground, &mut output);
-                offset.x += local_glyph.width();
+                local_glyph.draw(&offset, self.max_ascent, &self.foreground, &mut output);
+                offset.x += local_glyph.advance_width();
             });
 
             offset.x += x_incrementor;
@@ -425,7 +411,7 @@ enum EllipsiationState {
 
 pub(crate) struct WordRect {
     advance_width: usize,
-    glyphs: Vec<LocalGlyph>,
+    glyphs: Vec<Glyph>,
 }
 
 impl WordRect {
@@ -435,11 +421,8 @@ impl WordRect {
             glyphs: vec![],
         }
     }
-    fn from_local_glyphs(outlined_glyphs: Vec<LocalGlyph>) -> Self {
-        let advance_width = outlined_glyphs
-            .iter()
-            .map(|local_glyph| local_glyph.width())
-            .sum();
+    fn from_glyphs(outlined_glyphs: Vec<Glyph>) -> Self {
+        let advance_width = outlined_glyphs.iter().map(|glyph| glyph.advance_width()).sum();
 
         Self {
             advance_width,
@@ -447,33 +430,33 @@ impl WordRect {
         }
     }
 
-    fn max_bearing_y(&self) -> usize {
+    fn max_ascent(&self) -> usize {
         self.glyphs
             .iter()
-            .map(|glyph| glyph.bearing_y())
+            .map(|glyph| glyph.ascent())
             .max()
             .unwrap_or_default()
     }
 
-    fn max_bottom_spacing(&self) -> usize {
+    fn max_descent(&self) -> usize {
         self.glyphs
             .iter()
-            .map(|glyph| glyph.bottom_spacing())
+            .map(|glyph| glyph.descent().abs() as usize)
             .max()
             .unwrap_or_default()
     }
 
     #[inline(always = true)]
-    fn push_glyph(&mut self, new_glyph: LocalGlyph) {
-        self.advance_width += new_glyph.width();
+    fn push_glyph(&mut self, new_glyph: Glyph) {
+        self.advance_width += new_glyph.advance_width();
         self.glyphs.push(new_glyph);
     }
 
     #[inline(always = true)]
-    fn pop_glyph(&mut self) -> Option<LocalGlyph> {
+    fn pop_glyph(&mut self) -> Option<Glyph> {
         let last_glyph = self.glyphs.pop();
         if let Some(last_glyph) = last_glyph.as_ref() {
-            self.advance_width = self.advance_width.saturating_sub(last_glyph.width());
+            self.advance_width = self.advance_width.saturating_sub(last_glyph.advance_width());
         }
 
         last_glyph
@@ -482,85 +465,5 @@ impl WordRect {
     #[inline(always = true)]
     fn is_blank(&self) -> bool {
         self.glyphs.is_empty()
-    }
-}
-
-#[derive(Default, Clone)]
-enum LocalGlyph {
-    Image(Image),
-    Outline((Metrics, Vec<u8>)),
-    #[default]
-    Empty,
-}
-
-impl LocalGlyph {
-    fn is_empty(&self) -> bool {
-        if let LocalGlyph::Empty = self {
-            true
-        } else {
-            false
-        }
-    }
-
-    fn width(&self) -> usize {
-        match self {
-            LocalGlyph::Image(img) => img.width().unwrap_or_default(),
-            LocalGlyph::Outline((metrics, _)) => metrics.advance_width.round() as usize,
-            LocalGlyph::Empty => 0,
-        }
-    }
-
-    fn bottom_spacing(&self) -> usize {
-        match self {
-            LocalGlyph::Image(_) => 0,
-            LocalGlyph::Outline((metrics, _)) => metrics.ymin.abs() as usize,
-            LocalGlyph::Empty => 0,
-        }
-    }
-
-    fn bearing_y(&self) -> usize {
-        match self {
-            LocalGlyph::Image(img) => img.height().unwrap_or_default(),
-            LocalGlyph::Outline((metrics, _)) => (metrics.height as i32 + metrics.ymin) as usize,
-            LocalGlyph::Empty => todo!(),
-        }
-    }
-
-    fn draw<O: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        max_bearing_y: usize,
-        fg_color: &Bgra,
-        callback: &mut O,
-    ) {
-        match self {
-            LocalGlyph::Image(img) => {
-                img.draw(|img_x, img_y, color| callback(img_x + offset.x, img_y + offset.x, color));
-            }
-            LocalGlyph::Outline((metrics, coverage)) => {
-                let mut coverage_iter = coverage.iter();
-                let (width, height) = (metrics.width, metrics.height);
-                let y_diff = (max_bearing_y as i32 - height as i32 - metrics.ymin)
-                    .clamp(0, i32::MAX) as usize;
-                let x_diff = metrics.xmin.clamp(0, i32::MAX) as usize;
-
-                for glyph_y in y_diff..height + y_diff {
-                    for glyph_x in x_diff..width + x_diff {
-                        callback(
-                            offset.x + glyph_x,
-                            offset.y + glyph_y,
-                            DrawColor::OverlayWithCoverage(
-                                fg_color.to_owned(),
-                                Coverage(
-                                    unsafe { *coverage_iter.next().unwrap_unchecked() } as f32
-                                        / 255.0,
-                                ),
-                            ),
-                        );
-                    }
-                }
-            }
-            LocalGlyph::Empty => unreachable!(),
-        }
     }
 }

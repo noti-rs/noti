@@ -1,17 +1,21 @@
 use derive_more::Display;
-use fontdue::{FontSettings, Metrics};
+use fontdue::{self, FontSettings};
 use owned_ttf_parser::{AsFaceRef, OwnedFace};
 use rayon::prelude::*;
 use std::{
     collections::HashMap,
     ops::{Add, AddAssign, Sub, SubAssign},
     process::Command,
-    sync::Arc,
 };
 
 use crate::data::{aliases::Result, text::EntityKind};
 
-use super::image::Image;
+use super::{
+    banner::{Coverage, Draw, DrawColor},
+    color::Bgra,
+    image::Image,
+    types::Offset,
+};
 
 pub(crate) struct FontCollection {
     map: HashMap<FontStyle, Font>,
@@ -20,6 +24,7 @@ pub(crate) struct FontCollection {
 
 impl FontCollection {
     const ELLIPSIS: char = '…';
+    const ACCEPTED_STYLES: [&'static str; 3] = ["Regular", "Bold", "Italic"];
 
     pub(crate) fn load_by_font_name(font_name: &str) -> Result<Self> {
         let process_result = Command::new("fc-list")
@@ -36,12 +41,15 @@ impl FontCollection {
             .par_split('\n')
             .filter(|line| !line.is_empty())
             .map(|line| {
-                let (filepath, styles) = line
-                    .split_once(":")
-                    .expect("Must be the colon delimiter in --format when calling fc-list");
-                Font::try_read(filepath, styles).expect("Can't read the font file")
+                line.split_once(':')
+                    .expect("Must be the colon delimiter in --format when calling fc-list")
             })
-            .fold(HashMap::new, |mut acc, font| {
+            .filter(|(_, style)| {
+                Self::ACCEPTED_STYLES
+                    .contains(&style.split_once(' ').map(|(lhs, _)| lhs).unwrap_or(style))
+            })
+            .fold(HashMap::new, |mut acc, (filepath, styles)| {
+                let font = Font::try_read(filepath, styles).expect("Can't read the font file");
                 acc.insert(font.style.clone(), font);
                 acc
             })
@@ -67,6 +75,29 @@ impl FontCollection {
         Ok(Self { map, emoji })
     }
 
+    pub(crate) fn load_glyph_by_style(
+        &self,
+        font_style: &FontStyle,
+        ch: char,
+        px_size: f32,
+    ) -> Glyph {
+        let font = self.map.get(font_style).unwrap_or(
+            self.map
+                .get(&FontStyle::Regular)
+                .expect("Not found regular font in Font collection"),
+        );
+
+        let glyph = font.load_glyph(ch, px_size);
+
+        if glyph.is_empty() {
+            self.emoji_image(ch, px_size.round() as u16)
+                .map(|image| Glyph::Image(image))
+                .unwrap_or(Glyph::Empty)
+        } else {
+            glyph
+        }
+    }
+
     pub(crate) fn font_by_style(&self, font_style: &FontStyle) -> &Font {
         self.map.get(font_style).unwrap_or(
             self.map
@@ -81,16 +112,16 @@ impl FontCollection {
         Image::from_raster_glyph_image(face.glyph_raster_image(glyph_id, size)?, size as u32)
     }
 
-    pub(crate) fn get_ellipsis(&self, px_size: f32) -> (Metrics, Vec<u8>) {
-        let font = self.font_by_style(&FontStyle::Regular).font_arc();
-        font.rasterize(Self::ELLIPSIS, px_size)
+    pub(crate) fn get_ellipsis(&self, px_size: f32) -> Glyph {
+        let font = self.font_by_style(&FontStyle::Regular);
+        font.load_glyph(Self::ELLIPSIS, px_size)
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct Font {
     style: FontStyle,
-    data: Arc<fontdue::Font>,
+    data: fontdue::Font,
 }
 
 impl Font {
@@ -102,16 +133,138 @@ impl Font {
                 .unwrap_or(styles),
         );
 
+        let time = std::time::Instant::now();
+
         let bytes = std::fs::read(filepath)?;
         let font_settings = FontSettings::default();
-        let data = Arc::new(fontdue::Font::from_bytes(bytes, font_settings)?);
+        let data = fontdue::Font::from_bytes(bytes, font_settings)?;
+        dbg!(time.elapsed());
 
         Ok(Self { style, data })
     }
 
-    pub(crate) fn font_arc(&self) -> Arc<fontdue::Font> {
-        self.data.clone()
+    pub(crate) fn load_glyph(&self, ch: char, px_size: f32) -> Glyph {
+        if ch.is_whitespace() {
+            return Glyph::Empty;
+        }
+
+        let glyph_id = self.data.lookup_glyph_index(ch);
+        if glyph_id == 0 {
+            Glyph::Empty
+        } else {
+            let (metrics, coverage) = self.data.rasterize(ch, px_size);
+            Glyph::Outline {
+                metrics: Metrics {
+                    xmin: metrics.xmin,
+                    ymin: metrics.ymin,
+                    ascent: metrics.height as i32 + metrics.ymin,
+                    descent: std::cmp::min(-metrics.ymin, 0),
+                    width: metrics.width,
+                    height: metrics.height,
+                    advance_width: metrics.advance_width,
+                },
+                coverage,
+            }
+        }
     }
+
+    pub(crate) fn font(&self) -> &fontdue::Font {
+        &self.data
+    }
+}
+
+#[derive(Default, Clone)]
+pub(crate) enum Glyph {
+    Image(Image),
+    Outline {
+        metrics: Metrics,
+        coverage: Vec<u8>,
+    },
+    #[default]
+    Empty,
+}
+
+impl Glyph {
+    pub(crate) fn is_empty(&self) -> bool {
+        if let Glyph::Empty = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn advance_width(&self) -> usize {
+        match self {
+            Glyph::Image(img) => img.width().unwrap_or_default(),
+            Glyph::Outline { metrics, .. } => metrics.advance_width.round() as usize,
+            Glyph::Empty => 0,
+        }
+    }
+
+    pub(crate) fn descent(&self) -> i32 {
+        match self {
+            Glyph::Image(_) => 0,
+            Glyph::Outline { metrics, .. } => metrics.descent,
+            Glyph::Empty => 0,
+        }
+    }
+
+    pub(crate) fn ascent(&self) -> usize {
+        match self {
+            Glyph::Image(img) => img.height().unwrap_or_default(),
+            Glyph::Outline { metrics, .. } => metrics.ascent as usize,
+            Glyph::Empty => todo!(),
+        }
+    }
+
+    pub(super) fn draw<O: FnMut(usize, usize, DrawColor)>(
+        &self,
+        offset: &Offset,
+        max_bearing_y: usize,
+        fg_color: &Bgra,
+        callback: &mut O,
+    ) {
+        match self {
+            Glyph::Image(img) => {
+                img.draw(|img_x, img_y, color| callback(img_x + offset.x, img_y + offset.x, color));
+            }
+            Glyph::Outline { metrics, coverage } => {
+                let mut coverage_iter = coverage.iter();
+                let (width, height) = (metrics.width, metrics.height);
+                let y_diff = (max_bearing_y as i32 - height as i32 - metrics.ymin)
+                    .clamp(0, i32::MAX) as usize;
+                let x_diff = metrics.xmin.clamp(0, i32::MAX) as usize;
+
+                for glyph_y in y_diff..height + y_diff {
+                    for glyph_x in x_diff..width + x_diff {
+                        callback(
+                            offset.x + glyph_x,
+                            offset.y + glyph_y,
+                            DrawColor::OverlayWithCoverage(
+                                fg_color.to_owned(),
+                                Coverage(
+                                    unsafe { *coverage_iter.next().unwrap_unchecked() } as f32
+                                        / 255.0,
+                                ),
+                            ),
+                        );
+                    }
+                }
+            }
+            Glyph::Empty => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Metrics {
+    pub(crate) xmin: i32,
+    pub(crate) ymin: i32,
+    pub(crate) ascent: i32,
+    pub(crate) descent: i32,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    pub(crate) advance_width: f32,
 }
 
 #[derive(Debug, Display, Hash, PartialEq, Eq, Clone)]

@@ -847,6 +847,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "efe23d02309319171d00d794c9ff48d4f903c0e481375b1b04b017470838af04"
 dependencies = [
  "hashbrown",
+ "rayon",
  "ttf-parser 0.21.1",
 ]
 
@@ -958,6 +959,7 @@ checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
  "allocator-api2",
+ "rayon",
 ]
 
 [[package]]
