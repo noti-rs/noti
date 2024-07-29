@@ -22,23 +22,25 @@ impl Image {
                 let has_alpha = image_data.has_alpha;
 
                 let image = if has_alpha {
-                    image::DynamicImage::from(
-                        image::RgbaImage::from_vec(
-                            width as u32,
-                            height as u32,
-                            image_data.data.clone(),
-                        )
-                        .unwrap(),
-                    )
+                    let Some(rgba_image) = image::RgbaImage::from_vec(
+                        width as u32,
+                        height as u32,
+                        image_data.data.clone(),
+                    ) else {
+                        return Image::Unknown;
+                    };
+
+                    image::DynamicImage::from(rgba_image)
                 } else {
-                    image::DynamicImage::from(
-                        image::RgbImage::from_vec(
-                            width as u32,
-                            height as u32,
-                            image_data.data.clone(),
-                        )
-                        .unwrap(),
-                    )
+                    let Some(rgb_image) = image::RgbImage::from_vec(
+                        width as u32,
+                        height as u32,
+                        image_data.data.clone(),
+                    ) else {
+                        return Image::Unknown;
+                    };
+
+                    image::DynamicImage::from(rgb_image)
                 };
 
                 Self::resize(&mut width, &mut height, size);
@@ -103,13 +105,13 @@ impl Image {
                 height as u32,
                 data.chunks_exact(4)
                     .flat_map(|chunk| {
-                        Bgra::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap())
+                        Bgra::from(TryInto::<&[u8; 4]>::try_into(chunk).expect("Current chunk is not correct. Please contact to developer with this information."))
                             .to_rgba()
                             .to_slice()
                     })
                     .collect::<Vec<u8>>(),
             )
-            .unwrap(),
+            .expect("Can't parse image data of emoji. Please contact to developer with this information."),
         };
 
         let factor = size as f32 / width as f32;
@@ -139,11 +141,17 @@ impl Image {
             return self;
         }
 
-        let tree = resvg::usvg::Tree::from_data(
-            &std::fs::read(std::path::Path::new(image_path.unwrap())).unwrap(),
-            &resvg::usvg::Options::default(),
-        )
-        .unwrap();
+        let image_path = unsafe { image_path.unwrap_unchecked() };
+
+        let tree = if let Ok(data) = std::fs::read(image_path) {
+            resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default())
+        } else {
+            return self;
+        };
+
+        let Ok(tree) = tree else {
+            return self;
+        };
 
         let tree_size = tree.size();
         let (mut width, mut height) = (
@@ -159,7 +167,7 @@ impl Image {
             height as f32 / tree_size.height()
         };
 
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(width as u32, height as u32).unwrap();
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(width as u32, height as u32).expect("The Pixmap must be created. Something happened wrong. Please contact to developer with this information.");
         resvg::render(
             &tree,
             resvg::usvg::Transform::from_scale(scale, scale),
@@ -233,7 +241,11 @@ impl Draw for Image {
 
         for y in 0..image_data.height as usize {
             for x in 0..image_data.width as usize {
-                output(x, y, DrawColor::Overlay(chunks.next().unwrap().to_bgra()));
+                output(
+                    x,
+                    y,
+                    DrawColor::Overlay(unsafe { chunks.next().unwrap_unchecked() }.to_bgra()),
+                );
             }
         }
     }
