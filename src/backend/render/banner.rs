@@ -154,7 +154,14 @@ impl BannerRect {
     ) -> Option<Image> {
         let image =
             Image::from_image_data(self.data.hints.image_data.as_ref(), display.image_size())
-                .or_svg(self.data.hints.image_path.as_deref(), display.image_size());
+                .or_svg(
+                    self.data
+                        .hints
+                        .image_path
+                        .as_deref()
+                        .or(Some(self.data.app_icon.as_str())),
+                    display.image_size(),
+                );
 
         if !image.exists() {
             return None;
