@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::collections::VecDeque;
 
 use derive_builder::Builder;
 use itertools::Itertools;
@@ -36,11 +36,7 @@ pub(crate) struct TextRect {
 }
 
 impl TextRect {
-    pub(crate) fn from_str(
-        string: &str,
-        px_size: f32,
-        font_collection: Arc<FontCollection>,
-    ) -> Self {
+    pub(crate) fn from_str(string: &str, px_size: f32, font_collection: &FontCollection) -> Self {
         let glyph_collection: Vec<Glyph> = string
             .chars()
             .map(|ch| font_collection.load_glyph_by_style(&FontStyle::Regular, ch, px_size))
@@ -49,18 +45,14 @@ impl TextRect {
         let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
-            spacebar_width: Self::get_spacebar_width(&font_collection, px_size),
+            spacebar_width: Self::get_spacebar_width(font_collection, px_size),
             ellipsis: font_collection.get_ellipsis(px_size),
             line_height: font_collection.max_height(px_size),
             ..Default::default()
         }
     }
 
-    pub(crate) fn from_text(
-        text: &Text,
-        px_size: f32,
-        font_collection: Arc<FontCollection>,
-    ) -> Self {
+    pub(crate) fn from_text(text: &Text, px_size: f32, font_collection: &FontCollection) -> Self {
         let Text { body, entities } = text;
 
         let mut entities = VecDeque::from_iter(entities.iter());
@@ -99,7 +91,7 @@ impl TextRect {
         let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
-            spacebar_width: Self::get_spacebar_width(&font_collection, px_size),
+            spacebar_width: Self::get_spacebar_width(font_collection, px_size),
             ellipsis: font_collection.get_ellipsis(px_size),
             line_height: font_collection.max_height(px_size),
             ..Default::default()
@@ -115,7 +107,7 @@ impl TextRect {
             .collect()
     }
 
-    fn get_spacebar_width(font_collection: &Arc<FontCollection>, px_size: f32) -> usize {
+    fn get_spacebar_width(font_collection: &FontCollection, px_size: f32) -> usize {
         font_collection.get_spacebar_width(px_size).round() as usize
     }
 
