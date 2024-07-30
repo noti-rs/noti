@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, sync::Arc, time};
+use std::{fs::File, io::Write, time};
 
 use crate::{
     config::{spacing::Spacing, Colors, DisplayConfig, CONFIG},
@@ -30,8 +30,6 @@ pub struct BannerRect {
 
     stride: usize,
     framebuffer: Vec<u8>,
-
-    font_collection: Option<Arc<FontCollection>>,
 }
 
 impl BannerRect {
@@ -42,13 +40,7 @@ impl BannerRect {
 
             stride: 0,
             framebuffer: vec![],
-
-            font_collection: None,
         }
-    }
-
-    pub(crate) fn set_font_collection(&mut self, font_collection: Arc<FontCollection>) {
-        self.font_collection = Some(font_collection);
     }
 
     pub(crate) fn notification(&self) -> &Notification {
@@ -72,7 +64,7 @@ impl BannerRect {
         file.write_all(&self.framebuffer).unwrap();
     }
 
-    pub(crate) fn draw(&mut self) {
+    pub(crate) fn draw(&mut self, font_collection: &FontCollection) {
         let (mut width, mut height) = (
             CONFIG.general().width() as usize,
             CONFIG.general().height() as usize,
@@ -100,12 +92,19 @@ impl BannerRect {
 
         offset.x += img_width;
 
-        let summary = self.draw_summary(offset.clone(), width, height, colors, display);
+        let summary = self.draw_summary(
+            offset.clone(),
+            width,
+            height,
+            colors,
+            font_collection,
+            display,
+        );
 
         height -= summary.height();
         offset.y += summary.height();
 
-        let _ = self.draw_text(offset, width, height, colors, display);
+        let _ = self.draw_text(offset, width, height, colors, font_collection, display);
 
         self.draw_border(
             CONFIG.general().width().into(),
@@ -199,6 +198,7 @@ impl BannerRect {
         width: usize,
         height: usize,
         colors: &Colors,
+        font_collection: &FontCollection,
         display: &DisplayConfig,
     ) -> TextRect {
         let title_cfg = display.title();
@@ -209,7 +209,7 @@ impl BannerRect {
         let mut summary = TextRect::from_str(
             &self.data.summary,
             CONFIG.general().font().size() as f32,
-            self.font_collection.as_ref().cloned().unwrap(),
+            font_collection,
         );
 
         summary.set_margin(title_cfg.margin());
@@ -237,6 +237,7 @@ impl BannerRect {
         width: usize,
         height: usize,
         colors: &Colors,
+        font_collection: &FontCollection,
         display: &DisplayConfig,
     ) -> TextRect {
         let body_cfg = display.body();
@@ -245,17 +246,9 @@ impl BannerRect {
         let background: Bgra = colors.background().into();
 
         let mut text = if display.markup() {
-            TextRect::from_text(
-                &self.data.body,
-                font_size,
-                self.font_collection.as_ref().cloned().unwrap(),
-            )
+            TextRect::from_text(&self.data.body, font_size, font_collection)
         } else {
-            TextRect::from_str(
-                &self.data.body.body,
-                font_size,
-                self.font_collection.as_ref().cloned().unwrap(),
-            )
+            TextRect::from_str(&self.data.body.body, font_size, font_collection)
         };
 
         text.set_margin(body_cfg.margin());

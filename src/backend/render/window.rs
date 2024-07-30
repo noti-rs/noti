@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, os::fd::AsFd, sync::Arc};
+use std::{fs::File, io::Write, os::fd::AsFd};
 
 use crate::{
     config::{self, CONFIG},
@@ -30,7 +30,7 @@ pub(crate) struct WindowManager {
     qhandle: Option<QueueHandle<Window>>,
     window: Option<Window>,
 
-    font_collection: Arc<FontCollection>,
+    font_collection: FontCollection,
 
     banner_stack: Vec<BannerRect>,
     events: Vec<RendererMessage>,
@@ -39,9 +39,7 @@ pub(crate) struct WindowManager {
 impl WindowManager {
     pub(crate) fn init() -> Result<Self> {
         let connection = Connection::connect_to_env()?;
-        let font_collection = Arc::new(FontCollection::load_by_font_name(
-            CONFIG.general().font().name(),
-        )?);
+        let font_collection = FontCollection::load_by_font_name(CONFIG.general().font().name())?;
 
         Ok(Self {
             connection,
@@ -68,8 +66,7 @@ impl WindowManager {
             .into_iter()
             .map(|notification| {
                 let mut banner_rect = BannerRect::init(notification);
-                banner_rect.set_font_collection(self.font_collection.clone());
-                banner_rect.draw();
+                banner_rect.draw(&self.font_collection);
                 banner_rect
             })
             .collect();
@@ -263,7 +260,7 @@ impl WindowManager {
             let notification = notifications.remove(notification_index);
             let rect = &mut self.banner_stack[stack_index];
             rect.update_data(notification);
-            rect.draw();
+            rect.draw(&self.font_collection);
         }
     }
 
