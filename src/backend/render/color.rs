@@ -2,7 +2,7 @@ use std::ops::{Mul, MulAssign};
 
 use crate::config::Color;
 
-use super::banner::Coverage;
+use super::widget::Coverage;
 
 #[derive(Clone, Default)]
 pub(crate) struct Bgra {

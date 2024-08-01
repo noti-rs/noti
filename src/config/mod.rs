@@ -252,7 +252,7 @@ impl From<String> for Anchor {
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct DisplayConfig {
-    image_size: Option<u16>,
+    image: Option<ImageProperty>,
 
     padding: Option<Spacing>,
     border: Option<Border>,
@@ -268,8 +268,8 @@ pub struct DisplayConfig {
 }
 
 impl DisplayConfig {
-    pub fn image_size(&self) -> u16 {
-        self.image_size.unwrap()
+    pub fn image(&self) -> &ImageProperty {
+        self.image.as_ref().unwrap()
     }
 
     pub fn padding(&self) -> &Spacing {
@@ -305,9 +305,10 @@ impl DisplayConfig {
     }
 
     fn fill_empty_by_default(&mut self) {
-        if self.image_size.is_none() {
-            self.image_size = Some(64);
+        if self.image.is_none() {
+            self.image = Some(Default::default());
         }
+        self.image.as_mut().unwrap().fill_empty_by_default();
 
         if self.padding.is_none() {
             self.padding = Some(Default::default());
@@ -343,6 +344,36 @@ impl DisplayConfig {
 
         if self.timeout.is_none() {
             self.timeout = Some(0);
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct ImageProperty {
+    size: Option<u16>,
+    margin: Option<Spacing>,
+}
+
+impl ImageProperty {
+    pub fn size(&self) -> u16 {
+        self.size.unwrap()
+    }
+
+    pub fn margin(&self) -> &Spacing {
+        self.margin.as_ref().unwrap()
+    }
+
+    pub fn margin_mut(&mut self) -> &mut Spacing {
+        self.margin.as_mut().unwrap()
+    }
+
+    fn fill_empty_by_default(&mut self) {
+        if self.size.is_none() {
+            self.size = Some(64);
+        }
+
+        if self.margin.is_none() {
+            self.margin = Some(Default::default());
         }
     }
 }
@@ -529,17 +560,66 @@ impl Border {
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct TextProperty {
     margin: Option<Spacing>,
-    alignment: Option<TextAlignment>,
+    justification: Option<TextJustification>,
     line_spacing: Option<u8>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
-#[serde(from = "String")]
-pub enum TextAlignment {
+pub struct Alignment {
+    horizontal: Option<Position>,
+    vertical: Option<Position>,
+}
+
+impl Alignment {
+    pub fn new(horizontal: Position, vertical: Position) -> Self {
+        Self {
+            horizontal: Some(horizontal),
+            vertical: Some(vertical),
+        }
+    }
+
+    pub fn horizontal(&self) -> &Position {
+        self.horizontal.as_ref().unwrap()
+    }
+
+    pub fn vertical(&self) -> &Position {
+        self.vertical.as_ref().unwrap()
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub enum Position {
+    #[serde(rename = "start")]
+    Start,
+    #[default]
+    #[serde(rename = "center")]
+    Center,
+    #[serde(rename = "end")]
+    End,
+    #[serde(rename = "space-between")]
+    SpaceBetween,
+}
+
+impl Position {
+    pub fn compute_initial_pos(&self, width: usize, element_width: usize) -> usize {
+        match self {
+            Position::Start | Position::SpaceBetween => 0,
+            Position::Center => width / 2 - element_width / 2,
+            Position::End => width - element_width,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub enum TextJustification {
+    #[serde(rename = "center")]
     Center,
     #[default]
+    #[serde(rename = "left")]
     Left,
+    #[serde(rename = "right")]
     Right,
+    #[serde(rename = "space-between")]
     SpaceBetween,
 }
 
@@ -548,8 +628,8 @@ impl TextProperty {
         self.margin.as_ref().unwrap()
     }
 
-    pub fn alignment(&self) -> &TextAlignment {
-        self.alignment.as_ref().unwrap()
+    pub fn justification(&self) -> &TextJustification {
+        self.justification.as_ref().unwrap()
     }
 
     pub fn line_spacing(&self) -> u8 {
@@ -561,35 +641,16 @@ impl TextProperty {
             self.margin = Some(Default::default());
         }
 
-        if self.alignment.is_none() {
+        if self.justification.is_none() {
             if entity == "title" {
-                self.alignment = Some(TextAlignment::Center);
+                self.justification = Some(TextJustification::Center);
             } else {
-                self.alignment = Some(Default::default());
+                self.justification = Some(Default::default());
             }
         }
 
         if self.line_spacing.is_none() {
             self.line_spacing = Some(0);
-        }
-    }
-}
-
-impl From<String> for TextAlignment {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "center" => TextAlignment::Center,
-            "right" => TextAlignment::Right,
-            "left" => TextAlignment::Left,
-            "space-between" => TextAlignment::SpaceBetween,
-            other => panic!(
-                "Invalid text alignment option! There are possible values:\n\
-                - center\n\
-                - right\n\
-                - left\n\
-                - space-between\n\
-                Used: {other}"
-            ),
         }
     }
 }
@@ -612,7 +673,14 @@ pub struct AppConfig {
 impl AppConfig {
     fn merge(&mut self, other: &DisplayConfig) {
         if let Some(display) = self.display.as_mut() {
-            display.image_size = display.image_size.or(other.image_size);
+            if let Some(image) = display.image.as_mut() {
+                let other_image = other.image();
+
+                image.size = image.size.or(other_image.size);
+                image.margin = image.margin.clone().or(other_image.margin.clone());
+            } else {
+                display.image = other.image.clone();
+            }
 
             display.padding = display.padding.clone().or(other.padding.clone());
 
@@ -640,7 +708,10 @@ impl AppConfig {
                 let other_title = other.title();
 
                 title.margin = title.margin.clone().or(other_title.margin.clone());
-                title.alignment = title.alignment.clone().or(other_title.alignment.clone());
+                title.justification = title
+                    .justification
+                    .clone()
+                    .or(other_title.justification.clone());
                 title.line_spacing = title.line_spacing.or(other_title.line_spacing);
             } else {
                 display.title = other.title.clone();
@@ -650,7 +721,10 @@ impl AppConfig {
                 let other_body = other.body();
 
                 body.margin = body.margin.clone().or(other_body.margin.clone());
-                body.alignment = body.alignment.clone().or(other_body.alignment.clone());
+                body.justification = body
+                    .justification
+                    .clone()
+                    .or(other_body.justification.clone());
                 body.line_spacing = body.line_spacing.or(other_body.line_spacing);
             } else {
                 display.body = other.body.clone();

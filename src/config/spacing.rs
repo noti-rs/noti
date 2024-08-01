@@ -40,16 +40,32 @@ impl Spacing {
         self.top
     }
 
+    pub fn set_top(&mut self, top: u8) {
+        self.top = top;
+    }
+
     pub fn right(&self) -> u8 {
         self.right
+    }
+
+    pub fn set_right(&mut self, right: u8) {
+        self.right = right;
     }
 
     pub fn bottom(&self) -> u8 {
         self.bottom
     }
 
+    pub fn set_bottom(&mut self, bottom: u8) {
+        self.bottom = bottom;
+    }
+
     pub fn left(&self) -> u8 {
         self.left
+    }
+
+    pub fn set_left(&mut self, left: u8) {
+        self.left = left;
     }
 
     pub fn shrink(&self, width: &mut usize, height: &mut usize) {

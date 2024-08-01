@@ -3,8 +3,8 @@ use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 use crate::data::image::ImageData;
 
 use super::{
-    banner::{Draw, DrawColor},
     color::{Bgra, Rgba},
+    types::Offset, widget::{Draw, DrawColor},
 };
 
 #[derive(Clone)]
@@ -227,7 +227,11 @@ impl Image {
 }
 
 impl Draw for Image {
-    fn draw<Output: FnMut(usize, usize, super::banner::DrawColor)>(&self, mut output: Output) {
+    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
+        &self,
+        offset: &Offset,
+        output: &mut Output,
+    ) {
         let image_data = if let Image::Exists(image_data) = self {
             image_data
         } else {
@@ -242,8 +246,8 @@ impl Draw for Image {
         for y in 0..image_data.height as usize {
             for x in 0..image_data.width as usize {
                 output(
-                    x,
-                    y,
+                    x + offset.x,
+                    y + offset.y,
                     DrawColor::Overlay(unsafe { chunks.next().unwrap_unchecked() }.to_bgra()),
                 );
             }
