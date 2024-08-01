@@ -11,7 +11,7 @@ use std::{
 use crate::data::{aliases::Result, text::EntityKind};
 
 use super::{
-    banner::{Coverage, Draw, DrawColor},
+    widget::{Coverage, Draw, DrawColor},
     color::Bgra,
     image::Image,
 };
@@ -216,10 +216,14 @@ impl Glyph {
 }
 
 impl Draw for Glyph {
-    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
+    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
+        &self,
+        offset: &super::types::Offset,
+        output: &mut Output,
+    ) {
         match self {
             Glyph::Image(img) => {
-                img.draw(|img_x, img_y, color| output(img_x, img_y, color));
+                img.draw_with_offset(offset, output);
             }
             Glyph::Outline {
                 color,
@@ -229,8 +233,10 @@ impl Draw for Glyph {
                 let bounds = outlined_glyph.px_bounds();
                 outlined_glyph.draw(|x, y, coverage| {
                     output(
-                        (bounds.min.x.round() as i32 + x as i32).clamp(0, i32::MAX) as usize,
-                        (bounds.min.y.round() as i32 + y as i32).clamp(0, i32::MAX) as usize,
+                        (bounds.min.x.round() as i32 + x as i32).clamp(0, i32::MAX) as usize
+                            + offset.x,
+                        (bounds.min.y.round() as i32 + y as i32).clamp(0, i32::MAX) as usize
+                            + offset.y,
                         DrawColor::OverlayWithCoverage(color.to_owned(), Coverage(coverage)),
                     )
                 })

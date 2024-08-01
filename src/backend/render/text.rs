@@ -4,15 +4,14 @@ use derive_builder::Builder;
 use itertools::Itertools;
 
 use crate::{
-    config::{spacing::Spacing, EllipsizeAt, TextAlignment},
+    config::{spacing::Spacing, EllipsizeAt, TextJustification},
     data::text::Text,
 };
 
 use super::{
-    banner::{Draw, DrawColor},
     color::Bgra,
     font::{FontCollection, FontStyle, Glyph},
-    types::Offset,
+    types::{Offset, RectSize}, widget::{Draw, DrawColor},
 };
 
 #[derive(Default)]
@@ -20,7 +19,7 @@ pub(crate) struct TextRect {
     words: VecDeque<WordRect>,
     lines: Vec<LineRect>,
 
-    width: usize,
+    rect_size: RectSize,
 
     spacebar_width: usize,
     line_height: usize,
@@ -28,7 +27,7 @@ pub(crate) struct TextRect {
 
     ellipsize_at: EllipsizeAt,
     ellipsis: Glyph,
-    alignment: TextAlignment,
+    justification: TextJustification,
 
     foreground: Bgra,
 
@@ -127,21 +126,21 @@ impl TextRect {
         self.ellipsize_at = ellipsize_at.clone();
     }
 
-    pub(crate) fn set_alignment(&mut self, alignment: &TextAlignment) {
-        self.alignment = alignment.to_owned();
+    pub(crate) fn set_justification(&mut self, justification: &TextJustification) {
+        self.justification = justification.to_owned();
     }
 
-    pub(crate) fn compile(&mut self, mut width: usize, mut height: usize) {
-        self.width = width;
-        self.margin.shrink(&mut width, &mut height);
+    pub(crate) fn compile(&mut self, mut rect_size: RectSize) {
+        self.rect_size.width = rect_size.width;
+        rect_size.shrink_by(&self.margin);
 
         let mut lines = vec![];
 
-        for y in (0..height)
+        for y in (0..rect_size.height)
             .step_by(self.line_height + self.line_spacing)
-            .take_while(|y| height - *y >= self.line_height)
+            .take_while(|y| rect_size.height - *y >= self.line_height)
         {
-            let mut remaining_width = width;
+            let mut remaining_width = rect_size.width;
             let mut words = vec![];
 
             while let Some(word) = self.words.front() {
@@ -169,7 +168,7 @@ impl TextRect {
                 .y_offset(y)
                 .available_space(remaining_width)
                 .spacebar_width(self.spacebar_width)
-                .alignment(self.alignment.to_owned())
+                .justification(self.justification.to_owned())
                 .words(words)
                 .build()
                 .expect("Can't create a Line rect from existing components. Please contact with developers with this information."));
@@ -214,7 +213,7 @@ impl TextRect {
 
     #[allow(unused)]
     pub(crate) fn width(&self) -> usize {
-        self.width
+        self.rect_size.width
     }
 
     pub(crate) fn height(&self) -> usize {
@@ -227,12 +226,16 @@ impl TextRect {
 }
 
 impl Draw for TextRect {
-    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
-        let offset: Offset = (&self.margin).into();
+    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
+        &self,
+        offset: &Offset,
+        output: &mut Output,
+    ) {
+        let offset = Offset::from(&self.margin) + offset.clone();
 
         self.lines
             .iter()
-            .for_each(|line| line.draw(|x, y, color| output(x + offset.x, y + offset.y, color)))
+            .for_each(|line| line.draw_with_offset(&offset, output))
     }
 }
 
@@ -244,7 +247,7 @@ struct LineRect {
     available_space: usize,
     spacebar_width: usize,
 
-    alignment: TextAlignment,
+    justification: TextJustification,
 
     words: Vec<WordRect>,
 }
@@ -360,12 +363,16 @@ impl LineRect {
 }
 
 impl Draw for LineRect {
-    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
-        let (x, x_incrementor) = match &self.alignment {
-            TextAlignment::Center => (self.available_space / 2, self.spacebar_width),
-            TextAlignment::Left => (0, self.spacebar_width),
-            TextAlignment::Right => (self.available_space, self.spacebar_width),
-            TextAlignment::SpaceBetween => (
+    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
+        &self,
+        offset: &Offset,
+        output: &mut Output,
+    ) {
+        let (x, x_incrementor) = match &self.justification {
+            TextJustification::Center => (self.available_space / 2, self.spacebar_width),
+            TextJustification::Left => (0, self.spacebar_width),
+            TextJustification::Right => (self.available_space, self.spacebar_width),
+            TextJustification::SpaceBetween => (
                 0,
                 if self.words.len() == 1 {
                     0
@@ -375,12 +382,10 @@ impl Draw for LineRect {
             ),
         };
 
-        let mut offset = Offset::new(x, self.y_offset);
+        let mut offset = offset.clone() + Offset::new(x, self.y_offset);
 
         self.words.iter().for_each(|word| {
-            word.draw(|x, y, color| {
-                output(x + offset.x, y + offset.y, color);
-            });
+            word.draw_with_offset(&offset, output);
             offset.x += x_incrementor + word.width();
         });
     }
@@ -455,12 +460,14 @@ impl WordRect {
 }
 
 impl Draw for WordRect {
-    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, mut output: Output) {
-        let mut offset = Offset::new_x(0);
+    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
+        &self,
+        offset: &Offset,
+        output: &mut Output,
+    ) {
+        let mut offset = offset.to_owned();
         self.glyphs.iter().for_each(|glyph| {
-            glyph.draw(|x, y, color| {
-                output(x + offset.x, y + offset.y, color);
-            });
+            glyph.draw_with_offset(&offset, output);
             offset.x += glyph.advance_width();
         })
     }

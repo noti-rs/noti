@@ -1,7 +1,7 @@
 use derive_builder::Builder;
 
 use super::{
-    banner::{Coverage, Draw, DrawColor},
+    widget::{Coverage, Draw, DrawColor},
     color::Bgra,
     types::Offset,
 };
@@ -191,7 +191,11 @@ impl Border {
 }
 
 impl Draw for Border {
-    fn draw<Output: FnMut(usize, usize, super::banner::DrawColor)>(&self, mut output: Output) {
+    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
+        &self,
+        _: &Offset,
+        output: &mut Output,
+    ) {
         let corner = match (self.size, self.radius) {
             (0, 0) => return,
             (size, 0) => self.get_bordered_coverage(size),
@@ -200,12 +204,12 @@ impl Draw for Border {
         };
 
         let corner_size = corner.len();
-        Self::draw_corner(Offset::no_offset(), &corner, Corner::TopLeft, &mut output);
+        Self::draw_corner(Offset::no_offset(), &corner, Corner::TopLeft, output);
         Self::draw_corner(
             Offset::new_x(self.frame_width - corner_size),
             &corner,
             Corner::TopRight,
-            &mut output,
+            output,
         );
         Self::draw_corner(
             Offset::new(
@@ -214,13 +218,13 @@ impl Draw for Border {
             ),
             &corner,
             Corner::BottomRight,
-            &mut output,
+            output,
         );
         Self::draw_corner(
             Offset::new_y(self.frame_height - corner_size),
             &corner,
             Corner::BottomLeft,
-            &mut output,
+            output,
         );
 
         if self.size != 0 {
@@ -229,7 +233,7 @@ impl Draw for Border {
                 Offset::new_x(corner_size),
                 self.frame_width - corner_size * 2,
                 self.size,
-                &mut output,
+                output,
             );
 
             // Bottom
@@ -237,7 +241,7 @@ impl Draw for Border {
                 Offset::new(corner_size, self.frame_height - self.size),
                 self.frame_width - corner_size * 2,
                 self.size,
-                &mut output,
+                output,
             );
 
             // Left
@@ -245,7 +249,7 @@ impl Draw for Border {
                 Offset::new_y(corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
-                &mut output,
+                output,
             );
 
             // Right
@@ -253,7 +257,7 @@ impl Draw for Border {
                 Offset::new(self.frame_width - self.size, corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
-                &mut output,
+                output,
             );
         }
     }
