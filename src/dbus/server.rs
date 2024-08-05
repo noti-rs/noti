@@ -81,7 +81,7 @@ impl Handler {
 
         #[rustfmt::skip]
         let created_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let hints = Hints::from(&hints);
+        let hints = Hints::from(hints);
         let actions = NotificationAction::from_vec(&actions);
         let body = Text::parse(body);
         let expire_timeout = Timeout::from(expire_timeout);

@@ -42,8 +42,8 @@ impl Hints {
     }
 }
 
-impl From<&HashMap<&str, Value<'_>>> for Hints {
-    fn from(hints: &HashMap<&str, Value>) -> Self {
+impl From<HashMap<&str, Value<'_>>> for Hints {
+    fn from(mut hints: HashMap<&str, Value>) -> Self {
         let urgency = hints
             .get("urgency")
             .and_then(Urgency::from_hint)
@@ -56,16 +56,16 @@ impl From<&HashMap<&str, Value<'_>>> for Hints {
 
         let image_data = ["image-data", "image_data", "icon-data", "icon_data"]
             .iter()
-            .find_map(|&name| hints.get(name))
+            .find_map(|&name| hints.remove(name))
             .and_then(ImageData::from_hint);
 
-        let image_path = Self::get_hint_value(hints, "image-path");
-        let desktop_entry = Self::get_hint_value(hints, "desktop-entry");
-        let sound_file = Self::get_hint_value(hints, "sound-file");
-        let sound_name = Self::get_hint_value(hints, "sound-name"); // NOTE: http://0pointer.de/public/sound-naming-spec.html
-        let resident = Self::get_hint_value(hints, "resident");
-        let suppress_sound = Self::get_hint_value(hints, "suppress-sound");
-        let transient = Self::get_hint_value(hints, "transient");
+        let image_path = Self::get_hint_value(&hints, "image-path");
+        let desktop_entry = Self::get_hint_value(&hints, "desktop-entry");
+        let sound_file = Self::get_hint_value(&hints, "sound-file");
+        let sound_name = Self::get_hint_value(&hints, "sound-name"); // NOTE: http://0pointer.de/public/sound-naming-spec.html
+        let resident = Self::get_hint_value(&hints, "resident");
+        let suppress_sound = Self::get_hint_value(&hints, "suppress-sound");
+        let transient = Self::get_hint_value(&hints, "transient");
         let coordinates = Coordinates::from_hints(&hints);
 
         Hints {
