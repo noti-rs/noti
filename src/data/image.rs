@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use zbus::zvariant::{Array, Structure, Value};
 
@@ -26,29 +28,43 @@ pub struct ImageData {
 }
 
 impl ImageData {
-    pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
+    pub fn from_hint(hint: Value<'_>) -> Option<Self> {
         Structure::try_from(hint)
             .ok()
             .and_then(Self::from_structure)
     }
 
     fn from_structure(image_structure: Structure) -> Option<Self> {
-        let fields = image_structure.fields();
+        fn get_field<'a, 'b>(
+            fields: &'a mut HashMap<usize, Value<'b>>,
+            index: &'a usize,
+        ) -> Value<'b> {
+            unsafe { fields.remove(index).unwrap_unchecked() }
+        }
+
+        let mut fields = image_structure.into_fields().into_iter().enumerate().fold(
+            HashMap::new(),
+            |mut acc, (index, value)| {
+                acc.insert(index, value);
+                acc
+            },
+        );
+
         if fields.len() < 7 {
             return None;
         }
 
-        let image_raw = match Array::try_from(&fields[6]) {
+        let image_raw = match Array::try_from(get_field(&mut fields, &6)) {
             Ok(array) => array,
             Err(_) => return None,
         };
 
-        let width = i32::try_from(&fields[0]).ok()?;
-        let height = i32::try_from(&fields[1]).ok()?;
-        let rowstride = i32::try_from(&fields[2]).ok()?;
-        let has_alpha = bool::try_from(&fields[3]).ok()?;
-        let bits_per_sample = i32::try_from(&fields[4]).ok()?;
-        let channels = i32::try_from(&fields[5]).ok()?;
+        let width = i32::try_from(get_field(&mut fields, &0)).ok()?;
+        let height = i32::try_from(get_field(&mut fields, &1)).ok()?;
+        let rowstride = i32::try_from(get_field(&mut fields, &2)).ok()?;
+        let has_alpha = bool::try_from(get_field(&mut fields, &3)).ok()?;
+        let bits_per_sample = i32::try_from(get_field(&mut fields, &4)).ok()?;
+        let channels = i32::try_from(get_field(&mut fields, &5)).ok()?;
 
         let data = image_raw
             .iter()
