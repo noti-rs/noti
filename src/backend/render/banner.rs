@@ -53,6 +53,11 @@ impl BannerRect {
         file.write_all(&self.framebuffer).unwrap();
     }
 
+    #[inline]
+    pub(crate) fn framebuffer(&self) -> &[u8] {
+        &self.framebuffer
+    }
+
     pub(crate) fn draw(&mut self, font_collection: &FontCollection) {
         let rect_size = RectSize::new(
             CONFIG.general().width() as usize,
