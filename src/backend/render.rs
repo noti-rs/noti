@@ -7,17 +7,17 @@ use crate::data::{
     },
 };
 
-use self::window::WindowManager;
+pub(super) use self::{banner::BannerRect, font::FontCollection, types::RectSize};
+use super::window_manager::WindowManager;
 
-mod types;
-mod widget;
 mod banner;
 mod border;
 mod color;
 mod font;
 mod image;
 mod text;
-mod window;
+mod types;
+mod widget;
 
 pub(crate) struct Renderer {
     window_manager: WindowManager,
