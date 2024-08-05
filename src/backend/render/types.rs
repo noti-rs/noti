@@ -3,32 +3,32 @@ use std::ops::{Add, AddAssign};
 use crate::config::spacing::Spacing;
 
 #[derive(Debug, Default, Clone)]
-pub(super) struct RectSize {
-    pub(super) width: usize,
-    pub(super) height: usize,
+pub(in crate::backend) struct RectSize {
+    pub(in crate::backend) width: usize,
+    pub(in crate::backend) height: usize,
 }
 
 impl RectSize {
-    pub(super) fn new(width: usize, height: usize) -> Self {
+    pub(in crate::backend) fn new(width: usize, height: usize) -> Self {
         Self { width, height }
     }
 
     #[allow(dead_code)]
-    pub(super) fn new_width(width: usize) -> Self {
+    pub(in crate::backend) fn new_width(width: usize) -> Self {
         Self { width, height: 0 }
     }
 
     #[allow(dead_code)]
-    pub(super) fn new_height(height: usize) -> Self {
+    pub(in crate::backend) fn new_height(height: usize) -> Self {
         Self { width: 0, height }
     }
 
-    pub(super) fn shrink_by(&mut self, spacing: &Spacing) {
+    pub(in crate::backend) fn shrink_by(&mut self, spacing: &Spacing) {
         self.width -= spacing.left() as usize + spacing.right() as usize;
         self.height -= spacing.top() as usize + spacing.bottom() as usize;
     }
 
-    pub(super) fn area(&self) -> usize {
+    pub(in crate::backend) fn area(&self) -> usize {
         self.width * self.height
     }
 }

@@ -3,6 +3,8 @@ use std::thread;
 use tokio::sync::mpsc::unbounded_channel;
 
 mod render;
+mod window;
+mod window_manager;
 
 use crate::{
     data::{aliases::Result, dbus::Action},

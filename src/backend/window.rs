@@ -1,3 +1,4 @@
+use itertools::*;
 use std::{
     fs::File,
     os::{
@@ -7,15 +8,6 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    config::{self, CONFIG},
-    data::{
-        aliases::Result,
-        internal_messages::RendererMessage,
-        notification::{self, Notification},
-    },
-};
-use itertools::Itertools;
 use wayland_client::{
     delegate_noop,
     protocol::{
@@ -23,211 +15,24 @@ use wayland_client::{
         wl_pointer::{self, ButtonState},
         wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
     },
-    Connection, Dispatch, EventQueue, QueueHandle, WEnum,
+    Dispatch, QueueHandle, WEnum,
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1,
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use super::{banner::BannerRect, font::FontCollection, types::RectSize};
+use crate::{
+    config::{self, CONFIG},
+    data::{
+        internal_messages::RendererMessage,
+        notification::{self, Notification},
+    },
+};
 
-pub(crate) struct WindowManager {
-    connection: Connection,
-    event_queue: Option<EventQueue<Window>>,
-    qhandle: Option<QueueHandle<Window>>,
-    window: Option<Window>,
+use super::render::{BannerRect, FontCollection, RectSize};
 
-    font_collection: Arc<FontCollection>,
-
-    events: Vec<RendererMessage>,
-}
-
-impl WindowManager {
-    pub(crate) fn init() -> Result<Self> {
-        let connection = Connection::connect_to_env()?;
-        let font_collection = Arc::new(FontCollection::load_by_font_name(
-            CONFIG.general().font().name(),
-        )?);
-
-        Ok(Self {
-            connection,
-            event_queue: None,
-            qhandle: None,
-            window: None,
-
-            font_collection,
-
-            events: vec![],
-        })
-    }
-
-    pub(crate) fn create_notifications(&mut self, notifications: Vec<Notification>) {
-        let _ = self.init_window();
-
-        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
-        window.update_banners(notifications);
-
-        self.update_window();
-        self.roundtrip_event_queue();
-    }
-
-    pub(crate) fn close_notifications(&mut self, indices: &[u32]) {
-        if let Some(window) = self.window.as_mut() {
-            let notifications = window.remove_banners_by_id(indices);
-
-            if notifications.is_empty() {
-                return;
-            }
-
-            notifications
-                .into_iter()
-                .map(|notification| notification.id)
-                .for_each(|id| {
-                    self.events.push(RendererMessage::ClosedNotification {
-                        id,
-                        reason: crate::data::dbus::ClosingReason::CallCloseNotification,
-                    })
-                });
-
-            self.update_window();
-            self.roundtrip_event_queue();
-        }
-    }
-
-    pub(crate) fn remove_expired(&mut self) {
-        if let Some(window) = self.window.as_mut() {
-            let notifications = window.remove_expired_banners();
-
-            if notifications.is_empty() {
-                return;
-            }
-
-            notifications.into_iter().for_each(|notification| {
-                self.events.push(RendererMessage::ClosedNotification {
-                    id: notification.id,
-                    reason: crate::data::dbus::ClosingReason::Expired,
-                })
-            });
-
-            self.update_window();
-            self.roundtrip_event_queue();
-        }
-    }
-
-    pub(crate) fn pop_event(&mut self) -> Option<RendererMessage> {
-        self.events.pop()
-    }
-
-    pub(crate) fn handle_actions(&mut self) {
-        //TODO: change it to actions which defines in config file
-
-        if let Some(window) = self.window.as_mut() {
-            let messages = window.handle_click();
-            if messages.is_empty() {
-                return;
-            }
-
-            self.events.extend(messages);
-
-            self.update_window();
-            self.roundtrip_event_queue();
-        }
-    }
-
-    pub(crate) fn dispatch(&mut self) -> bool {
-        if self.event_queue.is_none() {
-            return false;
-        }
-
-        let event_queue = unsafe { self.event_queue.as_mut().unwrap_unchecked() };
-        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
-
-        let dispatched_count = event_queue
-            .dispatch_pending(window)
-            .expect("Successful dispatch");
-
-        if dispatched_count > 0 {
-            return true;
-        }
-
-        event_queue.flush().expect("Successful event queue flush");
-        let guard = event_queue.prepare_read().expect("Get read events guard");
-        let Ok(count) = guard.read() else {
-            return false;
-        };
-
-        if count > 0 {
-            event_queue
-                .dispatch_pending(window)
-                .expect("Successful dispatch");
-            true
-        } else {
-            false
-        }
-    }
-
-    fn update_window(&mut self) {
-        if let Some(window) = self.window.as_mut() {
-            if window.is_empty() {
-                self.deinit_window();
-                return;
-            }
-
-            let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
-
-            window.draw(qhandle);
-            window.frame(qhandle);
-            window.commit();
-        }
-    }
-
-    fn roundtrip_event_queue(&mut self) {
-        if let Some(event_queue) = self.event_queue.as_mut() {
-            event_queue
-                .roundtrip(unsafe { self.window.as_mut().unwrap_unchecked() })
-                .unwrap();
-        }
-    }
-
-    fn init_window(&mut self) -> bool {
-        if let None = self.window {
-            let mut event_queue = self.connection.new_event_queue();
-            let qhandle = event_queue.handle();
-            let display = self.connection.display();
-            display.get_registry(&qhandle, ());
-
-            let mut window = Window::init(self.font_collection.clone());
-            while !window.configured {
-                let _ = event_queue.blocking_dispatch(&mut window);
-            }
-
-            self.event_queue = Some(event_queue);
-            self.qhandle = Some(qhandle);
-            self.window = Some(window);
-            true
-        } else {
-            false
-        }
-    }
-
-    fn deinit_window(&mut self) {
-        unsafe {
-            let window = self.window.as_mut().unwrap_unchecked();
-            window.deinit();
-            self.event_queue
-                .as_mut()
-                .unwrap_unchecked()
-                .roundtrip(window)
-                .unwrap();
-        }
-        self.window = None;
-        self.event_queue = None;
-        self.qhandle = None;
-    }
-}
-
-struct Window {
+pub(super) struct Window {
     banners: Vec<BannerRect>,
     font_collection: Arc<FontCollection>,
 
@@ -248,7 +53,7 @@ struct Window {
 }
 
 impl Window {
-    fn init(font_collection: Arc<FontCollection>) -> Self {
+    pub(super) fn init(font_collection: Arc<FontCollection>) -> Self {
         Self {
             banners: vec![],
             font_collection,
@@ -273,7 +78,7 @@ impl Window {
         }
     }
 
-    fn deinit(&self) {
+    pub(super) fn deinit(&self) {
         if let Some(layer_surface) = self.layer_surface.as_ref() {
             layer_surface.destroy();
         }
@@ -291,11 +96,15 @@ impl Window {
         }
     }
 
-    fn is_empty(&self) -> bool {
+    pub(super) fn is_configured(&self) -> bool {
+        self.configured
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
         self.banners.is_empty()
     }
 
-    fn update_banners(&mut self, mut notifications: Vec<Notification>) {
+    pub(super) fn update_banners(&mut self, mut notifications: Vec<Notification>) {
         self.replace_by_indices(&mut notifications);
 
         self.banners
@@ -308,7 +117,7 @@ impl Window {
             .sort_by(CONFIG.general().sorting().get_cmp::<BannerRect>());
     }
 
-    fn replace_by_indices(&mut self, notifications: &mut Vec<Notification>) {
+    pub(super) fn replace_by_indices(&mut self, notifications: &mut Vec<Notification>) {
         let matching_indices: Vec<(usize, usize)> = notifications
             .iter()
             .enumerate()
@@ -328,7 +137,7 @@ impl Window {
         }
     }
 
-    fn remove_banners(&mut self, indices_to_remove: &[usize]) -> Vec<Notification> {
+    pub(super) fn remove_banners(&mut self, indices_to_remove: &[usize]) -> Vec<Notification> {
         indices_to_remove
             .iter()
             .sorted()
@@ -337,7 +146,7 @@ impl Window {
             .collect()
     }
 
-    fn remove_banners_by_id(&mut self, notification_indices: &[u32]) -> Vec<Notification> {
+    pub(super) fn remove_banners_by_id(&mut self, notification_indices: &[u32]) -> Vec<Notification> {
         let indices_to_remove: Vec<usize> = self
             .banners
             .iter()
@@ -356,7 +165,7 @@ impl Window {
         }
     }
 
-    fn remove_expired_banners(&mut self) -> Vec<Notification> {
+    pub(super) fn remove_expired_banners(&mut self) -> Vec<Notification> {
         let indices_to_remove: Vec<usize> = self
             .banners
             .iter()
@@ -390,7 +199,7 @@ impl Window {
         }
     }
 
-    fn handle_click(&mut self) -> Vec<RendererMessage> {
+    pub(super) fn handle_click(&mut self) -> Vec<RendererMessage> {
         if let PrioritiedPressState::Unpressed = self.pointer_state.press_state {
             return vec![];
         }
@@ -434,7 +243,7 @@ impl Window {
         vec![]
     }
 
-    fn draw(&mut self, qhandle: &QueueHandle<Window>) {
+    pub(super) fn draw(&mut self, qhandle: &QueueHandle<Window>) {
         let gap = CONFIG.general().gap();
 
         self.resize(RectSize::new(
@@ -537,14 +346,14 @@ impl Window {
         ));
     }
 
-    fn frame(&self, qhandle: &QueueHandle<Window>) {
+    pub(super) fn frame(&self, qhandle: &QueueHandle<Window>) {
         let surface = unsafe { self.surface.as_ref().unwrap_unchecked() };
         surface.damage(0, 0, i32::MAX, i32::MAX);
         surface.frame(qhandle, ());
         surface.attach(self.wl_buffer.as_ref(), 0, 0);
     }
 
-    fn commit(&self) {
+    pub(super) fn commit(&self) {
         let surface = unsafe { self.surface.as_ref().unwrap_unchecked() };
         surface.commit();
     }
