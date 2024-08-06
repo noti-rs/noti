@@ -560,6 +560,7 @@ impl Border {
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct TextProperty {
     wrap: Option<bool>,
+    style: Option<TextStyle>,
     margin: Option<Spacing>,
     justification: Option<TextJustification>,
     line_spacing: Option<u8>,
@@ -612,6 +613,19 @@ impl Position {
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
+pub enum TextStyle {
+    #[default]
+    #[serde(rename = "regular")]
+    Regular,
+    #[serde(rename = "bold")]
+    Bold,
+    #[serde(rename = "italic")]
+    Italic,
+    #[serde(rename = "bold italic")]
+    BoldItalic,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
 pub enum TextJustification {
     #[serde(rename = "center")]
     Center,
@@ -629,6 +643,10 @@ impl TextProperty {
         self.wrap.unwrap()
     }
 
+    pub fn style(&self) -> &TextStyle {
+        self.style.as_ref().unwrap()
+    }
+
     pub fn margin(&self) -> &Spacing {
         self.margin.as_ref().unwrap()
     }
@@ -642,8 +660,20 @@ impl TextProperty {
     }
 
     pub fn fill_empty_by_default(&mut self, entity: &str) {
+        fn is_title(entity: &str) -> bool {
+            entity == "title"
+        }
+
         if self.wrap.is_none() {
             self.wrap = Some(true);
+        }
+
+        if self.style.is_none() {
+            if is_title(entity) {
+                self.style = Some(TextStyle::Bold);
+            } else {
+                self.style = Some(Default::default());
+            }
         }
 
         if self.margin.is_none() {
@@ -651,7 +681,7 @@ impl TextProperty {
         }
 
         if self.justification.is_none() {
-            if entity == "title" {
+            if is_title(entity) {
                 self.justification = Some(TextJustification::Center);
             } else {
                 self.justification = Some(Default::default());
@@ -717,6 +747,7 @@ impl AppConfig {
                 let other_title = other.title();
 
                 title.wrap = title.wrap.or(other_title.wrap);
+                title.style = title.style.clone().or(other_title.style.clone());
                 title.margin = title.margin.clone().or(other_title.margin.clone());
                 title.justification = title
                     .justification
@@ -731,6 +762,7 @@ impl AppConfig {
                 let other_body = other.body();
 
                 body.wrap = body.wrap.or(other_body.wrap);
+                body.style = body.style.clone().or(other_body.style.clone());
                 body.margin = body.margin.clone().or(other_body.margin.clone());
                 body.justification = body
                     .justification

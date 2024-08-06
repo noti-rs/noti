@@ -504,16 +504,22 @@ impl WText {
         let colors = display_config
             .colors()
             .by_urgency(&notification.hints.urgency);
-
         let foreground: Bgra = colors.foreground().into();
 
-        let mut summary = TextRect::from_str(&notification.summary, font_size, font_collection);
-        Self::apply_properties(&mut summary, display_config.title(), display_config);
+        let title_cfg = display_config.title();
+        let mut summary = TextRect::from_str(
+            &notification.summary,
+            font_size,
+            title_cfg.style(),
+            font_collection,
+        );
+
+        Self::apply_properties(&mut summary, title_cfg, display_config);
         Self::apply_color(&mut summary, foreground);
 
         Self {
             data: summary,
-            property: display_config.title().clone(),
+            property: title_cfg.clone(),
         }
     }
 
@@ -526,20 +532,31 @@ impl WText {
         let colors = display_config
             .colors()
             .by_urgency(&notification.hints.urgency);
-
         let foreground: Bgra = colors.foreground().into();
 
+        let body_cfg = display_config.body();
         let mut body = if display_config.markup() {
-            TextRect::from_text(&notification.body, font_size, font_collection)
+            TextRect::from_text(
+                &notification.body,
+                font_size,
+                body_cfg.style(),
+                font_collection,
+            )
         } else {
-            TextRect::from_str(&notification.body.body, font_size, font_collection)
+            TextRect::from_str(
+                &notification.body.body,
+                font_size,
+                body_cfg.style(),
+                font_collection,
+            )
         };
-        Self::apply_properties(&mut body, display_config.body(), display_config);
+
+        Self::apply_properties(&mut body, body_cfg, display_config);
         Self::apply_color(&mut body, foreground);
 
         Self {
             data: body,
-            property: display_config.body().clone(),
+            property: body_cfg.clone(),
         }
     }
 
