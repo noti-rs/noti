@@ -548,6 +548,7 @@ impl WText {
         properties: &TextProperty,
         display_config: &DisplayConfig,
     ) {
+        element.set_wrap(properties.wrap());
         element.set_margin(properties.margin());
         element.set_line_spacing(properties.line_spacing() as usize);
         element.set_ellipsize_at(display_config.ellipsize_at());
