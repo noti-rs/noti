@@ -8,12 +8,15 @@ use std::{
     process::Command,
 };
 
-use crate::data::{aliases::Result, text::EntityKind};
+use crate::{
+    config::TextStyle,
+    data::{aliases::Result, text::EntityKind},
+};
 
 use super::{
-    widget::{Coverage, Draw, DrawColor},
     color::Bgra,
     image::Image,
+    widget::{Coverage, Draw, DrawColor},
 };
 
 pub(crate) struct FontCollection {
@@ -282,6 +285,23 @@ impl From<&EntityKind> for FontStyle {
             EntityKind::Bold => FontStyle::Bold,
             EntityKind::Italic => FontStyle::Italic,
             other => todo!("Unsupported style {other:?} at current moment"),
+        }
+    }
+}
+
+impl From<TextStyle> for FontStyle {
+    fn from(value: TextStyle) -> Self {
+        FontStyle::from(&value)
+    }
+}
+
+impl From<&TextStyle> for FontStyle {
+    fn from(value: &TextStyle) -> Self {
+        match value {
+            TextStyle::Regular => FontStyle::Regular,
+            TextStyle::Bold => FontStyle::Bold,
+            TextStyle::Italic => FontStyle::Italic,
+            TextStyle::BoldItalic => FontStyle::BoldItalic,
         }
     }
 }

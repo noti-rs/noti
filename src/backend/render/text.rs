@@ -37,10 +37,16 @@ pub(crate) struct TextRect {
 }
 
 impl TextRect {
-    pub(crate) fn from_str(string: &str, px_size: f32, font_collection: &FontCollection) -> Self {
+    pub(crate) fn from_str<Style: Into<FontStyle> + Clone>(
+        string: &str,
+        px_size: f32,
+        base_style: Style,
+        font_collection: &FontCollection,
+    ) -> Self {
+        let font_style = base_style.into();
         let glyph_collection: Vec<Glyph> = string
             .chars()
-            .map(|ch| font_collection.load_glyph_by_style(&FontStyle::Regular, ch, px_size))
+            .map(|ch| font_collection.load_glyph_by_style(&font_style, ch, px_size))
             .collect();
 
         let words = Self::convert_to_words(glyph_collection);
@@ -54,8 +60,14 @@ impl TextRect {
         }
     }
 
-    pub(crate) fn from_text(text: &Text, px_size: f32, font_collection: &FontCollection) -> Self {
+    pub(crate) fn from_text<Style: Into<FontStyle>>(
+        text: &Text,
+        px_size: f32,
+        base_style: Style,
+        font_collection: &FontCollection,
+    ) -> Self {
         let Text { body, entities } = text;
+        let base_style: FontStyle = base_style.into();
 
         let mut entities = VecDeque::from_iter(entities.iter());
         let mut current_entities = VecDeque::new();
@@ -75,7 +87,11 @@ impl TextRect {
                     }
                 }
 
-                let glyph = font_collection.load_glyph_by_style(&current_style, ch, px_size);
+                let glyph = font_collection.load_glyph_by_style(
+                    &(&base_style + &current_style),
+                    ch,
+                    px_size,
+                );
 
                 while let Some(entity) = current_entities.front() {
                     if entity.offset + entity.length < pos {
