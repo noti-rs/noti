@@ -11,13 +11,15 @@ use crate::{
 use super::{
     color::Bgra,
     font::{FontCollection, FontStyle, Glyph},
-    types::{Offset, RectSize}, widget::{Draw, DrawColor},
+    types::{Offset, RectSize},
+    widget::{Draw, DrawColor},
 };
 
 #[derive(Default)]
 pub(crate) struct TextRect {
     words: VecDeque<WordRect>,
     lines: Vec<LineRect>,
+    wrap: bool,
 
     rect_size: RectSize,
 
@@ -44,6 +46,7 @@ impl TextRect {
         let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
+            wrap: true,
             spacebar_width: Self::get_spacebar_width(font_collection, px_size),
             ellipsis: font_collection.get_ellipsis(px_size),
             line_height: font_collection.max_height(px_size),
@@ -90,6 +93,7 @@ impl TextRect {
         let words = Self::convert_to_words(glyph_collection);
         Self {
             words,
+            wrap: true,
             spacebar_width: Self::get_spacebar_width(font_collection, px_size),
             ellipsis: font_collection.get_ellipsis(px_size),
             line_height: font_collection.max_height(px_size),
@@ -108,6 +112,10 @@ impl TextRect {
 
     fn get_spacebar_width(font_collection: &FontCollection, px_size: f32) -> usize {
         font_collection.get_spacebar_width(px_size).round() as usize
+    }
+
+    pub(crate) fn set_wrap(&mut self, wrap: bool) {
+        self.wrap = wrap;
     }
 
     pub(crate) fn set_line_spacing(&mut self, line_spacing: usize) {
@@ -139,6 +147,7 @@ impl TextRect {
         for y in (0..rect_size.height)
             .step_by(self.line_height + self.line_spacing)
             .take_while(|y| rect_size.height - *y >= self.line_height)
+            .take(if self.wrap { usize::MAX } else { 1 })
         {
             let mut remaining_width = rect_size.width;
             let mut words = vec![];

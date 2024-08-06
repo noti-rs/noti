@@ -559,6 +559,7 @@ impl Border {
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct TextProperty {
+    wrap: Option<bool>,
     margin: Option<Spacing>,
     justification: Option<TextJustification>,
     line_spacing: Option<u8>,
@@ -624,6 +625,10 @@ pub enum TextJustification {
 }
 
 impl TextProperty {
+    pub fn wrap(&self) -> bool {
+        self.wrap.unwrap()
+    }
+
     pub fn margin(&self) -> &Spacing {
         self.margin.as_ref().unwrap()
     }
@@ -637,6 +642,10 @@ impl TextProperty {
     }
 
     pub fn fill_empty_by_default(&mut self, entity: &str) {
+        if self.wrap.is_none() {
+            self.wrap = Some(true);
+        }
+
         if self.margin.is_none() {
             self.margin = Some(Default::default());
         }
@@ -707,6 +716,7 @@ impl AppConfig {
             if let Some(title) = display.title.as_mut() {
                 let other_title = other.title();
 
+                title.wrap = title.wrap.or(other_title.wrap);
                 title.margin = title.margin.clone().or(other_title.margin.clone());
                 title.justification = title
                     .justification
@@ -720,6 +730,7 @@ impl AppConfig {
             if let Some(body) = display.body.as_mut() {
                 let other_body = other.body();
 
+                body.wrap = body.wrap.or(other_body.wrap);
                 body.margin = body.margin.clone().or(other_body.margin.clone());
                 body.justification = body
                     .justification
