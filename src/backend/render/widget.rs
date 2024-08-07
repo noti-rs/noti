@@ -379,14 +379,14 @@ pub(super) struct WImage {
 impl WImage {
     pub(super) fn new(notification: &Notification, display_config: &DisplayConfig) -> Self {
         let property = display_config.image().clone();
-        let size = property.size();
-        let image = Image::from_image_data(notification.hints.image_data.as_ref(), size).or_svg(
+        let max_size = property.max_size();
+        let image = Image::from_image_data(notification.hints.image_data.as_ref(), max_size).or_svg(
             notification
                 .hints
                 .image_path
                 .as_deref()
                 .or(Some(notification.app_icon.as_str())),
-            size,
+            max_size,
         );
 
         Self {
