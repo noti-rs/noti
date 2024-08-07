@@ -29,7 +29,7 @@ To enable Noti to start automatically with your Wayland session, add it to your 
 
 ## Configuration
 
-Noti can be configured via a configuration file located at `~/.config/noti/config.toml`. Below is an example configuration:
+Noti can be configured via a configuration file located at `$XDG_CONFIG_HOME/noti/config.toml` or `~/.config/noti/config.toml`. Below is an example configuration:
 
 ```toml
 [general]
@@ -43,9 +43,7 @@ width = 300
 height = 150
 
 [display]
-image_size = 64
 padding = 8
-
 timeout = 2000
 
 [display.colors.normal]
@@ -61,11 +59,20 @@ size = 4
 radius = 10
 color = "#000"
 
+[display.image]
+max_size = 64
+margin = { right = 25 }
+# For old computers you can use simplier method of resize
+# resizing_method = "nearest"
+
 [display.title]
-margin = { top = 5, left = 25 }
+wrap = false
+style = "bold italic"
+margin = { top = 5 }
 
 [display.body]
-margin = { top = 12, left = 25 }
+justification = "left"
+margin = { top = 12 }
 
 [[app]]
 name = "Telegram Desktop"
@@ -74,7 +81,7 @@ border = { radius = 8 }
 markup = true
 
 [app.display.body]
-alignment = "center"
+justification = "center"
 line_spacing = 5
 ```
 
