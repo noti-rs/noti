@@ -350,13 +350,13 @@ impl DisplayConfig {
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct ImageProperty {
-    size: Option<u16>,
+    max_size: Option<u16>,
     margin: Option<Spacing>,
 }
 
 impl ImageProperty {
-    pub fn size(&self) -> u16 {
-        self.size.unwrap()
+    pub fn max_size(&self) -> u16 {
+        self.max_size.unwrap()
     }
 
     pub fn margin(&self) -> &Spacing {
@@ -368,8 +368,8 @@ impl ImageProperty {
     }
 
     fn fill_empty_by_default(&mut self) {
-        if self.size.is_none() {
-            self.size = Some(64);
+        if self.max_size.is_none() {
+            self.max_size = Some(64);
         }
 
         if self.margin.is_none() {
@@ -715,7 +715,7 @@ impl AppConfig {
             if let Some(image) = display.image.as_mut() {
                 let other_image = other.image();
 
-                image.size = image.size.or(other_image.size);
+                image.max_size = image.max_size.or(other_image.max_size);
                 image.margin = image.margin.clone().or(other_image.margin.clone());
             } else {
                 display.image = other.image.clone();

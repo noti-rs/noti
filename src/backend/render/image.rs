@@ -14,7 +14,7 @@ pub(crate) enum Image {
 }
 
 impl Image {
-    pub(crate) fn from_image_data(image_data: Option<&ImageData>, size: u16) -> Self {
+    pub(crate) fn from_image_data(image_data: Option<&ImageData>, max_size: u16) -> Self {
         image_data
             .map(|image_data| {
                 let mut width = image_data.width;
@@ -43,7 +43,7 @@ impl Image {
                     image::DynamicImage::from(rgb_image)
                 };
 
-                Self::resize(&mut width, &mut height, size);
+                Self::resize(&mut width, &mut height, max_size);
                 let rowstride = width * 4;
 
                 let image = image::imageops::resize(
@@ -199,15 +199,20 @@ impl Image {
         }
     }
 
-    fn resize(width: &mut i32, height: &mut i32, new_size: u16) {
-        if width > height {
-            let factor = new_size as f32 / *width as f32;
-            *width = new_size as i32;
+    fn resize(width: &mut i32, height: &mut i32, max_size: u16) {
+        let swap = height > width;
+        if swap {
+            std::mem::swap(width, height);
+        }
+
+        if *width > max_size as i32 {
+            let factor = max_size as f32 / *width as f32;
+            *width = max_size as i32;
             *height = (factor * *height as f32).round() as i32;
-        } else {
-            let factor = new_size as f32 / *height as f32;
-            *height = new_size as i32;
-            *width = (factor * *width as f32).round() as i32;
+        }
+
+        if swap {
+            std::mem::swap(width, height);
         }
     }
 
