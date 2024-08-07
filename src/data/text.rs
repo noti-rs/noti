@@ -1,6 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, iter::Peekable, str::Chars};
+use std::{borrow::Cow, collections::HashMap, iter::Peekable, str::Chars};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Text {
@@ -10,31 +10,28 @@ pub struct Text {
 
 impl Text {
     pub fn parse(input: String) -> Self {
-        let parser = Parser::new(input);
+        let escaped_string = html_escape::decode_html_entities(&input);
+        let parser = Parser::new(&escaped_string);
         parser.parse()
     }
 }
 
-struct Parser {
-    input: String,
+struct Parser<'a> {
     body: String,
     entities: Vec<Entity>,
     stack: Vec<(Tag, usize)>,
     pos: usize,
-    chars: Peekable<Chars<'static>>,
+    chars: Peekable<Chars<'a>>,
 }
 
-impl Parser {
-    fn new(input: String) -> Self {
-        let input_static: &'static str = Box::leak(input.into_boxed_str());
-
+impl<'a> Parser<'a> {
+    fn new(input: &'a Cow<str>) -> Self {
         Self {
-            input: input_static.to_string(),
             body: String::new(),
             entities: Vec::new(),
             stack: Vec::new(),
             pos: 0,
-            chars: input_static.chars().peekable(),
+            chars: input.chars().peekable(),
         }
     }
 
@@ -471,6 +468,40 @@ mod tests {
             Text {
                 body: String::from("test       asdasd"),
                 entities: vec![],
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_html_symbol() {
+        let input = String::from("<b>hello&quot;</b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("hello\""),
+                entities: vec![Entity {
+                    offset: 0,
+                    length: 6,
+                    kind: EntityKind::Bold
+                }]
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_chained_html_symbols() {
+        let input = String::from("<b>hello&amp;quot;</b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("hello&quot;"),
+                entities: vec![Entity {
+                    offset: 0,
+                    length: 11,
+                    kind: EntityKind::Bold
+                }]
             }
         )
     }
