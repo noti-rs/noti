@@ -46,6 +46,7 @@ impl BannerRect {
 
     pub(crate) fn update_data(&mut self, notification: Notification) {
         self.data = notification;
+        self.created_at = time::Instant::now();
     }
 
     #[inline]
