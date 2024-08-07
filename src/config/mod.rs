@@ -352,6 +352,7 @@ impl DisplayConfig {
 pub struct ImageProperty {
     max_size: Option<u16>,
     margin: Option<Spacing>,
+    resizing_method: Option<ResizingMethod>,
 }
 
 impl ImageProperty {
@@ -367,6 +368,10 @@ impl ImageProperty {
         self.margin.as_mut().unwrap()
     }
 
+    pub fn resizing_method(&self) -> &ResizingMethod {
+        self.resizing_method.as_ref().unwrap()
+    }
+
     fn fill_empty_by_default(&mut self) {
         if self.max_size.is_none() {
             self.max_size = Some(64);
@@ -375,7 +380,26 @@ impl ImageProperty {
         if self.margin.is_none() {
             self.margin = Some(Default::default());
         }
+
+        if self.resizing_method.is_none() {
+            self.resizing_method = Some(Default::default());
+        }
     }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub enum ResizingMethod {
+    #[serde(rename = "nearest")]
+    Nearest,
+    #[serde(rename = "triangle")]
+    Triangle,
+    #[serde(rename = "catmull-rom")]
+    CatmullRom,
+    #[default]
+    #[serde(rename = "gaussian")]
+    Gaussian,
+    #[serde(rename = "lanczos3")]
+    Lanczos3,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -717,6 +741,10 @@ impl AppConfig {
 
                 image.max_size = image.max_size.or(other_image.max_size);
                 image.margin = image.margin.clone().or(other_image.margin.clone());
+                image.resizing_method = image
+                    .resizing_method
+                    .clone()
+                    .or(other_image.resizing_method.clone());
             } else {
                 display.image = other.image.clone();
             }

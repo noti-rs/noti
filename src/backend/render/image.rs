@@ -1,10 +1,14 @@
 use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 
-use crate::data::image::ImageData;
+use crate::{
+    config::{ImageProperty, ResizingMethod},
+    data::image::ImageData,
+};
 
 use super::{
     color::{Bgra, Rgba},
-    types::Offset, widget::{Draw, DrawColor},
+    types::Offset,
+    widget::{Draw, DrawColor},
 };
 
 #[derive(Clone)]
@@ -14,7 +18,10 @@ pub(crate) enum Image {
 }
 
 impl Image {
-    pub(crate) fn from_image_data(image_data: Option<&ImageData>, max_size: u16) -> Self {
+    pub(crate) fn from_image_data(
+        image_data: Option<&ImageData>,
+        image_property: &ImageProperty,
+    ) -> Self {
         image_data
             .map(|image_data| {
                 let mut width = image_data.width;
@@ -43,14 +50,14 @@ impl Image {
                     image::DynamicImage::from(rgb_image)
                 };
 
-                Self::resize(&mut width, &mut height, max_size);
+                Self::resize(&mut width, &mut height, image_property.max_size());
                 let rowstride = width * 4;
 
                 let image = image::imageops::resize(
                     &image,
                     width as u32,
                     height as u32,
-                    image::imageops::FilterType::Gaussian,
+                    image_property.resizing_method().into(),
                 );
 
                 Image::Exists(ImageData {
@@ -136,7 +143,7 @@ impl Image {
         }))
     }
 
-    pub(crate) fn or_svg(self, image_path: Option<&str>, size: u16) -> Self {
+    pub(crate) fn or_svg(self, image_path: Option<&str>, image_property: &ImageProperty) -> Self {
         if self.exists() || image_path.is_none() {
             return self;
         }
@@ -159,7 +166,7 @@ impl Image {
             tree_size.height().round() as i32,
         );
 
-        Self::resize(&mut width, &mut height, size);
+        Self::resize(&mut width, &mut height, image_property.max_size());
 
         let scale = if width > height {
             width as f32 / tree_size.width()
@@ -256,6 +263,18 @@ impl Draw for Image {
                     DrawColor::Overlay(unsafe { chunks.next().unwrap_unchecked() }.to_bgra()),
                 );
             }
+        }
+    }
+}
+
+impl From<&ResizingMethod> for image::imageops::FilterType {
+    fn from(value: &ResizingMethod) -> Self {
+        match value {
+            ResizingMethod::Nearest => image::imageops::FilterType::Nearest,
+            ResizingMethod::Triangle => image::imageops::FilterType::Triangle,
+            ResizingMethod::CatmullRom => image::imageops::FilterType::CatmullRom,
+            ResizingMethod::Gaussian => image::imageops::FilterType::Gaussian,
+            ResizingMethod::Lanczos3 => image::imageops::FilterType::Lanczos3,
         }
     }
 }
