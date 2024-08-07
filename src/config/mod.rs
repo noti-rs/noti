@@ -410,6 +410,10 @@ pub struct UrgencyColors {
 }
 
 impl UrgencyColors {
+    const LOW: &'static str = "low";
+    const NORMAL: &'static str = "normal";
+    const CRITICAL: &'static str = "critical";
+
     pub fn low(&self) -> &Colors {
         self.low.as_ref().unwrap()
     }
@@ -434,19 +438,21 @@ impl UrgencyColors {
         if self.low.is_none() {
             self.low = Some(Default::default());
         }
-        self.low.as_mut().unwrap().fill_empty_by_default();
+        self.low.as_mut().unwrap().fill_empty_by_default(Self::LOW);
 
         if self.normal.is_none() {
             self.normal = Some(Default::default());
         }
-        self.normal.as_mut().unwrap().fill_empty_by_default();
+        self.normal
+            .as_mut()
+            .unwrap()
+            .fill_empty_by_default(Self::NORMAL);
 
         if self.critical.is_none() {
             self.critical = Some(Default::default());
         }
         let critical = self.critical.as_mut().unwrap();
-        critical.fill_empty_by_default();
-        critical.foreground.as_mut().unwrap().red = 255;
+        critical.fill_empty_by_default(Self::CRITICAL);
     }
 }
 
@@ -465,7 +471,7 @@ impl Colors {
         self.foreground.as_ref().unwrap()
     }
 
-    fn fill_empty_by_default(&mut self) {
+    fn fill_empty_by_default(&mut self, urgency: &str) {
         if self.background.is_none() {
             self.background = Some(Color {
                 red: 255,
@@ -477,7 +483,11 @@ impl Colors {
 
         if self.foreground.is_none() {
             self.foreground = Some(Color {
-                red: 0,
+                red: if urgency == UrgencyColors::CRITICAL {
+                    255
+                } else {
+                    0
+                },
                 green: 0,
                 blue: 0,
                 alpha: 255,
