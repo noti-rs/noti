@@ -63,7 +63,7 @@ impl Client {
 
         let expire_timeout = match expire_timeout {
             Some(i) => i,
-            None => CONFIG.default_display().timeout() as i32,
+            None => CONFIG.lock().unwrap().default_display().timeout() as i32,
         };
 
         let mut hints = HashMap::new();

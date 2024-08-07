@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write, time};
 
 use crate::{
-    config::{spacing::Spacing, Alignment, DisplayConfig, Position, CONFIG},
+    config::{spacing::Spacing, Alignment, Config, DisplayConfig, Position},
     data::notification::Notification,
 };
 
@@ -59,13 +59,13 @@ impl BannerRect {
         &self.framebuffer
     }
 
-    pub(crate) fn draw(&mut self, font_collection: &FontCollection) {
+    pub(crate) fn draw(&mut self, font_collection: &FontCollection, config: &Config) {
         let rect_size = RectSize::new(
-            CONFIG.general().width() as usize,
-            CONFIG.general().height() as usize,
+            config.general().width() as usize,
+            config.general().height() as usize,
         );
 
-        let display = CONFIG.display_by_app(&self.data.app_name);
+        let display = config.display_by_app(&self.data.app_name);
         let colors = display.colors().by_urgency(&self.data.hints.urgency);
 
         let background: Bgra = colors.background().into();
@@ -76,7 +76,7 @@ impl BannerRect {
         let border_spacing = Spacing::all_directional(display.border().size());
         let padding = display.padding() + border_spacing;
 
-        let font_size = CONFIG.general().font().size() as f32;
+        let font_size = config.general().font().size() as f32;
 
         let mut container = ContainerBuilder::default()
             .spacing(padding)
@@ -105,8 +105,8 @@ impl BannerRect {
         });
 
         self.draw_border(
-            CONFIG.general().width().into(),
-            CONFIG.general().height().into(),
+            config.general().width().into(),
+            config.general().height().into(),
             &background,
             display,
         );

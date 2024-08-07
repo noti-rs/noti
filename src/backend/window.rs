@@ -23,7 +23,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 
 use crate::{
-    config::{self, CONFIG},
+    config::{self, Config},
     data::{
         internal_messages::RendererMessage,
         notification::{self, Notification},
@@ -40,6 +40,7 @@ pub(super) struct Window {
     margin: Margin,
 
     compositor: Option<wl_compositor::WlCompositor>,
+    layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     surface: Option<wl_surface::WlSurface>,
     layer_surface: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
 
@@ -48,23 +49,30 @@ pub(super) struct Window {
     buffer: Option<Buffer>,
     wl_buffer: Option<wl_buffer::WlBuffer>,
 
-    configured: bool,
+    configuration_state: ConfigurationState,
     pointer_state: PointerState,
 }
 
+pub(super) enum ConfigurationState {
+    NotConfiured,
+    Ready,
+    Configured,
+}
+
 impl Window {
-    pub(super) fn init(font_collection: Arc<FontCollection>) -> Self {
+    pub(super) fn init(font_collection: Arc<FontCollection>, config: &Config) -> Self {
         Self {
             banners: vec![],
             font_collection,
 
             rect_size: RectSize::new(
-                CONFIG.general().width().into(),
-                CONFIG.general().height().into(),
+                config.general().width().into(),
+                config.general().height().into(),
             ),
             margin: Margin::new(),
 
             compositor: None,
+            layer_shell: None,
             surface: None,
             layer_surface: None,
 
@@ -73,7 +81,7 @@ impl Window {
             buffer: None,
             wl_buffer: None,
 
-            configured: false,
+            configuration_state: ConfigurationState::NotConfiured,
             pointer_state: Default::default(),
         }
     }
@@ -96,28 +104,92 @@ impl Window {
         }
     }
 
-    pub(super) fn is_configured(&self) -> bool {
-        self.configured
+    pub(super) fn configure(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
+        let Some(layer_shell) = self.layer_shell.as_ref() else {
+            eprintln!("Tried to configure window when it doesn't have zwlr_layer_shell_v1!");
+            return;
+        };
+
+        let surface = self.compositor.as_ref()
+                        .expect(
+                            "The wl_compositor protocol must be before than the zwlr-layer-shell-v1 protocol.\
+                            If it is not correct, please contact to developers with this information"
+                        ).create_surface(qhandle, ());
+
+        self.layer_surface = Some(layer_shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Overlay,
+            "noti-app".to_string(),
+            qhandle,
+            (),
+        ));
+
+        self.relocate(config.general().offset(), config.general().anchor());
+
+        {
+            let layer_surface = unsafe { self.layer_surface.as_ref().unwrap_unchecked() };
+            layer_surface.set_size(self.rect_size.width as u32, self.rect_size.height as u32);
+            layer_surface
+                .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
+        }
+        surface.commit();
+
+        self.surface = Some(surface);
+    }
+
+    pub(super) fn reconfigure(&mut self, config: &Config) {
+        self.relocate(config.general().offset(), config.general().anchor());
+        self.banners
+            .sort_by(config.general().sorting().get_cmp::<BannerRect>());
+    }
+
+    fn relocate(&mut self, (x, y): (u8, u8), anchor_cfg: &config::Anchor) {
+        if let Some(layer_surface) = self.layer_surface.as_ref() {
+            self.margin = Margin::from_anchor(x as i32, y as i32, anchor_cfg);
+
+            let anchor = match anchor_cfg {
+                config::Anchor::Top => Anchor::Top,
+                config::Anchor::TopLeft => Anchor::Top.union(Anchor::Left),
+                config::Anchor::TopRight => Anchor::Top.union(Anchor::Right),
+                config::Anchor::Bottom => Anchor::Bottom,
+                config::Anchor::BottomLeft => Anchor::Bottom.union(Anchor::Left),
+                config::Anchor::BottomRight => Anchor::Bottom.union(Anchor::Right),
+                config::Anchor::Left => Anchor::Left,
+                config::Anchor::Right => Anchor::Right,
+            };
+
+            layer_surface.set_anchor(anchor);
+            self.margin.apply(&layer_surface);
+        }
+    }
+
+    pub(super) fn configuration_state(&self) -> &ConfigurationState {
+        &self.configuration_state
     }
 
     pub(super) fn is_empty(&self) -> bool {
         self.banners.is_empty()
     }
 
-    pub(super) fn update_banners(&mut self, mut notifications: Vec<Notification>) {
-        self.replace_by_indices(&mut notifications);
+    pub(super) fn update_banners(&mut self, mut notifications: Vec<Notification>, config: &Config) {
+        self.replace_by_indices(&mut notifications, config);
 
         self.banners
             .extend(notifications.into_iter().map(|notification| {
                 let mut banner_rect = BannerRect::init(notification);
-                banner_rect.draw(&self.font_collection);
+                banner_rect.draw(&self.font_collection, config);
                 banner_rect
             }));
         self.banners
-            .sort_by(CONFIG.general().sorting().get_cmp::<BannerRect>());
+            .sort_by(config.general().sorting().get_cmp::<BannerRect>());
     }
 
-    pub(super) fn replace_by_indices(&mut self, notifications: &mut Vec<Notification>) {
+    pub(super) fn replace_by_indices(
+        &mut self,
+        notifications: &mut Vec<Notification>,
+        config: &Config,
+    ) {
         let matching_indices: Vec<(usize, usize)> = notifications
             .iter()
             .enumerate()
@@ -133,7 +205,7 @@ impl Window {
             let notification = notifications.remove(notification_index);
             let rect = &mut self.banners[stack_index];
             rect.update_data(notification);
-            rect.draw(&self.font_collection);
+            rect.draw(&self.font_collection, config);
         }
     }
 
@@ -146,7 +218,10 @@ impl Window {
             .collect()
     }
 
-    pub(super) fn remove_banners_by_id(&mut self, notification_indices: &[u32]) -> Vec<Notification> {
+    pub(super) fn remove_banners_by_id(
+        &mut self,
+        notification_indices: &[u32],
+    ) -> Vec<Notification> {
         let indices_to_remove: Vec<usize> = self
             .banners
             .iter()
@@ -165,7 +240,7 @@ impl Window {
         }
     }
 
-    pub(super) fn remove_expired_banners(&mut self) -> Vec<Notification> {
+    pub(super) fn remove_expired_banners(&mut self, config: &Config) -> Vec<Notification> {
         let indices_to_remove: Vec<usize> = self
             .banners
             .iter()
@@ -180,7 +255,7 @@ impl Window {
                 }
                 notification::Timeout::Never => None,
                 notification::Timeout::Configurable => {
-                    let timeout = CONFIG
+                    let timeout = config
                         .display_by_app(&rect.notification().app_name)
                         .timeout();
                     if timeout != 0 && rect.created_at().elapsed().as_millis() > timeout as u128 {
@@ -199,15 +274,15 @@ impl Window {
         }
     }
 
-    pub(super) fn handle_click(&mut self) -> Vec<RendererMessage> {
+    pub(super) fn handle_click(&mut self, config: &Config) -> Vec<RendererMessage> {
         if let PrioritiedPressState::Unpressed = self.pointer_state.press_state {
             return vec![];
         }
         self.pointer_state.press_state.clear();
 
-        let rect_height = CONFIG.general().height() as usize;
-        let gap = CONFIG.general().gap() as usize;
-        let anchor = CONFIG.general().anchor();
+        let rect_height = config.general().height() as usize;
+        let gap = config.general().gap() as usize;
+        let anchor = config.general().anchor();
 
         if let Some(i) = (0..self.rect_size.height as usize)
             .step_by(rect_height + gap)
@@ -226,8 +301,7 @@ impl Window {
             })
         {
             if anchor.is_bottom() {
-                self.pointer_state.y -=
-                    CONFIG.general().height() as f64 + CONFIG.general().gap() as f64;
+                self.pointer_state.y -= rect_height as f64 + gap as f64;
             }
 
             return self
@@ -243,19 +317,27 @@ impl Window {
         vec![]
     }
 
-    pub(super) fn draw(&mut self, qhandle: &QueueHandle<Window>) {
-        let gap = CONFIG.general().gap();
+    pub(super) fn redraw(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
+        self.banners
+            .iter_mut()
+            .for_each(|banner| banner.draw(&self.font_collection, config));
+
+        self.draw(qhandle, config);
+    }
+
+    pub(super) fn draw(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
+        let gap = config.general().gap();
 
         self.resize(RectSize::new(
-            self.rect_size.width,
-            self.banners.len() * CONFIG.general().height() as usize
+            config.general().width().into(),
+            self.banners.len() * config.general().height() as usize
                 + self.banners.len().saturating_sub(1) * gap as usize,
         ));
 
         let gap_buffer = self.allocate_gap_buffer(gap);
 
         self.create_buffer(qhandle);
-        self.write_banners_to_buffer(CONFIG.general().anchor(), &gap_buffer);
+        self.write_banners_to_buffer(config.general().anchor(), &gap_buffer);
         self.build_buffer(qhandle);
     }
 
@@ -529,57 +611,16 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Window {
                     registry.bind::<wl_seat::WlSeat, _, _>(name, version, qhandle, ());
                 }
                 "zwlr_layer_shell_v1" => {
-                    let layer_shell = registry.bind::<zwlr_layer_shell_v1::ZwlrLayerShellV1, _, _>(
-                        name,
-                        version,
-                        qhandle,
-                        (),
+                    state.layer_shell = Some(
+                        registry.bind::<zwlr_layer_shell_v1::ZwlrLayerShellV1, _, _>(
+                            name,
+                            version,
+                            qhandle,
+                            (),
+                        ),
                     );
 
-                    let surface = state.compositor.as_ref()
-                        .expect(
-                            "The wl_compositor protocol must be before than the zwlr-layer-shell-v1 protocol.\
-                            If it is not correct, please contact to developers with this information"
-                        ).create_surface(qhandle, ());
-
-                    let layer_surface = layer_shell.get_layer_surface(
-                        &surface,
-                        None,
-                        zwlr_layer_shell_v1::Layer::Overlay,
-                        "noti-app".to_string(),
-                        qhandle,
-                        (),
-                    );
-
-                    let general_cfg = CONFIG.general();
-                    let anchor_cfg = general_cfg.anchor();
-
-                    let (x, y) = CONFIG.general().offset();
-                    state.margin = Margin::from_anchor(x as i32, y as i32, anchor_cfg);
-
-                    let anchor = match anchor_cfg {
-                        config::Anchor::Top => Anchor::Top,
-                        config::Anchor::TopLeft => Anchor::Top.union(Anchor::Left),
-                        config::Anchor::TopRight => Anchor::Top.union(Anchor::Right),
-                        config::Anchor::Bottom => Anchor::Bottom,
-                        config::Anchor::BottomLeft => Anchor::Bottom.union(Anchor::Left),
-                        config::Anchor::BottomRight => Anchor::Bottom.union(Anchor::Right),
-                        config::Anchor::Left => Anchor::Left,
-                        config::Anchor::Right => Anchor::Right,
-                    };
-
-                    layer_surface.set_anchor(anchor);
-                    state.margin.apply(&layer_surface);
-
-                    layer_surface
-                        .set_size(state.rect_size.width as u32, state.rect_size.height as u32);
-                    layer_surface.set_keyboard_interactivity(
-                        zwlr_layer_surface_v1::KeyboardInteractivity::None,
-                    );
-                    surface.commit();
-
-                    state.surface = Some(surface);
-                    state.layer_surface = Some(layer_surface);
+                    state.configuration_state = ConfigurationState::Ready;
                 }
                 _ => (),
             }
@@ -663,16 +704,12 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Window {
         {
             layer_surface.ack_configure(serial);
 
-            if width == 0 && height == 0 {
-                let general_cfg = CONFIG.general();
-                state.rect_size.width = general_cfg.width().into();
-                state.rect_size.height = general_cfg.height().into();
-            } else {
+            if width != 0 || height != 0 {
                 state.rect_size.width = width as usize;
                 state.rect_size.height = height as usize;
             }
 
-            state.configured = true;
+            state.configuration_state = ConfigurationState::Configured
         }
     }
 }
