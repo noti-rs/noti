@@ -1,19 +1,22 @@
 use once_cell::sync::Lazy;
 use serde::Deserialize;
-use std::{collections::HashMap, fs, path::Path, str::Chars};
+use std::{collections::HashMap, fs, path::Path, str::Chars, sync::Mutex};
 
 pub mod sorting;
 pub mod spacing;
+pub mod watcher;
 
 use sorting::Sorting;
 use spacing::Spacing;
+use watcher::{ConfigState, ConfigWatcher};
 
 use crate::data::notification::Urgency;
 
-pub static CONFIG: Lazy<Config> = Lazy::new(Config::init);
+pub static CONFIG: Lazy<Mutex<Config>> = Lazy::new(|| Mutex::new(Config::init()));
 
 #[derive(Debug)]
 pub struct Config {
+    watcher: ConfigWatcher,
     general: GeneralConfig,
     display: DisplayConfig,
 
@@ -22,24 +25,12 @@ pub struct Config {
 
 impl Config {
     pub fn init() -> Self {
-        let TomlConfig {
-            general,
-            mut display,
-            apps,
-        } = TomlConfig::parse();
+        let watcher = ConfigWatcher::init().expect("The config watcher must be initialized");
 
-        display.fill_empty_by_default();
-        let mut app_configs =
-            HashMap::with_capacity(apps.as_ref().map(|data| data.len()).unwrap_or(0));
-
-        if let Some(apps) = apps {
-            for mut app in apps {
-                app.merge(&display);
-                app_configs.insert(app.name, app.display.unwrap());
-            }
-        }
+        let (general, display, app_configs) = Self::parse(watcher.get_config_path());
 
         Self {
+            watcher,
             general,
             display,
             app_configs,
@@ -58,6 +49,41 @@ impl Config {
     pub fn display_by_app(&self, name: &str) -> &DisplayConfig {
         self.app_configs.get(name).unwrap_or(&self.display)
     }
+
+    pub fn check_updates(&mut self) -> ConfigState {
+        self.watcher.check_updates()
+    }
+
+    pub fn update(&mut self) {
+        let (general, display, app_configs) = Self::parse(self.watcher.get_config_path());
+
+        self.general = general;
+        self.display = display;
+        self.app_configs = app_configs;
+    }
+
+    fn parse(
+        path: Option<&Path>,
+    ) -> (GeneralConfig, DisplayConfig, HashMap<String, DisplayConfig>) {
+        let TomlConfig {
+            general,
+            mut display,
+            apps,
+        } = TomlConfig::parse(path);
+
+        display.fill_empty_by_default();
+        let mut app_configs =
+            HashMap::with_capacity(apps.as_ref().map(|data| data.len()).unwrap_or(0));
+
+        if let Some(apps) = apps {
+            for mut app in apps {
+                app.merge(&display);
+                app_configs.insert(app.name, app.display.unwrap());
+            }
+        }
+
+        (general, display, app_configs)
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -70,24 +96,21 @@ pub struct TomlConfig {
 }
 
 impl TomlConfig {
-    fn parse() -> Self {
-        let pkg_name = env!("CARGO_PKG_NAME");
-        std::env::var("XDG_CONFIG_HOME")
-            .or(std::env::var("HOME").map(|home_path| home_path + "/.config"))
-            .map(|config_path| format!("{config_path}/{pkg_name}/"))
-            .map(|str| Path::new(&str).join("config.toml"))
-            .map(|config_path| fs::read_to_string(&config_path).unwrap())
-            .map(|content| {
-                toml::from_str(&content).unwrap_or_else(|err| {
-                    eprintln!("{err}");
-                    std::process::exit(1);
-                })
+    fn parse(path: Option<&Path>) -> Self {
+        path.map(|config_path| fs::read_to_string(&config_path).unwrap())
+            .map(|content| match toml::from_str(&content) {
+                Ok(content) => Some(content),
+                Err(error) => {
+                    eprintln!("{error}");
+                    None
+                }
             })
+            .flatten()
             .unwrap_or(Default::default())
     }
 }
 
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct GeneralConfig {
     font: Font,
@@ -103,6 +126,23 @@ pub struct GeneralConfig {
     gap: u8,
 
     sorting: Sorting,
+}
+
+impl Default for GeneralConfig {
+    fn default() -> Self {
+        Self {
+            font: Default::default(),
+
+            width: GeneralConfig::default_width(),
+            height: GeneralConfig::default_height(),
+
+            anchor: Default::default(),
+            offset: Default::default(),
+            gap: GeneralConfig::default_gap(),
+
+            sorting: Default::default(),
+        }
+    }
 }
 
 impl GeneralConfig {
