@@ -165,38 +165,43 @@ impl TextRect {
             .take_while(|y| rect_size.height - *y >= self.line_height)
             .take(if self.wrap { usize::MAX } else { 1 })
         {
-            let mut remaining_width = rect_size.width;
-            let mut words = vec![];
+            let mut line = LineRectBuilder::create_empty()
+                .y_offset(y)
+                .available_space(rect_size.width as isize)
+                .spacebar_width(self.spacebar_width)
+                .justification(self.justification.to_owned())
+                .words(vec![])
+                .build()
+                .expect("Can't create a Line rect from existing components. Please contact with developers with this information.");
 
-            while let Some(word) = self.words.front() {
-                let inserting_width = word.width()
-                    + if !words.is_empty() {
-                        self.spacebar_width
-                    } else {
-                        0
-                    };
+            while let Some(word) = self.words.pop_front() {
+                line.push_word(word);
 
-                if inserting_width > remaining_width {
+                if line.is_overflow() {
+                    // INFO: here is a logic when the line have single word which overflows current
+                    // line and use it for ellipsization. Otherwise (when it is not single word)
+                    // remove last word to clean up the overflow and return it to `self.words`.
+                    if line.len() > 1 {
+                        // SAFETY: because the if-statement checks that line is non-empty, the
+                        // popped word alvays valid.
+                        self.words
+                            .push_front(unsafe { line.pop_word().unwrap_unchecked() })
+                    }
+
                     break;
                 }
-
-                // SAFETY: the word always valid while it check by `while let` loop around
-                words.push(unsafe { self.words.pop_front().unwrap_unchecked() });
-                remaining_width -= inserting_width;
             }
 
-            if words.len() == 0 {
+            if line.is_empty() {
                 break;
             }
 
-            lines.push(LineRectBuilder::create_empty()
-                .y_offset(y)
-                .available_space(remaining_width)
-                .spacebar_width(self.spacebar_width)
-                .justification(self.justification.to_owned())
-                .words(words)
-                .build()
-                .expect("Can't create a Line rect from existing components. Please contact with developers with this information."));
+            let is_overflow = line.is_overflow();
+            lines.push(line);
+
+            if is_overflow {
+                break;
+            }
         }
 
         self.lines = lines;
@@ -269,7 +274,7 @@ impl Draw for TextRect {
 struct LineRect {
     y_offset: usize,
 
-    available_space: usize,
+    available_space: isize,
     spacebar_width: usize,
 
     justification: TextJustification,
@@ -278,8 +283,21 @@ struct LineRect {
 }
 
 impl LineRect {
+    fn available_space(&self) -> usize {
+        assert!(
+            self.available_space > 0,
+            "The available space of line rect is negative. Maybe you forgot ellipsize it."
+        );
+
+        self.available_space as usize
+    }
+
     fn blank_space(&self) -> usize {
-        self.available_space + self.spacebar_width * self.words.len().saturating_sub(1)
+        assert!(
+            self.available_space > 0,
+            "The available space of line rect is negative. Maybe you forgot ellipsize it."
+        );
+        self.available_space as usize + self.spacebar_width * self.words.len().saturating_sub(1)
     }
 
     fn ellipsize(
@@ -288,40 +306,55 @@ impl LineRect {
         ellipsis: Glyph,
         ellipsize_at: &EllipsizeAt,
     ) -> EllipsiationState {
-        let Some(word) = last_word else {
-            return EllipsiationState::Complete;
-        };
-
         match ellipsize_at {
             EllipsizeAt::Middle => {
-                self.ellipsize_middle(word, ellipsis);
-                return EllipsiationState::Complete;
+                self.ellipsize_middle(last_word, ellipsis);
+                EllipsiationState::Complete
             }
-            EllipsizeAt::End => self.ellipsize_end(ellipsis),
+            EllipsizeAt::End => {
+                if last_word.is_some() || self.available_space < 0 {
+                    self.ellipsize_end(ellipsis)
+                } else {
+                    EllipsiationState::Complete
+                }
+            }
         }
     }
 
-    fn ellipsize_middle(&mut self, mut last_word: WordRect, ellipsis: Glyph) {
+    fn ellipsize_middle(&mut self, last_word: Option<WordRect>, ellipsis: Glyph) {
         let ellipsis_width = ellipsis.advance_width();
-        while !last_word.is_blank()
-            && last_word.width() + self.spacebar_width + ellipsis_width > self.available_space
-        {
-            last_word.pop_glyph();
+
+        if let Some(mut last_word) = last_word {
+            while !last_word.is_blank()
+                && (last_word.width() + self.spacebar_width + ellipsis_width) as isize
+                    > self.available_space
+            {
+                last_word.pop_glyph();
+            }
+
+            if !last_word.is_blank() {
+                last_word.push_glyph(ellipsis);
+                self.push_word(last_word);
+                return;
+            } else if ellipsis_width as isize <= self.available_space {
+                self.push_ellipsis_to_last_word(ellipsis);
+                return;
+            }
         }
 
-        if !last_word.is_blank() {
-            last_word.push_glyph(ellipsis);
-            self.push_word(last_word);
-            return;
-        } else if ellipsis_width <= self.available_space {
-            self.push_ellipsis_to_last_word(ellipsis);
+        if self.available_space >= 0 {
             return;
         }
 
-        let mut last_word = self.pop_word();
+        let mut last_word = self.pop_word().expect(
+            "Here must have a WordRect struct in the LineRect. \
+            But it doesn't have, so the LineRect is not correct. Please to contact the devs of \
+            the Noti application with this information, please.",
+        );
 
         while !last_word.is_blank()
-            && last_word.width() + self.spacebar_width + ellipsis_width > self.available_space
+            && (last_word.width() + self.spacebar_width + ellipsis_width) as isize
+                > self.available_space
         {
             last_word.pop_glyph();
         }
@@ -333,51 +366,58 @@ impl LineRect {
     }
 
     fn ellipsize_end(&mut self, ellipsis: Glyph) -> EllipsiationState {
-        if ellipsis.advance_width() <= self.available_space {
+        if ellipsis.advance_width() as isize <= self.available_space {
             self.push_ellipsis_to_last_word(ellipsis);
             EllipsiationState::Complete
         } else {
-            let Some(last_word) = self.words.pop() else {
+            if let None = self.pop_word() {
                 return EllipsiationState::Continue(Some(WordRect::new_empty()));
             };
 
-            self.available_space += last_word.width() + self.spacebar_width;
             self.ellipsize_end(ellipsis)
         }
     }
 
-    fn pop_word(&mut self) -> WordRect {
-        let last_word = self.words.pop().expect(
-            "Here must have a WordRect struct in the LineRect. \
-            But it doesn't have, so the LineRect is not correct. Please to contact the devs of \
-            the Noti application with this information, please.",
-        );
+    fn pop_word(&mut self) -> Option<WordRect> {
+        let last_word = self.words.pop()?;
 
-        self.available_space += last_word.width()
+        self.available_space += (last_word.width()
             + if !self.words.is_empty() {
                 self.spacebar_width
             } else {
                 0
-            };
+            }) as isize;
 
-        last_word
+        Some(last_word)
     }
 
     fn push_word(&mut self, word: WordRect) {
-        self.available_space -= word.width()
+        self.available_space -= (word.width()
             + if !self.words.is_empty() {
                 self.spacebar_width
             } else {
                 0
-            };
+            }) as isize;
         self.words.push(word);
     }
 
     fn push_ellipsis_to_last_word(&mut self, ellipsis: Glyph) {
         if let Some(last_word) = self.words.last_mut() {
-            self.available_space -= ellipsis.advance_width();
+            self.available_space -= ellipsis.advance_width() as isize;
             last_word.push_glyph(ellipsis);
         }
+    }
+
+    fn len(&self) -> usize {
+        self.words.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.words.is_empty()
+    }
+
+    fn is_overflow(&self) -> bool {
+        self.available_space < 0
     }
 
     fn set_color(&mut self, color: Bgra) {
@@ -394,9 +434,9 @@ impl Draw for LineRect {
         output: &mut Output,
     ) {
         let (x, x_incrementor) = match &self.justification {
-            TextJustification::Center => (self.available_space / 2, self.spacebar_width),
+            TextJustification::Center => (self.available_space() / 2, self.spacebar_width),
             TextJustification::Left => (0, self.spacebar_width),
-            TextJustification::Right => (self.available_space, self.spacebar_width),
+            TextJustification::Right => (self.available_space(), self.spacebar_width),
             TextJustification::SpaceBetween => (
                 0,
                 if self.words.len() == 1 {
