@@ -299,6 +299,7 @@ pub struct DisplayConfig {
 
     colors: Option<UrgencyColors>,
 
+    text: Option<TextProperty>,
     title: Option<TextProperty>,
     body: Option<TextProperty>,
     ellipsize_at: Option<EllipsizeAt>,
@@ -364,15 +365,25 @@ impl DisplayConfig {
         }
         self.colors.as_mut().unwrap().fill_empty_by_default();
 
+        // INFO: do not fill the text property because in will specializes to tile or body.
+        // WARNING: remember set None value to text because it is useless all the time
+        if self.text.is_none() {
+            self.text = Some(Default::default());
+        }
+
         if self.title.is_none() {
             self.title = Some(Default::default());
         }
-        self.title.as_mut().unwrap().fill_empty_by_default("title");
+        let title = self.title.as_mut().unwrap();
+        title.merge(self.text.as_ref().unwrap());
+        title.fill_empty_by_default("title");
 
         if self.body.is_none() {
             self.body = Some(Default::default());
         }
-        self.body.as_mut().unwrap().fill_empty_by_default("body");
+        let body = self.body.as_mut().unwrap();
+        body.merge(self.text.as_ref().unwrap());
+        body.fill_empty_by_default("body");
 
         if self.ellipsize_at.is_none() {
             self.ellipsize_at = Some(Default::default());
@@ -385,6 +396,8 @@ impl DisplayConfig {
         if self.timeout.is_none() {
             self.timeout = Some(0);
         }
+
+        self.text = None;
     }
 }
 
@@ -733,36 +746,44 @@ impl TextProperty {
         self.line_spacing.unwrap()
     }
 
-    pub fn fill_empty_by_default(&mut self, entity: &str) {
+    fn merge(&mut self, other: &TextProperty) {
+        self.wrap = self.wrap.or(other.wrap);
+        self.style = self.style.clone().or(other.style.clone());
+        self.margin = self.margin.clone().or(other.margin.clone());
+        self.justification = self.justification.clone().or(other.justification.clone());
+        self.line_spacing = self.line_spacing.or(other.line_spacing);
+    }
+
+    fn fill_empty_by_default(&mut self, entity: &str) {
         fn is_title(entity: &str) -> bool {
             entity == "title"
         }
 
-        if self.wrap.is_none() {
+        if let None = self.wrap {
             self.wrap = Some(true);
         }
 
-        if self.style.is_none() {
-            if is_title(entity) {
-                self.style = Some(TextStyle::Bold);
+        if let None = self.style {
+            self.style = Some(if is_title(entity) {
+                TextStyle::Bold
             } else {
-                self.style = Some(Default::default());
-            }
+                Default::default()
+            });
         }
 
-        if self.margin.is_none() {
+        if let None = self.margin {
             self.margin = Some(Default::default());
         }
 
-        if self.justification.is_none() {
-            if is_title(entity) {
-                self.justification = Some(TextJustification::Center);
+        if let None = self.justification {
+            self.justification = Some(if is_title(entity) {
+                TextJustification::Center
             } else {
-                self.justification = Some(Default::default());
-            }
+                Default::default()
+            });
         }
 
-        if self.line_spacing.is_none() {
+        if let None = self.line_spacing {
             self.line_spacing = Some(0);
         }
     }
@@ -821,34 +842,26 @@ impl AppConfig {
                 display.colors = other.colors.clone();
             }
 
-            if let Some(title) = display.title.as_mut() {
-                let other_title = other.title();
+            {
+                if display.text.is_none() {
+                    display.text = Some(Default::default());
+                }
 
-                title.wrap = title.wrap.or(other_title.wrap);
-                title.style = title.style.clone().or(other_title.style.clone());
-                title.margin = title.margin.clone().or(other_title.margin.clone());
-                title.justification = title
-                    .justification
-                    .clone()
-                    .or(other_title.justification.clone());
-                title.line_spacing = title.line_spacing.or(other_title.line_spacing);
-            } else {
-                display.title = other.title.clone();
-            }
+                if display.title.is_none() {
+                    display.title = display.text.clone();
+                }
+                let title = display.title.as_mut().unwrap();
+                title.merge(display.text.as_ref().unwrap());
+                title.merge(other.title());
 
-            if let Some(body) = display.body.as_mut() {
-                let other_body = other.body();
+                if display.body.is_none() {
+                    display.body = display.text.clone();
+                }
+                let body = display.body.as_mut().unwrap();
+                body.merge(display.text.as_ref().unwrap());
+                body.merge(other.body());
 
-                body.wrap = body.wrap.or(other_body.wrap);
-                body.style = body.style.clone().or(other_body.style.clone());
-                body.margin = body.margin.clone().or(other_body.margin.clone());
-                body.justification = body
-                    .justification
-                    .clone()
-                    .or(other_body.justification.clone());
-                body.line_spacing = body.line_spacing.or(other_body.line_spacing);
-            } else {
-                display.body = other.body.clone();
+                display.text = None;
             }
 
             display.ellipsize_at = display.ellipsize_at.clone().or(other.ellipsize_at.clone());
