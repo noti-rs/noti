@@ -58,6 +58,9 @@ foreground = "#1E1E2E"
 size = 4
 radius = 10
 color = "#000"
+# also applicable
+# color = "#FF000050"
+# which the last two digits defines opacity aka alpha-channel
 
 [display.image]
 max_size = 64
@@ -65,8 +68,11 @@ margin = { right = 25 }
 # For old computers you can use simplier method of resize
 # resizing_method = "nearest"
 
-[display.title]
+[display.text]
 wrap = false
+ellipsize_at = "middle"
+
+[display.title]
 style = "bold italic"
 margin = { top = 5 }
 
