@@ -514,7 +514,7 @@ impl WText {
             font_collection,
         );
 
-        Self::apply_properties(&mut summary, title_cfg, display_config);
+        Self::apply_properties(&mut summary, title_cfg);
         Self::apply_color(&mut summary, foreground);
 
         Self {
@@ -551,7 +551,7 @@ impl WText {
             )
         };
 
-        Self::apply_properties(&mut body, body_cfg, display_config);
+        Self::apply_properties(&mut body, body_cfg);
         Self::apply_color(&mut body, foreground);
 
         Self {
@@ -563,12 +563,11 @@ impl WText {
     fn apply_properties(
         element: &mut TextRect,
         properties: &TextProperty,
-        display_config: &DisplayConfig,
     ) {
         element.set_wrap(properties.wrap());
         element.set_margin(properties.margin());
         element.set_line_spacing(properties.line_spacing() as usize);
-        element.set_ellipsize_at(display_config.ellipsize_at());
+        element.set_ellipsize_at(properties.ellipsize_at());
         element.set_justification(properties.justification());
     }
 
