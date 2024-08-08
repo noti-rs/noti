@@ -302,7 +302,6 @@ pub struct DisplayConfig {
     text: Option<TextProperty>,
     title: Option<TextProperty>,
     body: Option<TextProperty>,
-    ellipsize_at: Option<EllipsizeAt>,
     markup: Option<bool>,
 
     timeout: Option<u16>,
@@ -331,10 +330,6 @@ impl DisplayConfig {
 
     pub fn body(&self) -> &TextProperty {
         self.body.as_ref().unwrap()
-    }
-
-    pub fn ellipsize_at(&self) -> &EllipsizeAt {
-        self.ellipsize_at.as_ref().unwrap()
     }
 
     pub fn markup(&self) -> bool {
@@ -384,10 +379,6 @@ impl DisplayConfig {
         let body = self.body.as_mut().unwrap();
         body.merge(self.text.as_ref().unwrap());
         body.fill_empty_by_default("body");
-
-        if self.ellipsize_at.is_none() {
-            self.ellipsize_at = Some(Default::default());
-        }
 
         if self.markup.is_none() {
             self.markup = Some(true);
@@ -647,7 +638,10 @@ impl Border {
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct TextProperty {
     wrap: Option<bool>,
+    ellipsize_at: Option<EllipsizeAt>,
+
     style: Option<TextStyle>,
+
     margin: Option<Spacing>,
     justification: Option<TextJustification>,
     line_spacing: Option<u8>,
@@ -730,6 +724,10 @@ impl TextProperty {
         self.wrap.unwrap()
     }
 
+    pub fn ellipsize_at(&self) -> &EllipsizeAt {
+        self.ellipsize_at.as_ref().unwrap()
+    }
+
     pub fn style(&self) -> &TextStyle {
         self.style.as_ref().unwrap()
     }
@@ -748,6 +746,7 @@ impl TextProperty {
 
     fn merge(&mut self, other: &TextProperty) {
         self.wrap = self.wrap.or(other.wrap);
+        self.ellipsize_at = self.ellipsize_at.clone().or(other.ellipsize_at.clone());
         self.style = self.style.clone().or(other.style.clone());
         self.margin = self.margin.clone().or(other.margin.clone());
         self.justification = self.justification.clone().or(other.justification.clone());
@@ -761,6 +760,10 @@ impl TextProperty {
 
         if let None = self.wrap {
             self.wrap = Some(true);
+        }
+
+        if self.ellipsize_at.is_none() {
+            self.ellipsize_at = Some(Default::default());
         }
 
         if let None = self.style {
@@ -864,7 +867,6 @@ impl AppConfig {
                 display.text = None;
             }
 
-            display.ellipsize_at = display.ellipsize_at.clone().or(other.ellipsize_at.clone());
             display.markup = display.markup.or(other.markup);
             display.timeout = display.timeout.or(other.timeout);
         } else {
