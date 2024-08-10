@@ -1,0 +1,8 @@
+/target
+.idea
+output.png
+src/utils.rs
+debug.log
+
+# Don't save .lock files in workspaces
+Cargo.lock
