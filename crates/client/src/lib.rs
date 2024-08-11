@@ -1,14 +1,42 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+use std::collections::HashMap;
+
+use zbus::zvariant::Value;
+
+pub struct NotificationData {
+    pub id: u32,
+    pub app_name: String,
+    pub icon: String,
+    pub summary: String,
+    pub body: String,
+    pub hints: String,
+    pub timeout: i32,
+    pub urgency: u8,
+    pub category: String,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub async fn send_notification(data: NotificationData) -> anyhow::Result<()> {
+    let client = dbus::client::Client::init().await?;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+    let mut hints = HashMap::new();
+    hints.entry("urgency").or_insert(Value::from(data.urgency));
+    hints
+        .entry("urgency")
+        .or_insert(Value::from(&data.category));
+
+    let mut actions = Vec::new();
+
+    client
+        .notify(
+            &data.app_name,
+            data.id,
+            &data.icon,
+            &data.summary,
+            &data.body,
+            actions,
+            hints,
+            data.timeout,
+        )
+        .await?;
+
+    Ok(())
 }
