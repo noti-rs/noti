@@ -14,6 +14,7 @@ members = [
   "crates/backend",
   "crates/client",
   "crates/dbus",
+  "crates/macros",
 ]
 
 [workspace.package]
