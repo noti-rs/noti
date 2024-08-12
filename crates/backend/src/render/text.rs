@@ -288,7 +288,7 @@ struct LineRect {
 impl LineRect {
     fn available_space(&self) -> usize {
         assert!(
-            self.available_space > 0,
+            self.available_space >= 0,
             "The available space of line rect is negative. Maybe you forgot ellipsize it."
         );
 
@@ -297,7 +297,7 @@ impl LineRect {
 
     fn blank_space(&self) -> usize {
         assert!(
-            self.available_space > 0,
+            self.available_space >= 0,
             "The available space of line rect is negative. Maybe you forgot ellipsize it."
         );
         self.available_space as usize + self.spacebar_width * self.words.len().saturating_sub(1)
