@@ -48,11 +48,6 @@ impl BannerRect {
     }
 
     #[inline]
-    pub(crate) fn write_to_file(&self, file: &mut File) {
-        file.write_all(&self.framebuffer).unwrap();
-    }
-
-    #[inline]
     pub(crate) fn framebuffer(&self) -> &[u8] {
         &self.framebuffer
     }
