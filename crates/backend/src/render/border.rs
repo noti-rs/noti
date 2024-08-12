@@ -1,9 +1,9 @@
 use derive_builder::Builder;
 
 use super::{
-    widget::{Coverage, Draw, DrawColor},
     color::Bgra,
     types::Offset,
+    widget::{Coverage, Draw, DrawColor},
 };
 
 type Matrix<T> = Vec<Vec<T>>;

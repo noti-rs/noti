@@ -79,7 +79,10 @@ impl TextRect {
                 while let Some(entity) = entities.front() {
                     if entity.offset == pos {
                         current_style += FontStyle::from(&entity.kind);
-                        current_entities.push_back(entities.pop_front().unwrap());
+                        // SAFETY: because of it acquires AFTER `while let Some(_)` it guarantee
+                        // that acquired data always valid
+                        current_entities
+                            .push_back(unsafe { entities.pop_front().unwrap_unchecked() });
                     } else {
                         break;
                     }
@@ -93,7 +96,9 @@ impl TextRect {
 
                 while let Some(entity) = current_entities.front() {
                     if entity.offset + entity.length < pos {
-                        let entity = current_entities.pop_front().unwrap();
+                        // SAFETY: because of it acquires AFTER `while let Some(_)` it guarantee
+                        // that acquired data always valid
+                        let entity = unsafe { current_entities.pop_front().unwrap_unchecked() };
                         current_style -= FontStyle::from(&entity.kind);
                     } else {
                         break;
