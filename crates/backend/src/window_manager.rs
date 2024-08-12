@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use wayland_client::{Connection, EventQueue, QueueHandle};
 
+use super::internal_messages::RendererMessage;
 use config::Config;
 use dbus::notification::Notification;
-use super::internal_messages::RendererMessage;
 
 use super::{
     render::FontCollection,
@@ -41,7 +41,7 @@ impl WindowManager {
         })
     }
 
-    pub(crate) fn update_by_config(&mut self, config: &Config) {
+    pub(crate) fn update_by_config(&mut self, config: &Config) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
             let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
@@ -51,29 +51,33 @@ impl WindowManager {
             window.commit();
         }
 
-        self.roundtrip_event_queue();
+        self.roundtrip_event_queue()
     }
 
     pub(crate) fn create_notifications(
         &mut self,
         notifications: Vec<Notification>,
         config: &Config,
-    ) {
-        let _ = self.init_window(config);
+    ) -> anyhow::Result<()> {
+        self.init_window(config)?;
 
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
         window.update_banners(notifications, config);
 
-        self.update_window(config);
-        self.roundtrip_event_queue();
+        self.update_window(config)?;
+        self.roundtrip_event_queue()
     }
 
-    pub(crate) fn close_notifications(&mut self, indices: &[u32], config: &Config) {
+    pub(crate) fn close_notifications(
+        &mut self,
+        indices: &[u32],
+        config: &Config,
+    ) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
             let notifications = window.remove_banners_by_id(indices);
 
             if notifications.is_empty() {
-                return;
+                return Ok(());
             }
 
             notifications
@@ -86,17 +90,19 @@ impl WindowManager {
                     })
                 });
 
-            self.update_window(config);
-            self.roundtrip_event_queue();
+            self.update_window(config)?;
+            self.roundtrip_event_queue()?;
         }
+
+        Ok(())
     }
 
-    pub(crate) fn remove_expired(&mut self, config: &Config) {
+    pub(crate) fn remove_expired(&mut self, config: &Config) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
             let notifications = window.remove_expired_banners(config);
 
             if notifications.is_empty() {
-                return;
+                return Ok(());
             }
 
             notifications.into_iter().for_each(|notification| {
@@ -106,68 +112,69 @@ impl WindowManager {
                 })
             });
 
-            self.update_window(config);
-            self.roundtrip_event_queue();
+            self.update_window(config)?;
+            self.roundtrip_event_queue()?;
         }
+
+        Ok(())
     }
 
     pub(crate) fn pop_event(&mut self) -> Option<RendererMessage> {
         self.events.pop()
     }
 
-    pub(crate) fn handle_actions(&mut self, config: &Config) {
+    pub(crate) fn handle_actions(&mut self, config: &Config) -> anyhow::Result<()> {
         //TODO: change it to actions which defines in config file
 
         if let Some(window) = self.window.as_mut() {
             let messages = window.handle_click(config);
             if messages.is_empty() {
-                return;
+                return Ok(());
             }
 
             self.events.extend(messages);
 
-            self.update_window(config);
-            self.roundtrip_event_queue();
+            self.update_window(config)?;
+            self.roundtrip_event_queue()?;
         }
+
+        Ok(())
     }
 
-    pub(crate) fn dispatch(&mut self) -> bool {
+    pub(crate) fn dispatch(&mut self) -> anyhow::Result<bool> {
         if self.event_queue.is_none() {
-            return false;
+            return Ok(false);
         }
 
         let event_queue = unsafe { self.event_queue.as_mut().unwrap_unchecked() };
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
 
-        let dispatched_count = event_queue
-            .dispatch_pending(window)
-            .expect("Successful dispatch");
+        let dispatched_count = event_queue.dispatch_pending(window)?;
 
         if dispatched_count > 0 {
-            return true;
+            return Ok(true);
         }
 
-        event_queue.flush().expect("Successful event queue flush");
-        let guard = event_queue.prepare_read().expect("Get read events guard");
+        event_queue.flush()?;
+        let Some(guard) = event_queue.prepare_read() else {
+            return Ok(false);
+        };
         let Ok(count) = guard.read() else {
-            return false;
+            return Ok(false);
         };
 
-        if count > 0 {
-            event_queue
-                .dispatch_pending(window)
-                .expect("Successful dispatch");
+        Ok(if count > 0 {
+            event_queue.dispatch_pending(window)?;
             true
         } else {
             false
-        }
+        })
     }
 
-    fn update_window(&mut self, config: &Config) {
+    fn update_window(&mut self, config: &Config) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
             if window.is_empty() {
-                self.deinit_window();
-                return;
+                return self.deinit_window();
             }
 
             let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
@@ -176,17 +183,19 @@ impl WindowManager {
             window.frame(qhandle);
             window.commit();
         }
+
+        Ok(())
     }
 
-    fn roundtrip_event_queue(&mut self) {
+    fn roundtrip_event_queue(&mut self) -> anyhow::Result<()> {
         if let Some(event_queue) = self.event_queue.as_mut() {
-            event_queue
-                .roundtrip(unsafe { self.window.as_mut().unwrap_unchecked() })
-                .unwrap();
+            event_queue.roundtrip(unsafe { self.window.as_mut().unwrap_unchecked() })?;
         }
+
+        Ok(())
     }
 
-    fn init_window(&mut self, config: &Config) -> bool {
+    fn init_window(&mut self, config: &Config) -> anyhow::Result<bool> {
         if let None = self.window {
             let mut event_queue = self.connection.new_event_queue();
             let qhandle = event_queue.handle();
@@ -196,36 +205,37 @@ impl WindowManager {
             let mut window = Window::init(self.font_collection.clone(), config);
 
             while let ConfigurationState::NotConfiured = window.configuration_state() {
-                let _ = event_queue.blocking_dispatch(&mut window);
+                event_queue.blocking_dispatch(&mut window)?;
             }
 
             window.configure(&qhandle, config);
 
             while let ConfigurationState::Ready = window.configuration_state() {
-                let _ = event_queue.blocking_dispatch(&mut window);
+                event_queue.blocking_dispatch(&mut window)?;
             }
 
             self.event_queue = Some(event_queue);
             self.qhandle = Some(qhandle);
             self.window = Some(window);
-            true
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 
-    fn deinit_window(&mut self) {
+    fn deinit_window(&mut self) -> anyhow::Result<()> {
         unsafe {
             let window = self.window.as_mut().unwrap_unchecked();
             window.deinit();
             self.event_queue
                 .as_mut()
                 .unwrap_unchecked()
-                .roundtrip(window)
-                .unwrap();
+                .roundtrip(window)?;
         }
         self.window = None;
         self.event_queue = None;
         self.qhandle = None;
+
+        Ok(())
     }
 }

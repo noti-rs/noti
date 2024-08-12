@@ -1,11 +1,12 @@
 use std::thread;
 
+use anyhow::Context;
 use tokio::sync::mpsc::unbounded_channel;
 
+mod internal_messages;
 mod render;
 mod window;
 mod window_manager;
-mod internal_messages;
 
 use dbus::actions::Action;
 use dbus::server::Server;
@@ -18,16 +19,14 @@ pub async fn run() -> anyhow::Result<()> {
 
     let (server_internal_channel, mut renderer) = Renderer::init()?;
 
-    thread::spawn(move || renderer.run());
+    let backend_thread = thread::spawn(move || renderer.run());
 
     loop {
         while let Ok(action) = receiver.try_recv() {
             match action {
                 Action::Show(notification) => {
                     server_internal_channel.send_to_renderer(
-                        internal_messages::ServerMessage::ShowNotification(
-                            notification,
-                        ),
+                        internal_messages::ServerMessage::ShowNotification(notification),
                     )?;
                 }
                 Action::Close(Some(id)) => {
@@ -55,22 +54,28 @@ pub async fn run() -> anyhow::Result<()> {
                     notification_id,
                     action_key,
                 } => todo!(),
-                internal_messages::RendererMessage::ClosedNotification {
-                    id,
-                    reason,
-                } => match reason {
-                    //INFO: ignore the first one because it always emits in server.
-                    dbus::actions::ClosingReason::CallCloseNotification => (),
-                    other_reason => {
-                        server
-                            .emit_signal(dbus::actions::Signal::NotificationClosed {
-                                notification_id: id,
-                                reason: other_reason,
-                            })
-                            .await?;
+                internal_messages::RendererMessage::ClosedNotification { id, reason } => {
+                    match reason {
+                        //INFO: ignore the first one because it always emits in server.
+                        dbus::actions::ClosingReason::CallCloseNotification => (),
+                        other_reason => {
+                            server
+                                .emit_signal(dbus::actions::Signal::NotificationClosed {
+                                    notification_id: id,
+                                    reason: other_reason,
+                                })
+                                .await?;
+                        }
                     }
-                },
+                }
             }
+        }
+
+        if backend_thread.is_finished() {
+            return backend_thread
+                .join()
+                .expect("Join the backend thread to finish main thread")
+                .with_context(|| "The backend shutdowns due to error");
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;

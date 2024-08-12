@@ -22,8 +22,8 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use config::{self, Config};
 use super::internal_messages::RendererMessage;
+use config::{self, Config};
 use dbus::notification::{self, Notification};
 
 use super::render::{BannerRect, FontCollection, RectSize};
@@ -380,12 +380,17 @@ impl Window {
         let buffer = Buffer::new();
 
         if let None = self.shm_pool {
-            self.shm_pool = Some(self.shm.as_ref().unwrap().create_pool(
-                buffer.as_fd(),
-                self.rect_size.area() as i32 * 4,
-                qhandle,
-                (),
-            ));
+            self.shm_pool = Some(
+                self.shm
+                    .as_ref()
+                    .expect("Must be wl_shm protocol to use create wl_shm_pool")
+                    .create_pool(
+                        buffer.as_fd(),
+                        self.rect_size.area() as i32 * 4,
+                        qhandle,
+                        (),
+                    ),
+            );
         }
 
         self.buffer = Some(buffer);

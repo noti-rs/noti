@@ -37,7 +37,7 @@ impl Renderer {
         ))
     }
 
-    pub(crate) fn run(&mut self) {
+    pub(crate) fn run(&mut self) -> anyhow::Result<()> {
         let mut notifications_to_create = vec![];
         let mut notifications_to_close = vec![];
 
@@ -59,7 +59,7 @@ impl Renderer {
                     .lock()
                     .expect("Acquire the Config struct before creating banners");
                 self.window_manager
-                    .create_notifications(notifications_to_create, &config);
+                    .create_notifications(notifications_to_create, &config)?;
                 notifications_to_create = vec![];
             }
 
@@ -68,25 +68,25 @@ impl Renderer {
                     .lock()
                     .expect("Acquire the Config struct before closing banners");
                 self.window_manager
-                    .close_notifications(&notifications_to_close, &config);
+                    .close_notifications(&notifications_to_close, &config)?;
                 notifications_to_close.clear();
             }
             self.window_manager.remove_expired(
                 &CONFIG
                     .lock()
                     .expect("Acquire the Config struct before expiring banners"),
-            );
+            )?;
 
             while let Some(message) = self.window_manager.pop_event() {
-                self.channel.send_to_server(message).unwrap();
+                self.channel.send_to_server(message)?;
             }
 
             self.window_manager.handle_actions(
                 &CONFIG
                     .lock()
                     .expect("Acquire the Config struct before handling actions"),
-            );
-            self.window_manager.dispatch();
+            )?;
+            self.window_manager.dispatch()?;
 
             {
                 let mut config = CONFIG
@@ -95,7 +95,7 @@ impl Renderer {
                 match config.check_updates() {
                     ConfigState::NotFound | ConfigState::Updated => {
                         config.update();
-                        self.window_manager.update_by_config(&config);
+                        self.window_manager.update_by_config(&config)?;
                     }
                     ConfigState::NothingChanged => (),
                 };
