@@ -30,5 +30,6 @@ tokio = { version = "1.38.0", features = ["full"] }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 backend = { path = "crates/backend" }
+client = { path = "crates/client" }
 config = { path = "crates/config" }
 clap = { version = "4.5.7", features = ["derive"] }

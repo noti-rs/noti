@@ -17,62 +17,38 @@ pub trait Notifications {
         hints: HashMap<&str, Value<'_>>,
         expire_timeout: i32,
     ) -> anyhow::Result<u32>;
+
+    async fn get_server_information(&self) -> anyhow::Result<(String, String, String, String)>;
 }
 
-pub struct Client {
-    connection: Connection,
+pub struct Client<'a> {
+    proxy: NotificationsProxy<'a>,
 }
 
-impl Client {
+impl<'a> Client<'a> {
     pub async fn init() -> anyhow::Result<Self> {
         let connection = Connection::session().await?;
-        Ok(Self { connection })
+        let proxy = NotificationsProxy::new(&connection).await?;
+
+        Ok(Self { proxy })
     }
 
     pub async fn notify(
         &self,
-        replaces_id: Option<u32>,
-        app_icon: Option<&str>,
+        app_name: &str,
+        replaces_id: u32,
+        app_icon: &str,
         summary: &str,
-        body: Option<&str>,
-        urgency: Option<u32>,
-        expire_timeout: Option<i32>,
+        body: &str,
+        actions: Vec<&str>,
+        hints: HashMap<&str, Value<'_>>,
+        expire_timeout: i32,
     ) -> anyhow::Result<u32> {
-        let proxy = NotificationsProxy::new(&self.connection).await?;
-
-        let app_name = "Noti";
-
-        let id = match replaces_id {
-            Some(id) => id,
-            None => 0,
-        };
-
-        let app_icon = match app_icon {
-            Some(s) => s,
-            None => "",
-        };
-
-        let body = match body {
-            Some(s) => s,
-            None => "",
-        };
-
-        let expire_timeout = match expire_timeout {
-            Some(i) => i,
-            None => 0,
-        };
-
-        let mut hints = HashMap::new();
-        if let Some(urgency) = urgency {
-            hints.insert("urgency", Value::from(urgency));
-        }
-
-        let actions = Vec::new();
-
-        let reply = proxy
+        let reply = self
+            .proxy
             .notify(
                 app_name,
-                id,
+                replaces_id,
                 app_icon,
                 summary,
                 body,
@@ -82,6 +58,11 @@ impl Client {
             )
             .await?;
 
+        Ok(reply)
+    }
+
+    pub async fn get_server_information(&self) -> anyhow::Result<(String, String, String, String)> {
+        let reply = self.proxy.get_server_information().await?;
         Ok(reply)
     }
 }

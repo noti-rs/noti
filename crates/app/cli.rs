@@ -11,6 +11,9 @@ pub enum Args {
 
     /// Sends the notification
     Send(SendCommand),
+
+    /// Prints server information
+    ServerInfo,
 }
 
 #[derive(Parser)]
@@ -18,7 +21,7 @@ pub struct SendCommand {
     #[arg(help = "Summary of the notification")]
     summary: String,
 
-    #[arg(help = "Body text of the notification")]
+    #[arg(default_value_t = String::from(""), help = "Body text of the notification")]
     body: String,
 
     #[arg(short, long, default_value_t = String::from("Noti"), hide_default_value = true, help = "The name of the application")]
@@ -45,11 +48,11 @@ pub struct SendCommand {
     #[arg(
         short,
         long,
-        default_value_t = 1,
+        default_value_t = String::from("normal"),
         hide_default_value = true,
-        help = "Urgency level (1: low, 2: normal, 3: critical)"
+        help = "Urgency level (low, normal, critical)"
     )]
-    urgency: u8,
+    urgency: String,
 
     #[arg(short, long, default_value_t = String::from(""), hide_default_value = true, help = "Notification category")]
     category: String,
@@ -57,6 +60,8 @@ pub struct SendCommand {
 
 impl Args {
     pub async fn process(&self) -> anyhow::Result<()> {
+        let noti = client::NotiClient::init().await;
+
         match self {
             Args::Run => {
                 let _ = &*CONFIG; // Initializes the configuration.
@@ -64,19 +69,20 @@ impl Args {
                 backend::run().await?;
             }
             Args::Send(args) => {
-                client::send_notification(client::NotificationData {
+                noti.send_notification(client::NotificationData {
                     id: args.replaces_id,
-                    app_name: args.app_name.to_string(),
-                    body: args.body.to_string(),
-                    summary: args.summary.to_string(),
-                    icon: args.icon.to_string(),
-                    timeout: args.timeout.into(),
-                    hints: args.hints.to_string(),
-                    urgency: args.urgency.into(),
-                    category: args.category.to_string(),
+                    app_name: &args.app_name,
+                    body: &args.body,
+                    summary: &args.summary,
+                    icon: &args.icon,
+                    timeout: args.timeout,
+                    hints: &args.hints,
+                    urgency: &args.urgency,
+                    category: &args.category,
                 })
                 .await?;
             }
+            Args::ServerInfo => noti.get_server_info().await?,
         }
 
         Ok(())

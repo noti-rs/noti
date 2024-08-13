@@ -508,6 +508,9 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dbus",
+ "tokio",
+ "zbus",
 ]
 
 [[package]]
@@ -1362,6 +1365,7 @@ dependencies = [
  "anyhow",
  "backend",
  "clap",
+ "client",
  "config",
  "tokio",
 ]
