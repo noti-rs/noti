@@ -21,7 +21,7 @@ pub struct SendCommand {
     #[arg(help = "Summary of the notification")]
     summary: String,
 
-    #[arg(default_value_t = String::from(""), help = "Body text of the notification")]
+    #[arg(default_value_t = String::from(""), hide_default_value = true, help = "Body text of the notification")]
     body: String,
 
     #[arg(short, long, default_value_t = String::from("Noti"), hide_default_value = true, help = "The name of the application")]
@@ -54,13 +54,51 @@ pub struct SendCommand {
     )]
     urgency: String,
 
-    #[arg(short, long, default_value_t = String::from(""), hide_default_value = true, help = "Notification category")]
-    category: String,
+    #[arg(short, long, help = "Notification category")]
+    category: Option<String>,
+
+    #[arg(short, long, help = "Desktop entry path")]
+    desktop_entry: Option<String>,
+
+    #[arg(short = 'I', long, help = "Path to image")]
+    image_path: Option<String>,
+
+    #[arg(short = 'R', long, help = "Resident")]
+    resident: Option<bool>,
+
+    #[arg(short, long, help = "Path to sound file")]
+    sound_file: Option<String>,
+
+    #[arg(short = 'N', long, help = "Sound name")]
+    sound_name: Option<String>,
+
+    #[arg(short = 'S', long, help = "Suppress sound")]
+    suppress_sound: Option<bool>,
+
+    #[arg(short = 'T', long, help = "Transient")]
+    transient: Option<bool>,
+
+    #[arg(short = 'A', long, help = "Action icons")]
+    action_icons: Option<bool>,
+
+    #[arg(
+        short,
+        long,
+        help = "X location on the screen that the notification should point to"
+    )]
+    x: Option<i32>,
+
+    #[arg(
+        short,
+        long,
+        help = "Y location on the screen that the notification should point to"
+    )]
+    y: Option<i32>,
 }
 
 impl Args {
     pub async fn process(&self) -> anyhow::Result<()> {
-        let noti = client::NotiClient::init().await;
+        let noti = client::NotiClient::init().await?;
 
         match self {
             Args::Run => {
@@ -68,23 +106,43 @@ impl Args {
 
                 backend::run().await?;
             }
-            Args::Send(args) => {
-                noti.send_notification(client::NotificationData {
-                    id: args.replaces_id,
-                    app_name: &args.app_name,
-                    body: &args.body,
-                    summary: &args.summary,
-                    icon: &args.icon,
-                    timeout: args.timeout,
-                    hints: &args.hints,
-                    urgency: &args.urgency,
-                    category: &args.category,
-                })
-                .await?;
-            }
-            Args::ServerInfo => noti.get_server_info().await?,
+            Args::Send(args) => self.send(noti, args).await?,
+            Args::ServerInfo => self.server_info(noti).await?,
         }
 
         Ok(())
+    }
+
+    async fn send(&self, noti: client::NotiClient<'_>, args: &SendCommand) -> anyhow::Result<()> {
+        let hints_data = client::HintsData {
+            urgency: args.urgency.clone(),
+            category: args.category.clone(),
+            desktop_entry: args.desktop_entry.clone(),
+            image_path: args.image_path.clone(),
+            sound_file: args.sound_file.clone(),
+            sound_name: args.sound_name.clone(),
+            resident: args.resident,
+            suppress_sound: args.suppress_sound,
+            transient: args.transient,
+            action_icons: args.action_icons,
+            x: args.x,
+            y: args.y,
+        };
+
+        noti.send_notification(
+            args.replaces_id,
+            &args.app_name,
+            &args.icon,
+            &args.summary,
+            &args.body,
+            args.timeout,
+            &args.hints,
+            &hints_data,
+        )
+        .await
+    }
+
+    async fn server_info(&self, noti: client::NotiClient<'_>) -> anyhow::Result<()> {
+        noti.get_server_info().await
     }
 }
