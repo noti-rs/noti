@@ -1,6 +1,4 @@
-use core::panic;
 use std::collections::HashMap;
-
 use zbus::zvariant::Value;
 
 pub struct NotificationData<'a> {
@@ -75,18 +73,8 @@ impl<'a> NotiClient<'a> {
                 let hint_name = parts[1].trim();
                 let hint_value = parts[2].trim();
 
-                hints.insert(
-                    hint_name,
-                    Value::from(match hint_type {
-                        "int" => Value::I32(hint_value.parse::<i32>()?),
-                        "bool" => Value::Bool(hint_value.parse::<bool>()?),
-                        "string" => Value::from(hint_value),
-                        _ => anyhow::bail!(
-                            "Invalid hint type \"{}\". Valid types are int, bool and string",
-                            hint_type
-                        ),
-                    }),
-                );
+                let value = Self::parse_hint_value(hint_type, hint_value)?;
+                hints.insert(hint_name, value);
             }
         }
 
@@ -94,5 +82,17 @@ impl<'a> NotiClient<'a> {
         hints.entry("category").or_insert(Value::from(category));
 
         Ok(hints)
+    }
+
+    fn parse_hint_value<'b>(hint_type: &'b str, hint_value: &'b str) -> anyhow::Result<Value<'b>> {
+        match hint_type {
+            "int" => Ok(Value::I32(hint_value.parse()?)),
+            "bool" => Ok(Value::Bool(hint_value.parse()?)),
+            "string" => Ok(Value::from(hint_value)),
+            _ => anyhow::bail!(
+                "Invalid hint type \"{}\". Valid types are int, bool, and string.",
+                hint_type
+            ),
+        }
     }
 }
