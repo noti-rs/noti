@@ -101,16 +101,18 @@ impl Args {
         let noti = client::NotiClient::init().await?;
 
         match self {
-            Args::Run => {
-                let _ = &*CONFIG; // Initializes the configuration.
-
-                backend::run().await?;
-            }
+            Args::Run => self.run().await?,
             Args::Send(args) => self.send(noti, args).await?,
             Args::ServerInfo => self.server_info(noti).await?,
         }
 
         Ok(())
+    }
+
+    async fn run(&self) -> anyhow::Result<()> {
+        let _ = &*CONFIG; // Initializes the configuration.
+
+        backend::run().await
     }
 
     async fn send(&self, noti: client::NotiClient<'_>, args: &SendCommand) -> anyhow::Result<()> {
