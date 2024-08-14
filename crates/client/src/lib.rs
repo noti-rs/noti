@@ -89,7 +89,9 @@ impl<'a> NotiClient<'a> {
     }
 
     fn or_insert_hints(hints: &mut HashMap<&'a str, Value<'a>>, hints_data: &'a HintsData) {
-        hints.insert("urgency", Value::from(hints_data.urgency.as_str()));
+        hints
+            .entry("urgency")
+            .or_insert(Value::from(hints_data.urgency.as_str()));
 
         if let Some(category) = &hints_data.category {
             hints
