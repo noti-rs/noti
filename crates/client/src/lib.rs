@@ -53,7 +53,7 @@ impl<'a> NotiClient<'a> {
     }
 
     pub async fn get_server_info(&self) -> anyhow::Result<()> {
-        let server_info = self.dbus_client.get_server_information().await.unwrap();
+        let server_info = self.dbus_client.get_server_information().await?;
         println!(
             "Name: {}\nVendor: {}\nVersion: {}\nSpecification version: {}",
             server_info.0, server_info.1, server_info.2, server_info.3
