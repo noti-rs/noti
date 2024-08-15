@@ -1,6 +1,6 @@
-use std::{fs::File, io::Write, time};
+use std::time;
 
-use config::{spacing::Spacing, Alignment, Config, DisplayConfig, Position};
+use config::{spacing::Spacing, Config, DisplayConfig};
 use dbus::notification::Notification;
 
 use super::{
@@ -8,7 +8,9 @@ use super::{
     color::Bgra,
     font::FontCollection,
     types::RectSize,
-    widget::{self, ContainerBuilder, Coverage, Draw, DrawColor, WImage, WText},
+    widget::{
+        self, Alignment, ContainerBuilder, Coverage, Draw, DrawColor, Position, WImage, WText,
+    },
 };
 
 pub struct BannerRect {
@@ -54,22 +56,22 @@ impl BannerRect {
 
     pub(crate) fn draw(&mut self, font_collection: &FontCollection, config: &Config) {
         let rect_size = RectSize::new(
-            config.general().width() as usize,
-            config.general().height() as usize,
+            config.general().width as usize,
+            config.general().height as usize,
         );
 
         let display = config.display_by_app(&self.data.app_name);
-        let colors = display.colors().by_urgency(&self.data.hints.urgency);
+        let colors = display.colors.by_urgency(&self.data.hints.urgency);
 
-        let background: Bgra = colors.background().into();
+        let background: Bgra = Bgra::from(&colors.background);
 
         self.init_framebuffer(&rect_size, &background);
         self.stride = rect_size.width as usize * 4;
 
-        let border_spacing = Spacing::all_directional(display.border().size());
-        let padding = display.padding() + border_spacing;
+        let border_spacing = Spacing::all_directional(display.border.size);
+        let padding = &display.padding + border_spacing;
 
-        let font_size = config.general().font().size() as f32;
+        let font_size = config.general().font.size as f32;
 
         let mut container = ContainerBuilder::default()
             .spacing(padding)
@@ -98,8 +100,8 @@ impl BannerRect {
         });
 
         self.draw_border(
-            config.general().width().into(),
-            config.general().height().into(),
+            config.general().width.into(),
+            config.general().height.into(),
             &background,
             display,
         );
@@ -119,12 +121,12 @@ impl BannerRect {
         background: &Bgra,
         display: &DisplayConfig,
     ) {
-        let border_cfg = display.border();
+        let border_cfg = &display.border;
 
         let border = BorderBuilder::default()
-            .size(border_cfg.size() as usize)
-            .radius(border_cfg.radius() as usize)
-            .color(border_cfg.color().into())
+            .size(border_cfg.size as usize)
+            .radius(border_cfg.radius as usize)
+            .color(Bgra::from(&border_cfg.color))
             .background_color(background.clone())
             .frame_width(width as usize)
             .frame_height(height as usize)
