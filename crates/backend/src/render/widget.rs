@@ -1,6 +1,6 @@
 use derive_builder::Builder;
 
-use config::{spacing::Spacing, Alignment, DisplayConfig, ImageProperty, Position, TextProperty};
+use config::{spacing::Spacing, DisplayConfig, ImageProperty, text::TextProperty};
 use dbus::notification::Notification;
 
 use super::{
@@ -98,15 +98,15 @@ impl Container {
 
     fn main_axis_alignment(&self) -> &Position {
         match &self.direction {
-            Direction::Horizontal => self.alignment.horizontal(),
-            Direction::Vertical => self.alignment.vertical(),
+            Direction::Horizontal => &self.alignment.horizontal,
+            Direction::Vertical => &self.alignment.vertical,
         }
     }
 
     fn auxiliary_axis_alignment(&self) -> &Position {
         match &self.direction {
-            Direction::Horizontal => self.alignment.vertical(),
-            Direction::Vertical => self.alignment.horizontal(),
+            Direction::Horizontal => &self.alignment.vertical,
+            Direction::Vertical => &self.alignment.horizontal,
         }
     }
 }
@@ -164,6 +164,41 @@ impl Draw for Container {
             plane.main_axis_offset += element.len_by_direction(&self.direction) + incrementor;
             plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset;
         });
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub(super) struct Alignment {
+    pub(super) horizontal: Position,
+    pub(super) vertical: Position,
+}
+
+impl Alignment {
+    pub(super) fn new(horizontal: Position, vertical: Position) -> Self {
+        Self {
+            horizontal,
+            vertical,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+#[allow(dead_code)]
+pub enum Position {
+    Start,
+    #[default]
+    Center,
+    End,
+    SpaceBetween,
+}
+
+impl Position {
+    pub fn compute_initial_pos(&self, width: usize, element_width: usize) -> usize {
+        match self {
+            Position::Start | Position::SpaceBetween => 0,
+            Position::Center => width / 2 - element_width / 2,
+            Position::End => width - element_width,
+        }
     }
 }
 
@@ -376,7 +411,7 @@ pub(super) struct WImage {
 
 impl WImage {
     pub(super) fn new(notification: &Notification, display_config: &DisplayConfig) -> Self {
-        let property = display_config.image().clone();
+        let property = display_config.image.clone();
         let image = Image::from_image_data(notification.hints.image_data.as_ref(), &property)
             .or_svg(
                 notification
@@ -432,7 +467,7 @@ impl WImage {
             return CompileState::Failure;
         }
 
-        let margin = self.property.margin_mut();
+        let margin = &mut self.property.margin;
         let horizontal_margin = (margin.left() + margin.right()) as usize;
 
         if image_width + horizontal_margin > rect_size.width {
@@ -481,7 +516,7 @@ impl Draw for WImage {
         offset: &Offset,
         output: &mut Output,
     ) {
-        let offset = Offset::from(self.property.margin()) + offset.clone();
+        let offset = Offset::from(&self.property.margin) + offset.clone();
         self.data.draw_with_offset(&offset, output);
     }
 }
@@ -500,24 +535,24 @@ impl WText {
         display_config: &DisplayConfig,
     ) -> Self {
         let colors = display_config
-            .colors()
+            .colors
             .by_urgency(&notification.hints.urgency);
-        let foreground: Bgra = colors.foreground().into();
+        let foreground = Bgra::from(&colors.foreground);
 
-        let title_cfg = display_config.title();
+        let title_cfg = display_config.title.clone();
         let mut summary = TextRect::from_str(
             &notification.summary,
             font_size,
-            title_cfg.style(),
+            &title_cfg.style,
             font_collection,
         );
 
-        Self::apply_properties(&mut summary, title_cfg);
+        Self::apply_properties(&mut summary, &title_cfg);
         Self::apply_color(&mut summary, foreground);
 
         Self {
             data: summary,
-            property: title_cfg.clone(),
+            property: title_cfg,
         }
     }
 
@@ -528,42 +563,42 @@ impl WText {
         display_config: &DisplayConfig,
     ) -> Self {
         let colors = display_config
-            .colors()
+            .colors
             .by_urgency(&notification.hints.urgency);
-        let foreground: Bgra = colors.foreground().into();
+        let foreground = Bgra::from(&colors.foreground);
 
-        let body_cfg = display_config.body();
-        let mut body = if display_config.markup() {
+        let body_cfg = display_config.body.clone();
+        let mut body = if display_config.markup {
             TextRect::from_text(
                 &notification.body,
                 font_size,
-                body_cfg.style(),
+                &body_cfg.style,
                 font_collection,
             )
         } else {
             TextRect::from_str(
                 &notification.body.body,
                 font_size,
-                body_cfg.style(),
+                &body_cfg.style,
                 font_collection,
             )
         };
 
-        Self::apply_properties(&mut body, body_cfg);
+        Self::apply_properties(&mut body, &body_cfg);
         Self::apply_color(&mut body, foreground);
 
         Self {
             data: body,
-            property: body_cfg.clone(),
+            property: body_cfg,
         }
     }
 
     fn apply_properties(element: &mut TextRect, properties: &TextProperty) {
-        element.set_wrap(properties.wrap());
-        element.set_margin(properties.margin());
-        element.set_line_spacing(properties.line_spacing() as usize);
-        element.set_ellipsize_at(properties.ellipsize_at());
-        element.set_justification(properties.justification());
+        element.set_wrap(properties.wrap);
+        element.set_margin(&properties.margin);
+        element.set_line_spacing(properties.line_spacing as usize);
+        element.set_ellipsize_at(&properties.ellipsize_at);
+        element.set_justification(&properties.justification);
     }
 
     fn apply_color(element: &mut TextRect, foreground: Bgra) {

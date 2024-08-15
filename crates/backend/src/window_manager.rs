@@ -26,7 +26,7 @@ impl WindowManager {
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
         let connection = Connection::connect_to_env()?;
         let font_collection = Arc::new(FontCollection::load_by_font_name(
-            config.general().font().name(),
+            &config.general().font.name,
         )?);
 
         Ok(Self {

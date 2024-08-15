@@ -62,8 +62,8 @@ impl Window {
             font_collection,
 
             rect_size: RectSize::new(
-                config.general().width().into(),
-                config.general().height().into(),
+                config.general().width.into(),
+                config.general().height.into(),
             ),
             margin: Margin::new(),
 
@@ -121,7 +121,7 @@ impl Window {
             (),
         ));
 
-        self.relocate(config.general().offset(), config.general().anchor());
+        self.relocate(config.general().offset, &config.general().anchor);
 
         {
             let layer_surface = unsafe { self.layer_surface.as_ref().unwrap_unchecked() };
@@ -135,9 +135,9 @@ impl Window {
     }
 
     pub(super) fn reconfigure(&mut self, config: &Config) {
-        self.relocate(config.general().offset(), config.general().anchor());
+        self.relocate(config.general().offset, &config.general().anchor);
         self.banners
-            .sort_by(config.general().sorting().get_cmp::<BannerRect>());
+            .sort_by(config.general().sorting.get_cmp::<BannerRect>());
     }
 
     fn relocate(&mut self, (x, y): (u8, u8), anchor_cfg: &config::Anchor) {
@@ -178,7 +178,7 @@ impl Window {
                 banner_rect
             }));
         self.banners
-            .sort_by(config.general().sorting().get_cmp::<BannerRect>());
+            .sort_by(config.general().sorting.get_cmp::<BannerRect>());
     }
 
     pub(super) fn replace_by_indices(
@@ -253,7 +253,7 @@ impl Window {
                 notification::Timeout::Configurable => {
                     let timeout = config
                         .display_by_app(&rect.notification().app_name)
-                        .timeout();
+                        .timeout;
                     if timeout != 0 && rect.created_at().elapsed().as_millis() > timeout as u128 {
                         Some(i)
                     } else {
@@ -276,9 +276,9 @@ impl Window {
         }
         self.pointer_state.press_state.clear();
 
-        let rect_height = config.general().height() as usize;
-        let gap = config.general().gap() as usize;
-        let anchor = config.general().anchor();
+        let rect_height = config.general().height as usize;
+        let gap = config.general().gap as usize;
+        let anchor = &config.general().anchor;
 
         if let Some(i) = (0..self.rect_size.height as usize)
             .step_by(rect_height + gap)
@@ -322,18 +322,18 @@ impl Window {
     }
 
     pub(super) fn draw(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
-        let gap = config.general().gap();
+        let gap = config.general().gap;
 
         self.resize(RectSize::new(
-            config.general().width().into(),
-            self.banners.len() * config.general().height() as usize
+            config.general().width.into(),
+            self.banners.len() * config.general().height as usize
                 + self.banners.len().saturating_sub(1) * gap as usize,
         ));
 
         let gap_buffer = self.allocate_gap_buffer(gap);
 
         self.create_buffer(qhandle);
-        self.write_banners_to_buffer(config.general().anchor(), &gap_buffer);
+        self.write_banners_to_buffer(&config.general().anchor, &gap_buffer);
         self.build_buffer(qhandle);
     }
 

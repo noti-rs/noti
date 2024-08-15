@@ -8,7 +8,7 @@ use std::{
     process::Command,
 };
 
-use config::TextStyle;
+use config::text::TextStyle;
 use dbus::text::EntityKind;
 
 use super::{

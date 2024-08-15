@@ -48,14 +48,14 @@ impl Image {
                     image::DynamicImage::from(rgb_image)
                 };
 
-                Self::resize(&mut width, &mut height, image_property.max_size());
+                Self::resize(&mut width, &mut height, image_property.max_size);
                 let rowstride = width * 4;
 
                 let image = image::imageops::resize(
                     &image,
                     width as u32,
                     height as u32,
-                    image_property.resizing_method().to_filter_type(),
+                    image_property.resizing_method.to_filter_type(),
                 );
 
                 Image::Exists(ImageData {
@@ -164,7 +164,7 @@ impl Image {
             tree_size.height().round() as i32,
         );
 
-        Self::resize(&mut width, &mut height, image_property.max_size());
+        Self::resize(&mut width, &mut height, image_property.max_size);
 
         let scale = if width > height {
             width as f32 / tree_size.width()

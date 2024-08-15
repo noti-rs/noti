@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use derive_builder::Builder;
 use itertools::Itertools;
 
-use config::{spacing::Spacing, EllipsizeAt, TextJustification};
+use config::{spacing::Spacing, text::{EllipsizeAt, TextJustification}};
 use dbus::text::Text;
 
 use super::{
