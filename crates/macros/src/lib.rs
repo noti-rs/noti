@@ -165,8 +165,13 @@ impl ConfigStructure {
             .iter()
             .map(|field| {
                 let ident = field.ident.as_ref().expect("Must be a named field");
+                let mut line = quote! { #ident: self.#ident.clone() };
 
-                quote! { #ident: self.#ident.clone().or(other.#ident.clone()), }
+                if _attr_info.is_mergeable_field(field) {
+                    line = quote! { #line.map(|#ident| #ident.merge(other.#ident.clone())) };
+                }
+
+                quote! { #line.or(other.#ident.clone()), }
             })
             .reduce(|mut lhs, rhs| {
                 lhs.extend(rhs);
@@ -339,6 +344,13 @@ impl AttrInfo {
             .unwrap_or(false)
     }
 
+    fn is_mergeable_field(&self, field: &syn::Field) -> bool {
+        self.field_attr_info
+            .get(&field_name(field))
+            .map(|field_info| field_info.mergeable)
+            .unwrap_or(false)
+    }
+
     fn is_cfg_prop(attr: &syn::Attribute) -> bool {
         if let syn::Meta::List(meta_list) = &attr.meta {
             if meta_list.path.is_ident("cfg_prop") {
@@ -418,6 +430,7 @@ impl ToTokens for DeriveInfo {
 
 struct FieldAttrInfo {
     temporary: bool,
+    mergeable: bool,
     default: DefaultAssignment,
     inherits: Option<InheritsField>,
     use_type: Option<syn::Ident>,
@@ -426,6 +439,7 @@ struct FieldAttrInfo {
 impl Parse for FieldAttrInfo {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut temporary = false;
+        let mut mergeable = false;
         let mut default = DefaultAssignment::DefaultCall;
         let mut inherits: Option<InheritsField> = None;
         let mut use_type: Option<syn::Ident> = None;
@@ -435,6 +449,7 @@ impl Parse for FieldAttrInfo {
 
             match ident.to_string().as_str() {
                 "temporary" => temporary = true,
+                "mergeable" => mergeable = true,
                 "default" => {
                     let content;
                     let _paren = parenthesized!(content in input);
@@ -462,6 +477,7 @@ impl Parse for FieldAttrInfo {
 
         Ok(Self {
             temporary,
+            mergeable,
             default,
             inherits,
             use_type,

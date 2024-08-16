@@ -248,23 +248,23 @@ public! {
     #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
     #[cfg_prop(name(DisplayConfig), derive(Debug))]
     struct TomlDisplayConfig {
-        #[cfg_prop(use_type(ImageProperty))]
+        #[cfg_prop(use_type(ImageProperty), mergeable)]
         image: Option<TomlImageProperty>,
 
         padding: Option<Spacing>,
-        #[cfg_prop(use_type(Border))]
+        #[cfg_prop(use_type(Border), mergeable)]
         border: Option<TomlBorder>,
 
-        #[cfg_prop(use_type(UrgencyColors))]
+        #[cfg_prop(use_type(UrgencyColors), mergeable)]
         colors: Option<TomlUrgencyColors>,
 
         #[cfg_prop(temporary)]
         text: Option<TomlTextProperty>,
 
-        #[cfg_prop(inherits(field = text), use_type(TextProperty), default(TomlTextProperty::default_title()))]
+        #[cfg_prop(inherits(field = text), use_type(TextProperty), default(TomlTextProperty::default_title()), mergeable)]
         title: Option<TomlTextProperty>,
 
-        #[cfg_prop(inherits(field = text), use_type(TextProperty))]
+        #[cfg_prop(inherits(field = text), use_type(TextProperty), mergeable)]
         body: Option<TomlTextProperty>,
 
         #[cfg_prop(default(true))]
@@ -322,7 +322,10 @@ pub struct AppConfig {
 
 impl AppConfig {
     fn merge(mut self, other: Option<&TomlDisplayConfig>) -> Self {
-        self.display = self.display.or(other.cloned());
+        self.display = self
+            .display
+            .map(|display| display.merge(other.cloned()))
+            .or(other.cloned());
         self
     }
 }

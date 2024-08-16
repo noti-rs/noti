@@ -10,13 +10,13 @@ public! {
     #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
     #[cfg_prop(name(UrgencyColors), derive(Debug))]
     struct TomlUrgencyColors {
-        #[cfg_prop(use_type(Colors))]
+        #[cfg_prop(use_type(Colors), mergeable)]
         low: Option<TomlColors>,
 
-        #[cfg_prop(use_type(Colors))]
+        #[cfg_prop(use_type(Colors), mergeable)]
         normal: Option<TomlColors>,
 
-        #[cfg_prop(use_type(Colors), default(TomlColors::default_critical()))]
+        #[cfg_prop(use_type(Colors), mergeable, default(TomlColors::default_critical()))]
         critical: Option<TomlColors>,
     }
 }
