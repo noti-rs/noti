@@ -251,9 +251,7 @@ impl Window {
                 }
                 notification::Timeout::Never => None,
                 notification::Timeout::Configurable => {
-                    let timeout = config
-                        .display_by_app(&rect.notification().app_name)
-                        .timeout;
+                    let timeout = config.display_by_app(&rect.notification().app_name).timeout;
                     if timeout != 0 && rect.created_at().elapsed().as_millis() > timeout as u128 {
                         Some(i)
                     } else {
@@ -270,34 +268,22 @@ impl Window {
         }
     }
 
+    pub(super) fn handle_hover(&mut self, config: &Config) {
+        if let Some(index) = self.get_hovered_banner(config) {
+            self.banners[index].update_timeout();
+        }
+    }
+
     pub(super) fn handle_click(&mut self, config: &Config) -> Vec<RendererMessage> {
         if let PrioritiedPressState::Unpressed = self.pointer_state.press_state {
             return vec![];
         }
         self.pointer_state.press_state.clear();
 
-        let rect_height = config.general().height as usize;
-        let gap = config.general().gap as usize;
-        let anchor = &config.general().anchor;
-
-        if let Some(i) = (0..self.rect_size.height as usize)
-            .step_by(rect_height + gap)
-            .enumerate()
-            .take(self.banners.len())
-            .find(|&(_, rect_top)| {
-                let rect_bottom = rect_top + rect_height;
-                (rect_top as f64..rect_bottom as f64).contains(&(self.pointer_state.y))
-            })
-            .map(|(i, _)| {
-                if anchor.is_top() {
-                    self.banners.len() - i - 1
-                } else {
-                    i
-                }
-            })
-        {
-            if anchor.is_bottom() {
-                self.pointer_state.y -= rect_height as f64 + gap as f64;
+        if let Some(i) = self.get_hovered_banner(config) {
+            if config.general().anchor.is_bottom() {
+                self.pointer_state.y -=
+                    config.general().height as f64 + config.general().gap as f64;
             }
 
             return self
@@ -311,6 +297,31 @@ impl Window {
         }
 
         vec![]
+    }
+
+    fn get_hovered_banner(&self, config: &Config) -> Option<usize> {
+        if !self.pointer_state.entered {
+            return None;
+        }
+
+        let rect_height = config.general().height as usize;
+        let gap = config.general().gap as usize;
+
+        (0..self.rect_size.height as usize)
+            .step_by(rect_height + gap)
+            .enumerate()
+            .take(self.banners.len())
+            .find(|&(_, rect_top)| {
+                let rect_bottom = rect_top + rect_height;
+                (rect_top as f64..rect_bottom as f64).contains(&(self.pointer_state.y))
+            })
+            .map(|(i, _)| {
+                if config.general().anchor.is_top() {
+                    self.banners.len() - i - 1
+                } else {
+                    i
+                }
+            })
     }
 
     pub(super) fn redraw(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
@@ -525,6 +536,7 @@ struct PointerState {
     x: f64,
     y: f64,
 
+    entered: bool,
     press_state: PrioritiedPressState,
 }
 
@@ -564,6 +576,15 @@ impl PointerState {
     const LEFT_BTN: u32 = 272;
     const RIGHT_BTN: u32 = 273;
     const MIDDLE_BTN: u32 = 274;
+
+    fn leave(&mut self) {
+        self.entered = false;
+    }
+
+    fn enter_and_relocate(&mut self, x: f64, y: f64) {
+        self.entered = true;
+        self.relocate(x, y)
+    }
 
     fn relocate(&mut self, x: f64, y: f64) {
         self.x = x;
@@ -671,8 +692,8 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Window {
                 surface_x,
                 surface_y,
                 ..
-            } => state.pointer_state.relocate(surface_x, surface_y),
-            wl_pointer::Event::Leave { .. } => (),
+            } => state.pointer_state.enter_and_relocate(surface_x, surface_y),
+            wl_pointer::Event::Leave { .. } => state.pointer_state.leave(),
             wl_pointer::Event::Motion {
                 surface_x,
                 surface_y,
