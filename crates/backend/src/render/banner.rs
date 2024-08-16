@@ -100,13 +100,12 @@ impl BannerRect {
 
         container.compile(rect_size);
         container.draw(&mut |x, y, color| {
-            self.put_color_at(x, y, Self::convert_color(color, &background))
+            self.put_color_at(x, y, Self::convert_color(color, self.get_color_at(x, y)))
         });
 
         self.draw_border(
             config.general().width.into(),
             config.general().height.into(),
-            &background,
             display,
         );
     }
@@ -118,43 +117,45 @@ impl BannerRect {
             .collect();
     }
 
-    fn draw_border(
-        &mut self,
-        width: usize,
-        height: usize,
-        background: &Bgra,
-        display: &DisplayConfig,
-    ) {
+    fn draw_border(&mut self, width: usize, height: usize, display: &DisplayConfig) {
         let border_cfg = &display.border;
 
-        let border = BorderBuilder::default()
+        BorderBuilder::default()
             .size(border_cfg.size as usize)
             .radius(border_cfg.radius as usize)
             .color(Bgra::from(&border_cfg.color))
-            .background_color(background.clone())
             .frame_width(width as usize)
             .frame_height(height as usize)
-            .build()
-            .unwrap();
-
-        border.draw(&mut |x, y, color| {
-            self.put_color_at(x, y, Self::convert_color(color, background))
-        });
+            .compile()
+            .expect("Create Border for banner rounding")
+            .draw(&mut |x, y, color| {
+                self.put_color_at(x, y, Self::convert_color(color, self.get_color_at(x, y)))
+            });
     }
 
-    fn convert_color(color: DrawColor, background: &Bgra) -> Bgra {
+    fn convert_color(color: DrawColor, background: Bgra) -> Bgra {
         match color {
             DrawColor::Replace(color) => color,
-            DrawColor::Overlay(foreground) => foreground.overlay_on(background),
+            DrawColor::Overlay(foreground) => foreground.overlay_on(&background),
             DrawColor::OverlayWithCoverage(foreground, Coverage(factor)) => {
-                foreground.linearly_interpolate(background, factor)
+                foreground.linearly_interpolate(&background, factor)
             }
+            DrawColor::Transparent(Coverage(factor)) => background * factor,
+        }
+    }
+
+    fn get_color_at(&self, x: usize, y: usize) -> Bgra {
+        let position = y * self.stride + x * 4;
+        unsafe {
+            TryInto::<&[u8; 4]>::try_into(&self.framebuffer[position..position + 4])
+                .unwrap_unchecked()
+                .into()
         }
     }
 
     fn put_color_at(&mut self, x: usize, y: usize, color: Bgra) {
+        let position = y * self.stride + x * 4;
         unsafe {
-            let position = y * self.stride + x * 4;
             *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
                 .unwrap_unchecked() = color.to_slice()
         }

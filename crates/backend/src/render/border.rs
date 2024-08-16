@@ -7,12 +7,11 @@ use super::{
 };
 
 type Matrix<T> = Vec<Vec<T>>;
+type MaybeColor = Option<DrawColor>;
 
-#[derive(Default, Builder)]
+#[derive(Default, Builder, Clone)]
 pub(crate) struct Border {
     color: Bgra,
-    background_color: Bgra,
-
     frame_width: usize,
     frame_height: usize,
 
@@ -20,6 +19,17 @@ pub(crate) struct Border {
     size: usize,
     #[builder(setter(into))]
     radius: usize,
+
+    #[builder(setter(skip))]
+    corner_coverage: Option<Matrix<MaybeColor>>,
+}
+
+impl BorderBuilder {
+    pub(super) fn compile(&self) -> anyhow::Result<Border> {
+        let mut border = self.build()?;
+        border.compile();
+        Ok(border)
+    }
 }
 
 enum Corner {
@@ -30,14 +40,66 @@ enum Corner {
 }
 
 impl Border {
+    pub(super) fn compile(&mut self) {
+        self.corner_coverage = Some(match (self.size, self.radius) {
+            (0, 0) => return,
+            (size, 0) => self.get_bordered_coverage(size),
+            (0, radius) => self.get_corner_coverage(radius),
+            (size, radius) => self.get_bordered_corner_coverage(size, radius),
+        });
+    }
+
+    pub(super) fn get_color_at(&self, x: usize, y: usize) -> MaybeColor {
+        assert!(x <= self.frame_width && y <= self.frame_height);
+
+        let corner = self.corner_coverage.as_ref()?;
+        let corner_size = corner.len();
+
+        if (corner_size..self.frame_width - corner_size).contains(&x)
+            && (corner_size..self.frame_height - corner_size).contains(&y)
+        {
+            return None;
+        }
+
+        if (corner_size..self.frame_width - corner_size).contains(&x) {
+            return if y < self.size || y > self.frame_height - self.size {
+                Some(DrawColor::Replace(self.color.clone()))
+            } else {
+                None
+            };
+        }
+
+        if (corner_size..self.frame_height - corner_size).contains(&y) {
+            return if x < self.size || x > self.frame_width - self.size {
+                Some(DrawColor::Replace(self.color.clone()))
+            } else {
+                None
+            };
+        }
+
+        let x_pos = if x < corner_size {
+            x
+        } else {
+            self.frame_width - x - 1
+        };
+
+        let y_pos = if y < corner_size {
+            y
+        } else {
+            self.frame_height - y - 1
+        };
+
+        corner[x_pos][y_pos].clone()
+    }
+
     #[inline]
-    fn get_bordered_coverage(&self, width: usize) -> Matrix<Option<DrawColor>> {
+    fn get_bordered_coverage(&self, width: usize) -> Matrix<MaybeColor> {
         vec![vec![Some(DrawColor::Replace(self.color.clone())); width]; width]
     }
 
-    fn get_corner_coverage(&self, radius: usize) -> Matrix<Option<DrawColor>> {
-        let mut corner = vec![vec![None; radius]; radius];
+    fn get_corner_coverage(&self, radius: usize) -> Matrix<MaybeColor> {
         let radius = std::cmp::min(radius, self.frame_height / 2);
+        let mut corner = vec![vec![None; radius]; radius];
 
         self.traverse_circle_with(radius, |inner_x, inner_y, rev_x, rev_y| {
             let cell_coverage = Self::get_coverage_by(radius as f32, rev_x as f32, rev_y as f32);
@@ -46,9 +108,8 @@ impl Border {
                 return false;
             }
 
-            let color = self.background_color.clone() * cell_coverage;
-            corner[inner_x][inner_y] = Some(DrawColor::Replace(color.clone()));
-            corner[inner_y][inner_x] = Some(DrawColor::Replace(color));
+            corner[inner_x][inner_y] = Some(DrawColor::Transparent(Coverage(cell_coverage)));
+            corner[inner_y][inner_x] = Some(DrawColor::Transparent(Coverage(cell_coverage)));
 
             true
         });
@@ -56,11 +117,7 @@ impl Border {
         corner
     }
 
-    fn get_bordered_corner_coverage(
-        &self,
-        size: usize,
-        radius: usize,
-    ) -> Matrix<Option<DrawColor>> {
+    fn get_bordered_corner_coverage(&self, size: usize, radius: usize) -> Matrix<MaybeColor> {
         let radius = std::cmp::min(radius, self.frame_height / 2);
         let inner_radius = radius.saturating_sub(size);
 
@@ -81,14 +138,10 @@ impl Border {
                     0.0 => DrawColor::Replace(border_color),
                     1.0 => {
                         to_continue = false;
-                        DrawColor::OverlayWithCoverage(Bgra::new(), Coverage(0.0))
-                        // self.background_color.clone()
+                        DrawColor::Transparent(Coverage(1.0))
                     }
-                    cell_coverage => match (self.color.alpha, self.background_color.alpha) {
-                        (_, 0.0) => DrawColor::Replace(border_color * (1.0 - cell_coverage)),
-                        (0.0, _) => {
-                            DrawColor::Replace(self.background_color.clone() * cell_coverage)
-                        }
+                    cell_coverage => match self.color.alpha {
+                        0.0 => DrawColor::Transparent(Coverage(cell_coverage)),
                         _ => DrawColor::OverlayWithCoverage(
                             border_color,
                             Coverage(1.0 - cell_coverage),
@@ -145,7 +198,7 @@ impl Border {
     #[inline]
     fn draw_corner<Output: FnMut(usize, usize, DrawColor)>(
         offset: Offset,
-        corner: &Matrix<Option<DrawColor>>,
+        corner: &Matrix<MaybeColor>,
         corner_type: Corner,
         output: &mut Output,
     ) {
@@ -196,11 +249,9 @@ impl Draw for Border {
         _: &Offset,
         output: &mut Output,
     ) {
-        let corner = match (self.size, self.radius) {
-            (0, 0) => return,
-            (size, 0) => self.get_bordered_coverage(size),
-            (0, radius) => self.get_corner_coverage(radius),
-            (size, radius) => self.get_bordered_corner_coverage(size, radius),
+        let Some(corner) = self.corner_coverage.as_ref() else {
+            eprintln!("Border is not compiled, refused to draw border.");
+            return;
         };
 
         let corner_size = corner.len();

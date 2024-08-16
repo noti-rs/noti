@@ -4,14 +4,18 @@ use config::{ImageProperty, ResizingMethod};
 use dbus::image::ImageData;
 
 use super::{
+    border::{Border, BorderBuilder},
     color::{Bgra, Rgba},
     types::Offset,
-    widget::{Draw, DrawColor},
+    widget::{Coverage, Draw, DrawColor},
 };
 
 #[derive(Clone)]
 pub(crate) enum Image {
-    Exists(ImageData),
+    Exists {
+        data: ImageData,
+        border: Option<Border>,
+    },
     Unknown,
 }
 
@@ -58,21 +62,28 @@ impl Image {
                     image_property.resizing_method.to_filter_type(),
                 );
 
-                Image::Exists(ImageData {
-                    width,
-                    height,
-                    rowstride,
-                    has_alpha: true,
-                    bits_per_sample: image_data.bits_per_sample,
-                    channels: 4,
-                    data: image.to_vec(),
-                })
+                Image::Exists {
+                    data: ImageData {
+                        width,
+                        height,
+                        rowstride,
+                        has_alpha: true,
+                        bits_per_sample: image_data.bits_per_sample,
+                        channels: 4,
+                        data: image.to_vec(),
+                    },
+                    border: Some(Self::border_with_rounding(
+                        width,
+                        height,
+                        image_property.rounding,
+                    )),
+                }
             })
             .unwrap_or(Image::Unknown)
     }
 
     pub(crate) fn exists(&self) -> bool {
-        if let Image::Exists(_) = self {
+        if let Image::Exists { .. } = self {
             true
         } else {
             false
@@ -130,15 +141,18 @@ impl Image {
             image::imageops::FilterType::Gaussian,
         );
 
-        Some(Image::Exists(ImageData {
-            width: new_width as i32,
-            height: new_height as i32,
-            rowstride: new_width as i32 * 4,
-            has_alpha: true,
-            bits_per_sample: 8,
-            channels: 4,
-            data: rgba_image.to_vec(),
-        }))
+        Some(Image::Exists {
+            data: ImageData {
+                width: new_width as i32,
+                height: new_height as i32,
+                rowstride: new_width as i32 * 4,
+                has_alpha: true,
+                bits_per_sample: 8,
+                channels: 4,
+                data: rgba_image.to_vec(),
+            },
+            border: None,
+        })
     }
 
     pub(crate) fn or_svg(self, image_path: Option<&str>, image_property: &ImageProperty) -> Self {
@@ -172,34 +186,42 @@ impl Image {
             height as f32 / tree_size.height()
         };
 
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(width as u32, height as u32).expect("The Pixmap must be created. Something happened wrong. Please contact to developer with this information.");
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(width as u32, height as u32)
+            .expect("The Pixmap must be created. Something happened wrong. Please contact to developer with this information.");
         resvg::render(
             &tree,
             resvg::usvg::Transform::from_scale(scale, scale),
             &mut pixmap.as_mut(),
         );
 
-        Image::Exists(ImageData {
-            data: pixmap.data().to_vec(),
-            width,
-            height,
-            rowstride: width * 4,
-            has_alpha: true,
-            bits_per_sample: 8,
-            channels: 4,
-        })
+        Image::Exists {
+            data: ImageData {
+                data: pixmap.data().to_vec(),
+                width,
+                height,
+                rowstride: width * 4,
+                has_alpha: true,
+                bits_per_sample: 8,
+                channels: 4,
+            },
+            border: Some(Self::border_with_rounding(
+                width,
+                height,
+                image_property.rounding,
+            )),
+        }
     }
 
     pub(crate) fn width(&self) -> Option<usize> {
         match self {
-            Image::Exists(img) => Some(img.width as usize),
+            Image::Exists { data, .. } => Some(data.width as usize),
             Image::Unknown => None,
         }
     }
 
     pub(crate) fn height(&self) -> Option<usize> {
         match self {
-            Image::Exists(img) => Some(img.height as usize),
+            Image::Exists { data, .. } => Some(data.height as usize),
             Image::Unknown => None,
         }
     }
@@ -219,6 +241,17 @@ impl Image {
         if swap {
             std::mem::swap(width, height);
         }
+    }
+
+    fn border_with_rounding(width: i32, height: i32, rounding_radius: u16) -> Border {
+        BorderBuilder::default()
+            .color(Bgra::new())
+            .size(0_usize)
+            .radius(rounding_radius)
+            .frame_width(width as usize)
+            .frame_height(height as usize)
+            .compile()
+            .expect("Create Border for image rounding")
     }
 
     fn converter(has_alpha: bool) -> fn(&[u8]) -> Rgba {
@@ -242,23 +275,36 @@ impl Draw for Image {
         offset: &Offset,
         output: &mut Output,
     ) {
-        let image_data = if let Image::Exists(image_data) = self {
-            image_data
-        } else {
+        let Image::Exists { data, border } = self else {
             return;
         };
 
-        let mut chunks = image_data
+        let mut chunks = data
             .data
-            .chunks_exact(image_data.channels as usize)
-            .map(Self::converter(image_data.has_alpha));
+            .chunks_exact(data.channels as usize)
+            .map(Self::converter(data.has_alpha));
 
-        for y in 0..image_data.height as usize {
-            for x in 0..image_data.width as usize {
+        for y in 0..data.height as usize {
+            for x in 0..data.width as usize {
+                let border_coverage = match border
+                    .as_ref()
+                    .map(|border| border.get_color_at(x, y))
+                    .flatten()
+                {
+                    Some(DrawColor::Transparent(Coverage(factor))) => factor,
+                    None => 1.0,
+                    _ => unreachable!(),
+                };
+
+                let color = unsafe { chunks.next().unwrap_unchecked() }.to_bgra();
                 output(
                     x + offset.x,
                     y + offset.y,
-                    DrawColor::Overlay(unsafe { chunks.next().unwrap_unchecked() }.to_bgra()),
+                    if border_coverage == 1.0 {
+                        DrawColor::Overlay(color)
+                    } else {
+                        DrawColor::OverlayWithCoverage(color, Coverage(border_coverage))
+                    },
                 );
             }
         }
