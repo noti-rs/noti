@@ -44,6 +44,10 @@ impl BannerRect {
         &self.created_at
     }
 
+    pub(crate) fn update_timeout(&mut self) {
+        self.created_at = time::Instant::now();
+    }
+
     pub(crate) fn update_data(&mut self, notification: Notification) {
         self.data = notification;
         self.created_at = time::Instant::now();

@@ -1,6 +1,6 @@
 use derive_builder::Builder;
 
-use config::{spacing::Spacing, DisplayConfig, ImageProperty, text::TextProperty};
+use config::{spacing::Spacing, text::TextProperty, DisplayConfig, ImageProperty};
 use dbus::notification::Notification;
 
 use super::{

@@ -127,6 +127,8 @@ impl WindowManager {
         //TODO: change it to actions which defines in config file
 
         if let Some(window) = self.window.as_mut() {
+            window.handle_hover(config);
+
             let messages = window.handle_click(config);
             if messages.is_empty() {
                 return Ok(());
