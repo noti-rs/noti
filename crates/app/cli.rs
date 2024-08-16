@@ -42,6 +42,9 @@ pub struct SendCommand {
     #[arg(short, long, default_value_t = -1, hide_default_value = true, help = "Timeout in milliseconds")]
     timeout: i32,
 
+    #[arg(short = 'A', long, help = "Actions")]
+    actions: Vec<String>,
+
     #[arg(short = 'H', long, default_value_t = String::from(""), hide_default_value = true, help = "Hints")]
     hints: String,
 
@@ -78,7 +81,7 @@ pub struct SendCommand {
     #[arg(short = 'T', long, help = "Transient")]
     transient: Option<bool>,
 
-    #[arg(short = 'A', long, help = "Action icons")]
+    #[arg(short = 'C', long, help = "Action icons")]
     action_icons: Option<bool>,
 
     #[arg(
@@ -116,6 +119,8 @@ impl Args {
     }
 
     async fn send(&self, noti: client::NotiClient<'_>, args: &SendCommand) -> anyhow::Result<()> {
+        dbg!(&args.actions);
+
         let hints_data = client::HintsData {
             urgency: args.urgency.clone(),
             category: args.category.clone(),
@@ -138,6 +143,7 @@ impl Args {
             &args.summary,
             &args.body,
             args.timeout,
+            &args.actions,
             &args.hints,
             &hints_data,
         )

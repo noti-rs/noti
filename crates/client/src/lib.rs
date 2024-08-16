@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Deref};
 use zbus::zvariant::Value;
 
 pub struct HintsData {
@@ -36,12 +36,16 @@ impl<'a> NotiClient<'a> {
         summary: &'a str,
         body: &'a str,
         timeout: i32,
+        actions: &'a Vec<String>,
         hints_string: &'a str,
         hints_data: &'a HintsData,
     ) -> anyhow::Result<()> {
         let hints = Self::build_hints(&hints_string, &hints_data)?;
+        dbg!(&actions);
 
-        let mut actions = Vec::new();
+        let actions = Self::build_actions(actions)?;
+
+        dbg!(&actions);
 
         self.dbus_client
             .notify(
@@ -162,5 +166,24 @@ impl<'a> NotiClient<'a> {
                 hint_type
             ),
         }
+    }
+
+    fn build_actions(actions: &'a Vec<String>) -> anyhow::Result<Vec<&'a str>> {
+        let mut new: Vec<&str> = Vec::new();
+
+        for entry in actions {
+            let parts: Vec<&str> = entry.split(':').collect();
+
+            if parts.len() == 2 {
+                let action_name = parts[0].trim();
+                let action_desc = parts[1].trim();
+
+                new.push(action_name);
+                new.push(action_desc);
+            }
+        }
+
+        dbg!(&new);
+        Ok(new)
     }
 }
