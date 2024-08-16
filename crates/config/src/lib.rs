@@ -281,6 +281,8 @@ public! {
     struct TomlImageProperty {
         #[cfg_prop(default(64))]
         max_size: Option<u16>,
+        #[cfg_prop(default(0))]
+        rounding: Option<u16>,
         margin: Option<Spacing>,
         resizing_method: Option<ResizingMethod>,
     }

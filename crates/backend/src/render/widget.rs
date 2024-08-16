@@ -18,6 +18,7 @@ pub(super) enum DrawColor {
     Replace(Bgra),
     Overlay(Bgra),
     OverlayWithCoverage(Bgra, Coverage),
+    Transparent(Coverage),
 }
 
 pub(super) trait Draw {
