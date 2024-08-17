@@ -1,7 +1,7 @@
 use super::{image::ImageData, text::Text};
 use derive_more::Display;
 use std::{cmp::Ordering, collections::HashMap};
-use zbus::zvariant::{Str, Value};
+use zbus::zvariant::Value;
 
 #[derive(Debug)]
 pub struct Notification {

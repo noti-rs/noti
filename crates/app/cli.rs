@@ -6,13 +6,13 @@ use config::CONFIG;
 #[derive(Parser)]
 #[command(version, about, name = env!("CARGO_PKG_NAME"))]
 pub enum Args {
-    /// Starts the backend. Use it in systemd, openrc or any other services.
+    /// Start the backend. Use it in systemd, openrc or any other service.
     Run,
 
-    /// Sends the notification
+    /// Send the notification
     Send(SendCommand),
 
-    /// Prints server information
+    /// Print server information
     ServerInfo,
 }
 
