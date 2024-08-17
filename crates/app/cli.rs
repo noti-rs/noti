@@ -48,14 +48,8 @@ pub struct SendCommand {
     #[arg(short = 'H', long, help = "Hints")]
     hints: Vec<String>,
 
-    #[arg(
-        short,
-        long,
-        default_value_t = String::from("normal"),
-        hide_default_value = true,
-        help = "Urgency level (low, normal, critical)"
-    )]
-    urgency: String,
+    #[arg(short, long, help = "Urgency level (low, normal, critical)")]
+    urgency: Option<String>,
 
     #[arg(short, long, help = "Notification category")]
     category: Option<String>,

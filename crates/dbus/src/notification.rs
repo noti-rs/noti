@@ -1,7 +1,7 @@
 use super::{image::ImageData, text::Text};
 use derive_more::Display;
 use std::{cmp::Ordering, collections::HashMap};
-use zbus::zvariant::Value;
+use zbus::zvariant::{Str, Value};
 
 #[derive(Debug)]
 pub struct Notification {
@@ -252,14 +252,14 @@ pub enum Urgency {
 
 impl Urgency {
     pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
-        u8::try_from(hint)
+        u32::try_from(hint)
             .ok()
             .and_then(|val| Some(Self::from(val)))
     }
 }
 
-impl From<u8> for Urgency {
-    fn from(value: u8) -> Self {
+impl From<u32> for Urgency {
+    fn from(value: u32) -> Self {
         match value {
             0 => Self::Low,
             1 => Self::Normal,

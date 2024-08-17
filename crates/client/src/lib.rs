@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use zbus::zvariant::Value;
 
 pub struct HintsData {
-    pub urgency: String,
+    pub urgency: Option<String>,
     pub category: Option<String>,
     pub desktop_entry: Option<String>,
     pub image_path: Option<String>,
@@ -42,6 +42,8 @@ impl<'a> NotiClient<'a> {
     ) -> anyhow::Result<()> {
         let hints = Self::build_hints(&hints_vec, &hints_data)?;
         let actions = Self::build_actions(actions)?;
+
+        dbg!(&hints);
 
         self.dbus_client
             .notify(
@@ -94,7 +96,7 @@ impl<'a> NotiClient<'a> {
             }
         }
 
-        Self::or_insert_hints(&mut hints_map, &hints_data);
+        Self::or_insert_hints(&mut hints_map, &hints_data)?;
 
         Ok(hints_map)
     }
@@ -102,6 +104,7 @@ impl<'a> NotiClient<'a> {
     fn parse_hint_value(hint_type: &'a str, hint_value: &'a str) -> anyhow::Result<Value<'a>> {
         match hint_type {
             "int" => Ok(Value::I32(hint_value.parse()?)),
+            "uint" => Ok(Value::U32(hint_value.parse()?)),
             "bool" => Ok(Value::Bool(hint_value.parse()?)),
             "string" => Ok(Value::from(hint_value)),
             _ => anyhow::bail!(
@@ -111,10 +114,23 @@ impl<'a> NotiClient<'a> {
         }
     }
 
-    fn or_insert_hints(hints: &mut HashMap<&'a str, Value<'a>>, hints_data: &'a HintsData) {
-        hints
-            .entry("urgency")
-            .or_insert(Value::from(hints_data.urgency.as_str()));
+    fn or_insert_hints(
+        hints: &mut HashMap<&'a str, Value<'a>>,
+        hints_data: &'a HintsData,
+    ) -> anyhow::Result<()> {
+        if let Some(urgency) = &hints_data.urgency {
+            hints
+                .entry("urgency")
+                .or_insert(Value::U32(match urgency.to_lowercase().as_str() {
+                    "low" => 0,
+                    "normal" => 1,
+                    "critical" => 2,
+                    _ => anyhow::bail!(
+                        "Invalid urgency value: {}. Valid values are low, normal and critical.",
+                        { &urgency }
+                    ),
+                }));
+        }
 
         if let Some(category) = &hints_data.category {
             hints
@@ -173,5 +189,7 @@ impl<'a> NotiClient<'a> {
         if let Some(y) = hints_data.y {
             hints.entry("y").or_insert(Value::I32(y));
         }
+
+        Ok(())
     }
 }
