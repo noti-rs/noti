@@ -101,10 +101,14 @@ pub struct SendCommand {
 
 impl Args {
     pub async fn process(&self) -> anyhow::Result<()> {
+        if let Args::Run = self {
+            self.run().await?
+        }
+
         let noti = client::NotiClient::init().await?;
 
         match self {
-            Args::Run => self.run().await?,
+            Args::Run => unreachable!(),
             Args::Send(args) => self.send(noti, args).await?,
             Args::ServerInfo => self.server_info(noti).await?,
         }
