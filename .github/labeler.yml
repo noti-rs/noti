@@ -1,0 +1,23 @@
+App:
+  - changed-files:
+    - any-glob-to-any-file: 'crates/app/**'
+
+Backend:
+  - changed-files:
+    - any-glob-to-any-file: 'crates/backend/**'
+
+Config:
+  - changed-files:
+    - any-glob-to-any-file: 'crates/config/**'
+
+Macro:
+  - changed-files:
+    - any-glob-to-any-file: 'crates/macro/**'
+
+DBus:
+  - changed-files:
+    - any-glob-to-any-file: 'crates/dbus/**'
+
+Client:
+  - changed-files:
+    - any-glob-to-any-file: 'crates/client/**'
