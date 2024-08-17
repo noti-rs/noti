@@ -45,8 +45,8 @@ pub struct SendCommand {
     #[arg(short = 'A', long, help = "Actions")]
     actions: Vec<String>,
 
-    #[arg(short = 'H', long, default_value_t = String::from(""), hide_default_value = true, help = "Hints")]
-    hints: String,
+    #[arg(short = 'H', long, help = "Hints")]
+    hints: Vec<String>,
 
     #[arg(
         short,
@@ -119,8 +119,6 @@ impl Args {
     }
 
     async fn send(&self, noti: client::NotiClient<'_>, args: &SendCommand) -> anyhow::Result<()> {
-        dbg!(&args.actions);
-
         let hints_data = client::HintsData {
             urgency: args.urgency.clone(),
             category: args.category.clone(),

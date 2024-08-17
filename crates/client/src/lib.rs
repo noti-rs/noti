@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Deref};
+use std::collections::HashMap;
 use zbus::zvariant::Value;
 
 pub struct HintsData {
@@ -37,15 +37,11 @@ impl<'a> NotiClient<'a> {
         body: &'a str,
         timeout: i32,
         actions: &'a Vec<String>,
-        hints_string: &'a str,
+        hints_vec: &'a Vec<String>,
         hints_data: &'a HintsData,
     ) -> anyhow::Result<()> {
-        let hints = Self::build_hints(&hints_string, &hints_data)?;
-        dbg!(&actions);
-
+        let hints = Self::build_hints(&hints_vec, &hints_data)?;
         let actions = Self::build_actions(actions)?;
-
-        dbg!(&actions);
 
         self.dbus_client
             .notify(
@@ -66,16 +62,27 @@ impl<'a> NotiClient<'a> {
         Ok(())
     }
 
+    fn build_actions(actions: &'a [String]) -> anyhow::Result<Vec<&'a str>> {
+        let mut actions_vec = Vec::with_capacity(actions.len() * 2);
+
+        for entry in actions {
+            if let Some((action_name, action_desc)) = entry.split_once(':') {
+                actions_vec.push(action_name.trim());
+                actions_vec.push(action_desc.trim());
+            }
+        }
+
+        Ok(actions_vec)
+    }
+
     fn build_hints(
-        hints_string: &'a str,
+        hints: &'a [String],
         hints_data: &'a HintsData,
     ) -> anyhow::Result<HashMap<&'a str, Value<'a>>> {
-        let mut hints: HashMap<&str, Value> = HashMap::new();
+        let mut hints_map: HashMap<&str, Value> = HashMap::with_capacity(hints.len());
 
-        let entries = hints_string.split(';');
-
-        for entry in entries.to_owned() {
-            let parts: Vec<&str> = entry.split(':').collect();
+        for entry in hints {
+            let parts: Vec<&'a str> = entry.split(':').collect();
 
             if parts.len() == 3 {
                 let hint_type = parts[0].trim();
@@ -83,13 +90,25 @@ impl<'a> NotiClient<'a> {
                 let hint_value = parts[2].trim();
 
                 let value = Self::parse_hint_value(hint_type, hint_value)?;
-                hints.insert(hint_name, value);
+                hints_map.insert(hint_name, value);
             }
         }
 
-        Self::or_insert_hints(&mut hints, &hints_data);
+        Self::or_insert_hints(&mut hints_map, &hints_data);
 
-        Ok(hints)
+        Ok(hints_map)
+    }
+
+    fn parse_hint_value(hint_type: &'a str, hint_value: &'a str) -> anyhow::Result<Value<'a>> {
+        match hint_type {
+            "int" => Ok(Value::I32(hint_value.parse()?)),
+            "bool" => Ok(Value::Bool(hint_value.parse()?)),
+            "string" => Ok(Value::from(hint_value)),
+            _ => anyhow::bail!(
+                "Invalid hint type \"{}\". Valid types are int, bool, and string.",
+                hint_type
+            ),
+        }
     }
 
     fn or_insert_hints(hints: &mut HashMap<&'a str, Value<'a>>, hints_data: &'a HintsData) {
@@ -154,36 +173,5 @@ impl<'a> NotiClient<'a> {
         if let Some(y) = hints_data.y {
             hints.entry("y").or_insert(Value::I32(y));
         }
-    }
-
-    fn parse_hint_value(hint_type: &'a str, hint_value: &'a str) -> anyhow::Result<Value<'a>> {
-        match hint_type {
-            "int" => Ok(Value::I32(hint_value.parse()?)),
-            "bool" => Ok(Value::Bool(hint_value.parse()?)),
-            "string" => Ok(Value::from(hint_value)),
-            _ => anyhow::bail!(
-                "Invalid hint type \"{}\". Valid types are int, bool, and string.",
-                hint_type
-            ),
-        }
-    }
-
-    fn build_actions(actions: &'a Vec<String>) -> anyhow::Result<Vec<&'a str>> {
-        let mut new: Vec<&str> = Vec::new();
-
-        for entry in actions {
-            let parts: Vec<&str> = entry.split(':').collect();
-
-            if parts.len() == 2 {
-                let action_name = parts[0].trim();
-                let action_desc = parts[1].trim();
-
-                new.push(action_name);
-                new.push(action_desc);
-            }
-        }
-
-        dbg!(&new);
-        Ok(new)
     }
 }
