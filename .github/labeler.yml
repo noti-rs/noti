@@ -21,3 +21,7 @@ DBus:
 Client:
   - changed-files:
     - any-glob-to-any-file: 'crates/client/**'
+
+Documentation:
+  - changed-files:
+    - any-glob-to-any-file: 'docs/**'
