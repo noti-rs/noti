@@ -18,13 +18,24 @@ pub enum Args {
 
 #[derive(Parser)]
 pub struct SendCommand {
-    #[arg(help = "Summary of the notification")]
+    #[arg(help = "Summary", long_help = "Summary of the notification")]
     summary: String,
 
-    #[arg(default_value_t = String::from(""), hide_default_value = true, help = "Body text of the notification")]
+    #[arg(
+        default_value_t = String::from(""),
+        hide_default_value = true,
+        help = "Body",
+        long_help = "Body text of the notification"
+    )]
     body: String,
 
-    #[arg(short, long, default_value_t = String::from("Noti"), hide_default_value = true, help = "The name of the application")]
+    #[arg(
+        short,
+        long,
+        default_value_t = String::from("Noti"),
+        hide_default_value = true,
+        help = "The name of the application"
+    )]
     app_name: String,
 
     #[arg(
@@ -32,65 +43,114 @@ pub struct SendCommand {
         long,
         default_value_t = 0,
         hide_default_value = true,
-        help = "ID of the notification to replace"
+        help = "ID",
+        long_help = "ID of the notification to replace"
     )]
     replaces_id: u32,
 
-    #[arg(short, long, default_value_t = String::from(""), hide_default_value = true, help = "Path to the icon file")]
+    #[arg(
+        short,
+        long,
+        default_value_t = String::from(""),
+        hide_default_value = true,
+        help = "Icon",
+        long_help = "Path to the icon file"
+    )]
     icon: String,
 
     #[arg(short, long, default_value_t = -1, hide_default_value = true, help = "Timeout in milliseconds")]
     timeout: i32,
 
-    #[arg(short = 'A', long, help = "Actions")]
+    #[arg(
+        short = 'A',
+        long,
+        help = "Actions",
+        long_help = "Extra actions that define interactive options for the notification"
+    )]
     actions: Vec<String>,
 
-    #[arg(short = 'H', long, help = "Hints")]
+    #[arg(
+        short = 'H',
+        long,
+        help = "Hints",
+        long_help = "Extra hints that modify notification behavior"
+    )]
     hints: Vec<String>,
 
     #[arg(short, long, help = "Urgency level (low, normal, critical)")]
     urgency: Option<String>,
 
-    #[arg(short, long, help = "Notification category")]
+    #[arg(
+        short,
+        long,
+        help = "Notification category",
+        long_help = "The type of notification this is"
+    )]
     category: Option<String>,
 
-    #[arg(short, long, help = "Desktop entry path")]
+    #[arg(
+        short,
+        long,
+        help = "Desktop entry path",
+        long_help = "Desktop entry filename representing the calling program"
+    )]
     desktop_entry: Option<String>,
 
-    #[arg(short = 'I', long, help = "Path to image")]
+    #[arg(
+        short = 'I',
+        long,
+        help = "Image file",
+        long_help = "Path to image file"
+    )]
     image_path: Option<String>,
 
-    #[arg(short = 'R', long, help = "Resident")]
+    #[arg(
+        short = 'R',
+        long,
+        help = "Resident",
+        long_help = "Prevents automatic removal of notifications after an action"
+    )]
     resident: Option<bool>,
 
-    #[arg(short, long, help = "Path to sound file")]
+    #[arg(
+        short,
+        long,
+        help = "Sound file",
+        long_help = "Path to a sound file to play when the notification pops up"
+    )]
     sound_file: Option<String>,
 
-    #[arg(short = 'N', long, help = "Sound name")]
+    #[arg(
+        short = 'N',
+        long,
+        help = "Sound name",
+        long_help = "A themeable sound name to play when the notification pops up"
+    )]
     sound_name: Option<String>,
 
-    #[arg(short = 'S', long, help = "Suppress sound")]
+    #[arg(
+        short = 'S',
+        long,
+        help = "Suppress sound",
+        long_help = "Causes the server to suppress playing any sounds"
+    )]
     suppress_sound: Option<bool>,
 
-    #[arg(short = 'T', long, help = "Transient")]
+    #[arg(
+        short = 'T',
+        long,
+        help = "Transient",
+        long_help = "Marks the notification as transient, bypassing the server's persistence capability if available"
+    )]
     transient: Option<bool>,
 
-    #[arg(short = 'C', long, help = "Action icons")]
+    #[arg(
+        short = 'C',
+        long,
+        help = "Action icons",
+        long_help = "Interprets action IDs as icons, annotated by display names"
+    )]
     action_icons: Option<bool>,
-
-    #[arg(
-        short,
-        long,
-        help = "X location on the screen that the notification should point to"
-    )]
-    x: Option<i32>,
-
-    #[arg(
-        short,
-        long,
-        help = "Y location on the screen that the notification should point to"
-    )]
-    y: Option<i32>,
 }
 
 impl Args {
@@ -128,8 +188,6 @@ impl Args {
             suppress_sound: args.suppress_sound,
             transient: args.transient,
             action_icons: args.action_icons,
-            x: args.x,
-            y: args.y,
         };
 
         noti.send_notification(
