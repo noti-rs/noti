@@ -12,8 +12,6 @@ pub struct HintsData {
     pub suppress_sound: Option<bool>,
     pub transient: Option<bool>,
     pub action_icons: Option<bool>,
-    pub x: Option<i32>,
-    pub y: Option<i32>,
 }
 
 pub struct NotiClient<'a> {
@@ -37,17 +35,15 @@ impl<'a> NotiClient<'a> {
         body: &'a str,
         timeout: i32,
         actions: &'a Vec<String>,
-        hints_vec: &'a Vec<String>,
+        hints: &'a Vec<String>,
         hints_data: &'a HintsData,
     ) -> anyhow::Result<()> {
-        let hints = Self::build_hints(&hints_vec, &hints_data)?;
+        let new_hints = Self::build_hints(&hints, &hints_data)?;
         let actions = Self::build_actions(actions)?;
-
-        dbg!(&hints);
 
         self.dbus_client
             .notify(
-                &app_name, id, &icon, &summary, &body, actions, hints, timeout,
+                &app_name, id, &icon, &summary, &body, actions, new_hints, timeout,
             )
             .await?;
 
@@ -65,16 +61,16 @@ impl<'a> NotiClient<'a> {
     }
 
     fn build_actions(actions: &'a [String]) -> anyhow::Result<Vec<&'a str>> {
-        let mut actions_vec = Vec::with_capacity(actions.len() * 2);
+        let mut new_actions = Vec::with_capacity(actions.len() * 2);
 
         for entry in actions {
             if let Some((action_name, action_desc)) = entry.split_once(':') {
-                actions_vec.push(action_name.trim());
-                actions_vec.push(action_desc.trim());
+                new_actions.push(action_name.trim());
+                new_actions.push(action_desc.trim());
             }
         }
 
-        Ok(actions_vec)
+        Ok(new_actions)
     }
 
     fn build_hints(
@@ -108,7 +104,7 @@ impl<'a> NotiClient<'a> {
             "bool" => Ok(Value::Bool(hint_value.parse()?)),
             "string" => Ok(Value::from(hint_value)),
             _ => anyhow::bail!(
-                "Invalid hint type \"{}\". Valid types are int, bool, and string.",
+                "Invalid hint type \"{}\". Valid types are int, uint, bool, and string.",
                 hint_type
             ),
         }
@@ -180,14 +176,6 @@ impl<'a> NotiClient<'a> {
             hints
                 .entry("action-icons")
                 .or_insert(Value::Bool(action_icons));
-        }
-
-        if let Some(x) = hints_data.x {
-            hints.entry("x").or_insert(Value::I32(x));
-        }
-
-        if let Some(y) = hints_data.y {
-            hints.entry("y").or_insert(Value::I32(y));
         }
 
         Ok(())
