@@ -1,3 +1,4 @@
+use anyhow::bail;
 use std::collections::HashMap;
 use zbus::zvariant::Value;
 
@@ -67,6 +68,8 @@ impl<'a> NotiClient<'a> {
             if let Some((action_name, action_desc)) = entry.split_once(':') {
                 new_actions.push(action_name.trim());
                 new_actions.push(action_desc.trim());
+            } else {
+                bail!("Actions are invalid!")
             }
         }
 
@@ -89,6 +92,8 @@ impl<'a> NotiClient<'a> {
 
                 let value = Self::parse_hint_value(hint_type, hint_value)?;
                 hints_map.insert(hint_name, value);
+            } else {
+                bail!("Hints are invalid!")
             }
         }
 
