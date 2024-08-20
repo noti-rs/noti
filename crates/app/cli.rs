@@ -4,7 +4,7 @@ use config::CONFIG;
 /// The notification system which derives a notification to user
 /// using wayland client.
 #[derive(Parser)]
-#[command(version, about, name = env!("CARGO_PKG_NAME"))]
+#[command(version, about, name = env!("APP_NAME"))]
 pub enum Args {
     /// Start the backend. Use it in systemd, openrc or any other service.
     Run,
