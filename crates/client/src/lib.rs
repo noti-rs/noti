@@ -69,7 +69,10 @@ impl<'a> NotiClient<'a> {
                 new_actions.push(action_name.trim());
                 new_actions.push(action_desc.trim());
             } else {
-                bail!("Actions are invalid!")
+                bail!(
+                    "Invalid action format for entry '{}'. Expected format: 'name:desc'",
+                    entry
+                );
             }
         }
 
@@ -93,7 +96,10 @@ impl<'a> NotiClient<'a> {
                 let value = Self::parse_hint_value(hint_type, hint_value)?;
                 hints_map.insert(hint_name, value);
             } else {
-                bail!("Hints are invalid!")
+                bail!(
+                    "Invalid hint format for entry '{}'. Expected format: 'type:name:value'",
+                    entry
+                );
             }
         }
 
