@@ -135,9 +135,7 @@ impl<'a> NotiClient<'a> {
         hint_value: Option<T>,
         hint_name: &'a str,
         conversion: impl Fn(T) -> Value<'a>,
-    ) where
-        T: Clone,
-    {
+    ) {
         if let Some(hint) = hint_value {
             hints.entry(hint_name).or_insert_with(|| conversion(hint));
         }
