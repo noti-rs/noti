@@ -103,7 +103,16 @@ impl<'a> NotiClient<'a> {
             }
         }
 
-        Self::or_insert_hints(&mut hints_map, &hints_data)?;
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.urgency.clone(), "urgency", Value::from);
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.category.clone(), "category", Value::from);
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.desktop_entry.clone(), "desktop-entry", Value::from);
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.image_path.clone(), "image-path", Value::from);
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.sound_file.clone(), "sound-file", Value::from);
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.sound_name.clone(), "sound-name", Value::from);
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.resident.clone(), "resident", Value::Bool);
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.suppress_sound.clone(), "suppress-sound", Value::Bool);
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.transient.clone(), "transient", Value::Bool);
+        #[rustfmt::skip] Self::or_insert_hint(&mut hints_map, hints_data.action_icons.clone(), "action-icons", Value::Bool);
 
         Ok(hints_map)
     }
@@ -121,74 +130,16 @@ impl<'a> NotiClient<'a> {
         }
     }
 
-    fn or_insert_hints(
+    fn or_insert_hint<T>(
         hints: &mut HashMap<&'a str, Value<'a>>,
-        hints_data: &'a HintsData,
-    ) -> anyhow::Result<()> {
-        if let Some(urgency) = &hints_data.urgency {
-            hints
-                .entry("urgency")
-                .or_insert(Value::U32(match urgency.to_lowercase().as_str() {
-                    "low" => 0,
-                    "normal" => 1,
-                    "critical" => 2,
-                    _ => anyhow::bail!(
-                        "Invalid urgency value: {}. Valid values are low, normal and critical.",
-                        { &urgency }
-                    ),
-                }));
+        hint_value: Option<T>,
+        hint_name: &'a str,
+        conversion: impl Fn(T) -> Value<'a>,
+    ) where
+        T: Clone,
+    {
+        if let Some(hint) = hint_value {
+            hints.entry(hint_name).or_insert_with(|| conversion(hint));
         }
-
-        if let Some(category) = &hints_data.category {
-            hints
-                .entry("category")
-                .or_insert(Value::from(category.as_str()));
-        }
-
-        if let Some(desktop_entry) = &hints_data.desktop_entry {
-            hints
-                .entry("desktop-entry")
-                .or_insert(Value::from(desktop_entry.as_str()));
-        }
-
-        if let Some(image_path) = &hints_data.image_path {
-            hints
-                .entry("image-path")
-                .or_insert(Value::from(image_path.as_str()));
-        }
-
-        if let Some(resident) = hints_data.resident {
-            hints.entry("resident").or_insert(Value::Bool(resident));
-        }
-
-        if let Some(sound_file) = &hints_data.sound_file {
-            hints
-                .entry("sound-file")
-                .or_insert(Value::from(sound_file.as_str()));
-        }
-
-        if let Some(sound_name) = &hints_data.sound_name {
-            hints
-                .entry("sound-name")
-                .or_insert(Value::from(sound_name.as_str()));
-        }
-
-        if let Some(suppress_sound) = hints_data.suppress_sound {
-            hints
-                .entry("suppress-sound")
-                .or_insert(Value::Bool(suppress_sound));
-        }
-
-        if let Some(transient) = hints_data.transient {
-            hints.entry("transient").or_insert(Value::Bool(transient));
-        }
-
-        if let Some(action_icons) = hints_data.action_icons {
-            hints
-                .entry("action-icons")
-                .or_insert(Value::Bool(action_icons));
-        }
-
-        Ok(())
     }
 }

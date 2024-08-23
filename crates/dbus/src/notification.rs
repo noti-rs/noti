@@ -252,9 +252,15 @@ pub enum Urgency {
 
 impl Urgency {
     pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
-        u32::try_from(hint)
-            .ok()
-            .and_then(|val| Some(Self::from(val)))
+        if let Ok(val) = u32::try_from(hint) {
+            Some(Self::from(val));
+        }
+
+        if let Ok(val) = String::try_from(hint) {
+            Some(Self::from(val.as_str()));
+        }
+
+        None
     }
 }
 
@@ -264,7 +270,7 @@ impl From<u32> for Urgency {
             0 => Self::Low,
             1 => Self::Normal,
             2 => Self::Critical,
-            _ => Self::default(),
+            _ => Default::default(),
         }
     }
 }
@@ -285,7 +291,7 @@ impl From<&str> for Urgency {
             "low" => Self::Low,
             "normal" => Self::Normal,
             "critical" => Self::Critical,
-            _ => Self::default(),
+            _ => Default::default(),
         }
     }
 }
