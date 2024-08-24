@@ -98,7 +98,7 @@ impl TextRect {
                 );
 
                 while let Some(entity) = current_entities.front() {
-                    if entity.offset + entity.length < pos {
+                    if entity.offset + entity.length <= pos {
                         // SAFETY: because of it acquires AFTER `while let Some(_)` it guarantee
                         // that acquired data always valid
                         let entity = unsafe { current_entities.pop_front().unwrap_unchecked() };
@@ -346,9 +346,7 @@ impl LineRect {
                 self.push_ellipsis_to_last_word(ellipsis);
                 return;
             }
-        }
-
-        if self.available_space >= 0 {
+        } else if self.available_space >= 0 {
             return;
         }
 
