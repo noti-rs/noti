@@ -66,6 +66,7 @@ struct Handler {
 
 #[interface(name = "org.freedesktop.Notifications")]
 impl Handler {
+    #[allow(clippy::too_many_arguments)]
     async fn notify(
         &mut self,
         app_name: String,
@@ -102,7 +103,7 @@ impl Handler {
             is_read: false,
         };
 
-        self.sender.send(Action::Show(notification)).unwrap();
+        self.sender.send(Action::Show(notification.into())).unwrap();
         Ok(id)
     }
 

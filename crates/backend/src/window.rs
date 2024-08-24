@@ -156,7 +156,7 @@ impl Window {
             };
 
             layer_surface.set_anchor(anchor);
-            self.margin.apply(&layer_surface);
+            self.margin.apply(layer_surface);
         }
     }
 
@@ -225,7 +225,7 @@ impl Window {
             .filter_map(|(i, banner_rect)| {
                 notification_indices
                     .contains(&banner_rect.notification().id)
-                    .then(|| i)
+                    .then_some(i)
             })
             .collect();
 
@@ -307,7 +307,7 @@ impl Window {
         let rect_height = config.general().height as usize;
         let gap = config.general().gap as usize;
 
-        (0..self.rect_size.height as usize)
+        (0..self.rect_size.height)
             .step_by(rect_height + gap)
             .enumerate()
             .take(self.banners.len())
@@ -356,9 +356,9 @@ impl Window {
     }
 
     fn allocate_gap_buffer(&self, gap: u8) -> Vec<u8> {
-        let rowstride = self.rect_size.width as usize * 4;
+        let rowstride = self.rect_size.width * 4;
         let gap_size = gap as usize * rowstride;
-        vec![0; gap_size as usize]
+        vec![0; gap_size]
     }
 
     fn write_banners_to_buffer(&mut self, anchor: &config::Anchor, gap_buffer: &[u8]) {
@@ -390,7 +390,7 @@ impl Window {
 
         let buffer = Buffer::new();
 
-        if let None = self.shm_pool {
+        if self.shm_pool.is_none() {
             self.shm_pool = Some(
                 self.shm
                     .as_ref()
@@ -546,21 +546,22 @@ struct PointerState {
 enum PrioritiedPressState {
     #[default]
     Unpressed,
-    LMB,
-    RMB,
-    MMB,
+    Lmb,
+    Rmb,
+    Mmb,
 }
 
 impl PrioritiedPressState {
     fn update(&mut self, new_state: PrioritiedPressState) {
         match self {
-            PrioritiedPressState::LMB => (),
-            PrioritiedPressState::RMB => match &new_state {
-                PrioritiedPressState::LMB => *self = new_state,
-                _ => (),
-            },
-            PrioritiedPressState::MMB => match &new_state {
-                PrioritiedPressState::LMB | PrioritiedPressState::RMB => *self = new_state,
+            PrioritiedPressState::Lmb => (),
+            PrioritiedPressState::Rmb => {
+                if let PrioritiedPressState::Lmb = &new_state {
+                    *self = new_state
+                }
+            }
+            PrioritiedPressState::Mmb => match &new_state {
+                PrioritiedPressState::Lmb | PrioritiedPressState::Rmb => *self = new_state,
                 _ => (),
             },
             PrioritiedPressState::Unpressed => *self = new_state,
@@ -593,9 +594,9 @@ impl PointerState {
 
     fn press(&mut self, button: u32) {
         match button {
-            PointerState::LEFT_BTN => self.press_state.update(PrioritiedPressState::LMB),
-            PointerState::RIGHT_BTN => self.press_state.update(PrioritiedPressState::RMB),
-            PointerState::MIDDLE_BTN => self.press_state.update(PrioritiedPressState::MMB),
+            PointerState::LEFT_BTN => self.press_state.update(PrioritiedPressState::Lmb),
+            PointerState::RIGHT_BTN => self.press_state.update(PrioritiedPressState::Rmb),
+            PointerState::MIDDLE_BTN => self.press_state.update(PrioritiedPressState::Mmb),
             _ => (),
         }
     }

@@ -10,7 +10,7 @@ pub enum Args {
     Run,
 
     /// Send the notification
-    Send(SendCommand),
+    Send(Box<SendCommand>),
 
     /// Print server information
     ServerInfo,
@@ -163,7 +163,7 @@ impl Args {
 
         match self {
             Args::Run => unreachable!(),
-            Args::Send(args) => send(noti, args).await?,
+            Args::Send(args) => send(noti, *args).await?,
             Args::ServerInfo => server_info(noti).await?,
         }
 

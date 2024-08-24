@@ -311,19 +311,11 @@ pub(super) enum Widget {
 
 impl Widget {
     pub(super) fn is_container(&self) -> bool {
-        if let Widget::Container(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Widget::Container(_))
     }
 
     pub(super) fn is_unknown(&self) -> bool {
-        if let Widget::Unknown = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Widget::Unknown)
     }
 
     pub(super) fn compile(&mut self, rect_size: RectSize) {

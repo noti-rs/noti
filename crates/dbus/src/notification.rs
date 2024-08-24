@@ -25,13 +25,13 @@ pub struct Hints {
     /// The type of notification this is.
     pub category: Category,
 
-    ///	This specifies the name of the desktop filename representing the calling program.
-    ///	This should be the same as the prefix used for the application's .desktop file.
-    ///	An example would be "rhythmbox" from "rhythmbox.desktop".
-    ///	This can be used by the daemon to retrieve the correct icon for the application, for logging purposes, etc.
+    /// This specifies the name of the desktop filename representing the calling program.
+    /// This should be the same as the prefix used for the application's .desktop file.
+    /// An example would be "rhythmbox" from "rhythmbox.desktop".
+    /// This can be used by the daemon to retrieve the correct icon for the application, for logging purposes, etc.
     pub desktop_entry: Option<String>,
 
-    ///	Raw data image format.
+    /// Raw data image format.
     pub image_data: Option<ImageData>,
 
     /// Alternative way to define the notification image
@@ -120,12 +120,14 @@ impl From<HashMap<&str, Value<'_>>> for Hints {
 
 #[derive(Debug)]
 pub struct NotificationAction {
+    #[allow(unused)]
     action_key: String,
+    #[allow(unused)]
     localized_string: String,
 }
 
 impl NotificationAction {
-    pub fn from_vec(vec: &Vec<&str>) -> Vec<Self> {
+    pub fn from_vec(vec: &[&str]) -> Vec<Self> {
         let mut actions: Vec<Self> = Vec::new();
 
         if vec.len() >= 2 {
@@ -173,9 +175,7 @@ pub enum Category {
 
 impl Category {
     pub fn from_hint(hint: &Value<'_>) -> Option<Category> {
-        String::try_from(hint)
-            .ok()
-            .and_then(|s| Some(Self::from(s.as_str())))
+        String::try_from(hint).ok().map(|s| Self::from(s.as_str()))
     }
 }
 
@@ -252,15 +252,14 @@ pub enum Urgency {
 
 impl Urgency {
     pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
-        if let Ok(val) = u32::try_from(hint) {
-            Some(Self::from(val));
+        fn to_urgency<T: Into<Urgency>>(val: T) -> Urgency {
+            val.into()
         }
 
-        if let Ok(val) = String::try_from(hint) {
-            Some(Self::from(val.as_str()));
-        }
-
-        None
+        u32::try_from(hint)
+            .map(to_urgency)
+            .ok()
+            .or_else(|| String::try_from(hint).ok().map(to_urgency))
     }
 }
 
@@ -293,6 +292,12 @@ impl From<&str> for Urgency {
             "critical" => Self::Critical,
             _ => Default::default(),
         }
+    }
+}
+
+impl From<String> for Urgency {
+    fn from(value: String) -> Self {
+        <Self as From<&str>>::from(&value)
     }
 }
 

@@ -116,16 +116,15 @@ pub struct TomlConfig {
 
 impl TomlConfig {
     fn parse(path: Option<&Path>) -> Self {
-        path.map(|config_path| fs::read_to_string(&config_path).unwrap())
-            .map(|content| match toml::from_str(&content) {
+        path.map(|config_path| fs::read_to_string(config_path).unwrap())
+            .and_then(|content| match toml::from_str(&content) {
                 Ok(content) => Some(content),
                 Err(error) => {
                     eprintln!("{error}");
                     None
                 }
             })
-            .flatten()
-            .unwrap_or(Default::default())
+            .unwrap_or_default()
     }
 }
 
@@ -189,31 +188,22 @@ pub enum Anchor {
 
 impl Anchor {
     pub fn is_top(&self) -> bool {
-        match self {
-            Anchor::Top | Anchor::TopLeft | Anchor::TopRight => true,
-            _ => false,
-        }
+        matches!(self, Anchor::Top | Anchor::TopLeft | Anchor::TopRight)
     }
 
     pub fn is_right(&self) -> bool {
-        match self {
-            Anchor::TopRight | Anchor::BottomRight | Anchor::Right => true,
-            _ => false,
-        }
+        matches!(self, Anchor::TopRight | Anchor::BottomRight | Anchor::Right)
     }
 
     pub fn is_bottom(&self) -> bool {
-        match self {
-            Anchor::Bottom | Anchor::BottomLeft | Anchor::BottomRight => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Anchor::Bottom | Anchor::BottomLeft | Anchor::BottomRight
+        )
     }
 
     pub fn is_left(&self) -> bool {
-        match self {
-            Anchor::TopLeft | Anchor::BottomLeft | Anchor::Left => true,
-            _ => false,
-        }
+        matches!(self, Anchor::TopLeft | Anchor::BottomLeft | Anchor::Left)
     }
 }
 

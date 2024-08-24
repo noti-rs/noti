@@ -68,11 +68,12 @@ impl RendererInternalChannel {
 }
 
 pub(crate) enum ServerMessage {
-    ShowNotification(Notification),
+    ShowNotification(Box<Notification>),
     CloseNotification { id: u32 },
 }
 
 pub(crate) enum RendererMessage {
+    #[allow(unused)]
     ActionInvoked {
         notification_id: u32,
         action_key: String,

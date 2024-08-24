@@ -376,7 +376,7 @@ impl LineRect {
             self.push_ellipsis_to_last_word(ellipsis);
             EllipsiationState::Complete
         } else {
-            if let None = self.pop_word() {
+            if self.pop_word().is_none() {
                 return EllipsiationState::Continue(Some(WordRect::new_empty()));
             };
 

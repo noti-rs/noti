@@ -6,6 +6,7 @@ use zbus::{proxy, zvariant::Value, Connection};
     default_path = "/org/freedesktop/Notifications"
 )]
 pub trait Notifications {
+    #[allow(clippy::too_many_arguments)]
     async fn notify(
         &self,
         app_name: &str,
@@ -33,6 +34,7 @@ impl<'a> Client<'a> {
         Ok(Self { proxy })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn notify(
         &self,
         app_name: &str,

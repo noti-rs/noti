@@ -157,7 +157,7 @@ where
         let possible_values = SortBy::POSSIBLE_VALUES
             .iter()
             .fold(String::new(), |acc, val| {
-                if acc.len() == 0 {
+                if acc.is_empty() {
                     acc + "\"" + val + "\""
                 } else {
                     acc + " | \"" + val + "\""
@@ -182,6 +182,20 @@ sorting = {{
     ordering: String? = "ascending" | "asc" | "descending" | "desc"
 }}"#
         )
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if SortBy::POSSIBLE_VALUES.contains(&v) {
+            Ok(v.to_owned().into())
+        } else {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Str(v),
+                &self,
+            ))
+        }
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
