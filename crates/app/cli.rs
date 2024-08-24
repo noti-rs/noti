@@ -154,57 +154,57 @@ pub struct SendCommand {
 }
 
 impl Args {
-    pub async fn process(&self) -> anyhow::Result<()> {
+    pub async fn process(self) -> anyhow::Result<()> {
         if let Args::Run = self {
-            self.run().await?
+            run().await?
         }
 
         let noti = client::NotiClient::init().await?;
 
         match self {
             Args::Run => unreachable!(),
-            Args::Send(args) => self.send(noti, args).await?,
-            Args::ServerInfo => self.server_info(noti).await?,
+            Args::Send(args) => send(noti, args).await?,
+            Args::ServerInfo => server_info(noti).await?,
         }
 
         Ok(())
     }
+}
 
-    async fn run(&self) -> anyhow::Result<()> {
-        let _ = &*CONFIG; // Initializes the configuration.
+async fn run() -> anyhow::Result<()> {
+    let _ = &*CONFIG; // Initializes the configuration.
 
-        backend::run().await
-    }
+    backend::run().await
+}
 
-    async fn send(&self, noti: client::NotiClient<'_>, args: &SendCommand) -> anyhow::Result<()> {
-        let hints_data = client::HintsData {
-            urgency: args.urgency.clone(),
-            category: args.category.clone(),
-            desktop_entry: args.desktop_entry.clone(),
-            image_path: args.image_path.clone(),
-            sound_file: args.sound_file.clone(),
-            sound_name: args.sound_name.clone(),
-            resident: args.resident,
-            suppress_sound: args.suppress_sound,
-            transient: args.transient,
-            action_icons: args.action_icons,
-        };
+async fn send(noti: client::NotiClient<'_>, args: SendCommand) -> anyhow::Result<()> {
+    let hints_data = client::HintsData {
+        urgency: args.urgency,
+        category: args.category,
+        desktop_entry: args.desktop_entry,
+        image_path: args.image_path,
+        sound_file: args.sound_file,
+        sound_name: args.sound_name,
+        resident: args.resident,
+        suppress_sound: args.suppress_sound,
+        transient: args.transient,
+        action_icons: args.action_icons,
+    };
 
-        noti.send_notification(
-            args.replaces_id,
-            &args.app_name,
-            &args.icon,
-            &args.summary,
-            &args.body,
-            args.timeout,
-            &args.actions,
-            &args.hints,
-            &hints_data,
-        )
-        .await
-    }
+    noti.send_notification(
+        args.replaces_id,
+        args.app_name,
+        args.icon,
+        args.summary,
+        args.body,
+        args.timeout,
+        args.actions,
+        args.hints,
+        hints_data,
+    )
+    .await
+}
 
-    async fn server_info(&self, noti: client::NotiClient<'_>) -> anyhow::Result<()> {
-        noti.get_server_info().await
-    }
+async fn server_info(noti: client::NotiClient<'_>) -> anyhow::Result<()> {
+    noti.get_server_info().await
 }
