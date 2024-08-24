@@ -19,17 +19,50 @@ pub struct Notification {
 
 #[derive(Debug, Clone)]
 pub struct Hints {
+    /// The urgency level.
     pub urgency: Urgency,
+
+    /// The type of notification this is.
     pub category: Category,
+
+    ///	This specifies the name of the desktop filename representing the calling program.
+    ///	This should be the same as the prefix used for the application's .desktop file.
+    ///	An example would be "rhythmbox" from "rhythmbox.desktop".
+    ///	This can be used by the daemon to retrieve the correct icon for the application, for logging purposes, etc.
     pub desktop_entry: Option<String>,
+
+    ///	Raw data image format.
     pub image_data: Option<ImageData>,
+
+    /// Alternative way to define the notification image
     pub image_path: Option<String>,
+
+    /// When set the server will not automatically remove the notification when an action has been invoked.
+    /// The notification will remain resident in the server until it is explicitly removed by the user or by the sender.
+    /// This hint is likely only useful when the server has the "persistence" capability.
     pub resident: Option<bool>,
+
+    /// The path to a sound file to play when the notification pops up.
     pub sound_file: Option<String>,
+
+    /// A themeable named sound from the freedesktop.org sound naming specification to play when the notification pops up.
+    /// Similar to icon-name, only for sounds. An example would be "message-new-instant".
     pub sound_name: Option<String>,
+
+    /// Causes the server to suppress playing any sounds, if it has that ability.
+    /// This is usually set when the client itself is going to play its own sound.
     pub suppress_sound: Option<bool>,
+
+    /// When set the server will treat the notification as transient and by-pass the server's persistence capability, if it should exist.
     pub transient: Option<bool>,
+
+    /// Specifies the X and Y location on the screen that the notification should point to.
     pub coordinates: Option<Coordinates>,
+
+    /// When set, a server that has the "action-icons" capability will attempt to interpret any action identifier as a named icon.
+    /// The localized display name will be used to annotate the icon for accessibility purposes.
+    /// The icon name should be compliant with the Freedesktop.org Icon Naming Specification.
+    pub action_icons: Option<bool>,
 }
 
 impl Hints {
@@ -65,6 +98,7 @@ impl From<HashMap<&str, Value<'_>>> for Hints {
         let resident = Self::get_hint_value(&hints, "resident");
         let suppress_sound = Self::get_hint_value(&hints, "suppress-sound");
         let transient = Self::get_hint_value(&hints, "transient");
+        let action_icons = Self::get_hint_value(&hints, "action_icons");
         let coordinates = Coordinates::from_hints(&hints);
 
         Hints {
@@ -79,6 +113,7 @@ impl From<HashMap<&str, Value<'_>>> for Hints {
             suppress_sound,
             transient,
             coordinates,
+            action_icons,
         }
     }
 }
@@ -217,19 +252,25 @@ pub enum Urgency {
 
 impl Urgency {
     pub fn from_hint(hint: &Value<'_>) -> Option<Self> {
-        u8::try_from(hint)
-            .ok()
-            .and_then(|val| Some(Self::from(val)))
+        if let Ok(val) = u32::try_from(hint) {
+            Some(Self::from(val));
+        }
+
+        if let Ok(val) = String::try_from(hint) {
+            Some(Self::from(val.as_str()));
+        }
+
+        None
     }
 }
 
-impl From<u8> for Urgency {
-    fn from(value: u8) -> Self {
+impl From<u32> for Urgency {
+    fn from(value: u32) -> Self {
         match value {
             0 => Self::Low,
             1 => Self::Normal,
             2 => Self::Critical,
-            _ => Self::default(),
+            _ => Default::default(),
         }
     }
 }
@@ -250,7 +291,7 @@ impl From<&str> for Urgency {
             "low" => Self::Low,
             "normal" => Self::Normal,
             "critical" => Self::Critical,
-            _ => Self::default(),
+            _ => Default::default(),
         }
     }
 }
