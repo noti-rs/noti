@@ -5,10 +5,10 @@ use std::{
 
 use inotify::{EventMask, Inotify, WatchDescriptor, WatchMask};
 
-const XDG_CONFIG_HOME: &'static str = "XDG_CONFIG_HOME";
-const HOME: &'static str = "HOME";
-const APP_NAME: &'static str = env!("APP_NAME");
-const CONFIG_FILE: &'static str = "config.toml";
+const XDG_CONFIG_HOME: &str = "XDG_CONFIG_HOME";
+const HOME: &str = "HOME";
+const APP_NAME: &str = env!("APP_NAME");
+const CONFIG_FILE: &str = "config.toml";
 
 const DEFAULT_MASKS: WatchMask = WatchMask::MOVE_SELF
     .union(WatchMask::DELETE_SELF)
@@ -47,15 +47,12 @@ impl ConfigWatcher {
     }
 
     pub(super) fn get_config_path(&self) -> Option<&Path> {
-        self.config_wd
-            .as_ref()
-            .map(|config_wd| {
-                self.paths
-                    .iter()
-                    .find(|path| path.destination == config_wd.destination)
-                    .map(|path| path.as_path())
-            })
-            .flatten()
+        self.config_wd.as_ref().and_then(|config_wd| {
+            self.paths
+                .iter()
+                .find(|path| path.destination == config_wd.destination)
+                .map(|path| path.as_path())
+        })
     }
 
     pub(super) fn check_updates(&mut self) -> ConfigState {
@@ -97,11 +94,7 @@ pub enum ConfigState {
 
 impl ConfigState {
     fn is_not_found(&self) -> bool {
-        if let ConfigState::NotFound = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, ConfigState::NotFound)
     }
 
     fn priority(&self) -> u8 {
@@ -193,10 +186,12 @@ impl InotifyConfigSpecialization for Inotify {
         let new_wd = self
             .watches()
             .add(path.as_path(), DEFAULT_MASKS)
-            .expect(&format!(
-                "Failed to create watch descriptor for config path {:?}",
-                path
-            ));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Failed to create watch descriptor for config path {:?}",
+                    path
+                )
+            });
 
         ConfigWd::from_wd(new_wd, path.destination.clone())
     }

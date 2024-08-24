@@ -255,10 +255,10 @@ impl Draw for Border {
         };
 
         let corner_size = corner.len();
-        Self::draw_corner(Offset::no_offset(), &corner, Corner::TopLeft, output);
+        Self::draw_corner(Offset::no_offset(), corner, Corner::TopLeft, output);
         Self::draw_corner(
             Offset::new_x(self.frame_width - corner_size),
-            &corner,
+            corner,
             Corner::TopRight,
             output,
         );
@@ -267,13 +267,13 @@ impl Draw for Border {
                 self.frame_width - corner_size,
                 self.frame_height - corner_size,
             ),
-            &corner,
+            corner,
             Corner::BottomRight,
             output,
         );
         Self::draw_corner(
             Offset::new_y(self.frame_height - corner_size),
-            &corner,
+            corner,
             Corner::BottomLeft,
             output,
         );

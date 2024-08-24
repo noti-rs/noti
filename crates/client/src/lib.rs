@@ -27,6 +27,7 @@ impl<'a> NotiClient<'a> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn send_notification(
         &self,
         id: u32,
@@ -62,7 +63,7 @@ impl<'a> NotiClient<'a> {
     }
 }
 
-fn build_actions<'a>(actions: &'a [String]) -> anyhow::Result<Vec<&'a str>> {
+fn build_actions(actions: &[String]) -> anyhow::Result<Vec<&str>> {
     let mut new_actions = Vec::with_capacity(actions.len() * 2);
 
     for entry in actions {

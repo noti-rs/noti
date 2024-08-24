@@ -60,7 +60,7 @@ impl ConfigStructure {
                 .last()
                 .expect("Must be last element of type path");
 
-            if last.ident.to_string() != "Option" {
+            if last.ident != "Option" {
                 return Err(syn::Error::new(
                     type_path.span(),
                     "Expected Option<T> type, but given another",
@@ -86,7 +86,7 @@ impl ConfigStructure {
         fn get_type_path(ty: &syn::Type) -> syn::Result<&syn::TypePath> {
             match ty {
                 syn::Type::Path(type_path) => Ok(type_path),
-                syn::Type::Group(syn::TypeGroup { elem, .. }) => get_type_path(&**elem),
+                syn::Type::Group(syn::TypeGroup { elem, .. }) => get_type_path(elem),
                 _ => Err(syn::Error::new(
                     ty.span(),
                     "Invalid type, expected Option<T> type",
@@ -227,7 +227,7 @@ impl ConfigStructure {
                         }
                     }
 
-                    if let Some(_) = field_char.use_type {
+                    if field_char.use_type.is_some() {
                         quote! { .into() }.to_tokens(&mut line);
                     }
                 } else {
@@ -305,10 +305,10 @@ impl AttrInfo {
             if let syn::Meta::List(meta_list) = attr.meta {
                 Ok(meta_list.tokens)
             } else {
-                return Err(syn::Error::new(
+                Err(syn::Error::new(
                     attr.span(),
                     "Expected attribute like #[cfg_prop()]",
-                ));
+                ))
             }
         }
 
@@ -323,7 +323,7 @@ impl AttrInfo {
         let mut field_attr_info = HashMap::new();
 
         for field in cfg_struct.fields.iter_mut() {
-            let field_name = field_name(&field);
+            let field_name = field_name(field);
             let Some(field_attribute) = removed_suitable_attr(&mut field.attrs) else {
                 continue;
             };

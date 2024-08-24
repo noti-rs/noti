@@ -60,7 +60,7 @@ impl FontCollection {
 
         let emoji = OwnedFace::from_vec(
             std::fs::read(
-                &Command::new("fc-list")
+                Command::new("fc-list")
                     .args(["NotoColorEmoji", "--format", "%{file}"])
                     .output()?
                     .stdout
@@ -86,7 +86,7 @@ impl FontCollection {
 
         if glyph.is_empty() {
             self.emoji_image(ch, px_size.round() as u16)
-                .map(|image| Glyph::Image(image))
+                .map(Glyph::Image)
                 .unwrap_or(Glyph::Empty)
         } else {
             glyph
@@ -101,8 +101,8 @@ impl FontCollection {
 
     pub(crate) fn max_height(&self, px_size: f32) -> usize {
         self.map
-            .iter()
-            .map(|(_, font)| font.get_height(px_size).round() as usize)
+            .values()
+            .map(|font| font.get_height(px_size).round() as usize)
             .max()
             .unwrap_or_default()
     }
@@ -194,11 +194,7 @@ pub(crate) enum Glyph {
 
 impl Glyph {
     pub(crate) fn is_empty(&self) -> bool {
-        if let Glyph::Empty = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Glyph::Empty)
     }
 
     pub(crate) fn set_color(&mut self, new_color: Bgra) {

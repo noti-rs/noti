@@ -198,7 +198,7 @@ impl WindowManager {
     }
 
     fn init_window(&mut self, config: &Config) -> anyhow::Result<bool> {
-        if let None = self.window {
+        if self.window.is_none() {
             let mut event_queue = self.connection.new_event_queue();
             let qhandle = event_queue.handle();
             let display = self.connection.display();

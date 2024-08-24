@@ -1,5 +1,5 @@
 use regex::Regex;
-use std::{borrow::Cow, collections::HashMap, iter::Peekable, str::Chars};
+use std::{collections::HashMap, iter::Peekable, str::Chars};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Text {
@@ -24,7 +24,7 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn new(input: &'a Cow<str>) -> Self {
+    fn new(input: &'a str) -> Self {
         Self {
             body: String::new(),
             entities: Vec::new(),
@@ -146,11 +146,10 @@ struct Tag {
 
 impl Tag {
     fn parse(tag: &str) -> Option<Tag> {
-        let (tag, is_closing) = if tag.starts_with('/') {
-            (&tag[1..], true)
-        } else {
-            (tag, false)
-        };
+        let (tag, is_closing) = tag
+            .strip_prefix('/')
+            .map(|stripped| (stripped, true))
+            .unwrap_or_else(|| (tag, false));
 
         let is_self_closing = tag.ends_with('/');
         let tag = if is_self_closing {

@@ -46,7 +46,7 @@ impl Renderer {
                 match message {
                     ServerMessage::ShowNotification(notification) => {
                         dbg!(&notification);
-                        notifications_to_create.push(notification);
+                        notifications_to_create.push(*notification);
                     }
                     ServerMessage::CloseNotification { id } => {
                         notifications_to_close.push(id);

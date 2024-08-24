@@ -42,11 +42,11 @@ impl Bgra {
         }
     }
 
-    pub(crate) fn to_rgba(self) -> Rgba {
+    pub(crate) fn into_rgba(self) -> Rgba {
         self.into()
     }
 
-    pub(crate) fn to_slice(&self) -> [u8; 4] {
+    pub(crate) fn into_slice(self) -> [u8; 4] {
         [
             (self.blue * 255.0).round() as u8,
             (self.green * 255.0).round() as u8,
@@ -98,7 +98,7 @@ impl From<&Color> for Bgra {
 
 impl From<Bgra> for [u8; 4] {
     fn from(value: Bgra) -> Self {
-        value.to_slice()
+        value.into_slice()
     }
 }
 
@@ -181,11 +181,11 @@ impl Rgba {
         }
     }
 
-    pub(crate) fn to_bgra(self) -> Bgra {
+    pub(crate) fn into_bgra(self) -> Bgra {
         self.into()
     }
 
-    pub(crate) fn to_slice(self) -> [u8; 4] {
+    pub(crate) fn into_slice(self) -> [u8; 4] {
         [
             (self.red * 255.0).round() as u8,
             (self.green * 255.0).round() as u8,
@@ -247,7 +247,7 @@ impl From<Rgba> for Bgra {
 
 impl From<Rgba> for [u8; 4] {
     fn from(value: Rgba) -> Self {
-        value.to_slice()
+        value.into_slice()
     }
 }
 

@@ -70,7 +70,7 @@ impl BannerRect {
         let background: Bgra = Bgra::from(&colors.background);
 
         self.init_framebuffer(&rect_size, &background);
-        self.stride = rect_size.width as usize * 4;
+        self.stride = rect_size.width * 4;
 
         let border_spacing = Spacing::all_directional(display.border.size);
         let padding = &display.padding + border_spacing;
@@ -113,7 +113,7 @@ impl BannerRect {
     fn init_framebuffer(&mut self, rect_size: &RectSize, background: &Bgra) {
         self.framebuffer = vec![background.clone(); rect_size.area()]
             .into_iter()
-            .flat_map(|bgra| bgra.to_slice())
+            .flat_map(|bgra| bgra.into_slice())
             .collect();
     }
 
@@ -124,8 +124,8 @@ impl BannerRect {
             .size(border_cfg.size as usize)
             .radius(border_cfg.radius as usize)
             .color(Bgra::from(&border_cfg.color))
-            .frame_width(width as usize)
-            .frame_height(height as usize)
+            .frame_width(width)
+            .frame_height(height)
             .compile()
             .expect("Create Border for banner rounding")
             .draw(&mut |x, y, color| {
@@ -157,7 +157,7 @@ impl BannerRect {
         let position = y * self.stride + x * 4;
         unsafe {
             *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
-                .unwrap_unchecked() = color.to_slice()
+                .unwrap_unchecked() = color.into_slice()
         }
     }
 }

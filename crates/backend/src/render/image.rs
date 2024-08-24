@@ -83,11 +83,7 @@ impl Image {
     }
 
     pub(crate) fn exists(&self) -> bool {
-        if let Image::Exists { .. } = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Image::Exists { .. })
     }
 
     pub(crate) fn from_raster_glyph_image(from: RasterGlyphImage, size: u32) -> Option<Self> {
@@ -122,8 +118,8 @@ impl Image {
                 data.chunks_exact(4)
                     .flat_map(|chunk| {
                         Bgra::from(TryInto::<&[u8; 4]>::try_into(chunk).expect("Current chunk is not correct. Please contact to developer with this information."))
-                            .to_rgba()
-                            .to_slice()
+                            .into_rgba()
+                            .into_slice()
                     })
                     .collect::<Vec<u8>>(),
             )
@@ -286,17 +282,14 @@ impl Draw for Image {
 
         for y in 0..data.height as usize {
             for x in 0..data.width as usize {
-                let border_coverage = match border
-                    .as_ref()
-                    .map(|border| border.get_color_at(x, y))
-                    .flatten()
-                {
-                    Some(DrawColor::Transparent(Coverage(factor))) => factor,
-                    None => 1.0,
-                    _ => unreachable!(),
-                };
+                let border_coverage =
+                    match border.as_ref().and_then(|border| border.get_color_at(x, y)) {
+                        Some(DrawColor::Transparent(Coverage(factor))) => factor,
+                        None => 1.0,
+                        _ => unreachable!(),
+                    };
 
-                let color = unsafe { chunks.next().unwrap_unchecked() }.to_bgra();
+                let color = unsafe { chunks.next().unwrap_unchecked() }.into_bgra();
                 output(
                     x + offset.x,
                     y + offset.y,
