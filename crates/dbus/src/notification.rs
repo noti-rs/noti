@@ -256,15 +256,15 @@ impl Urgency {
             val.into()
         }
 
-        u32::try_from(hint)
+        u8::try_from(hint)
             .map(to_urgency)
             .ok()
-            .or_else(|| String::try_from(hint).ok().map(to_urgency))
+            .or_else(|| String::try_from(hint).map(to_urgency).ok())
     }
 }
 
-impl From<u32> for Urgency {
-    fn from(value: u32) -> Self {
+impl From<u8> for Urgency {
+    fn from(value: u8) -> Self {
         match value {
             0 => Self::Low,
             1 => Self::Normal,
