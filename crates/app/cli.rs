@@ -1,5 +1,5 @@
 use clap::Parser;
-use config::CONFIG;
+use config::Config;
 
 /// The notification system which derives a notification to user
 /// using wayland client.
@@ -7,13 +7,24 @@ use config::CONFIG;
 #[command(version, about, name = env!("APP_NAME"))]
 pub enum Args {
     /// Start the backend. Use it in systemd, openrc or any other service.
-    Run,
+    Run(Box<RunCommand>),
 
     /// Send the notification
     Send(Box<SendCommand>),
 
     /// Print server information
     ServerInfo,
+}
+
+#[derive(Parser)]
+pub struct RunCommand {
+    #[arg(
+        short,
+        long,
+        help = "Path to config file",
+        long_help = "Path to config file which will be used primarily"
+    )]
+    config: Option<String>,
 }
 
 #[derive(Parser)]
@@ -155,14 +166,14 @@ pub struct SendCommand {
 
 impl Args {
     pub async fn process(self) -> anyhow::Result<()> {
-        if let Args::Run = self {
-            run().await?
+        if let Args::Run(ref args) = self {
+            run(args).await?
         }
 
         let noti = client::NotiClient::init().await?;
 
         match self {
-            Args::Run => unreachable!(),
+            Args::Run { .. } => unreachable!(),
             Args::Send(args) => send(noti, *args).await?,
             Args::ServerInfo => server_info(noti).await?,
         }
@@ -171,10 +182,9 @@ impl Args {
     }
 }
 
-async fn run() -> anyhow::Result<()> {
-    let _ = &*CONFIG; // Initializes the configuration.
-
-    backend::run().await
+async fn run(args: &RunCommand) -> anyhow::Result<()> {
+    let config = Config::init(args.config.as_deref());
+    backend::run(config).await
 }
 
 async fn send(noti: client::NotiClient<'_>, args: SendCommand) -> anyhow::Result<()> {

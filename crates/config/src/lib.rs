@@ -1,7 +1,6 @@
 use macros::ConfigProperty;
-use once_cell::sync::Lazy;
 use serde::Deserialize;
-use std::{collections::HashMap, fs, path::Path, sync::Mutex};
+use std::{collections::HashMap, fs, path::Path};
 
 pub mod colors;
 pub mod sorting;
@@ -15,8 +14,6 @@ use spacing::Spacing;
 use text::{TextProperty, TomlTextProperty};
 use watcher::{ConfigState, ConfigWatcher};
 
-pub static CONFIG: Lazy<Mutex<Config>> = Lazy::new(|| Mutex::new(Config::init()));
-
 #[derive(Debug)]
 pub struct Config {
     watcher: ConfigWatcher,
@@ -27,8 +24,9 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn init() -> Self {
-        let watcher = ConfigWatcher::init().expect("The config watcher must be initialized");
+    pub fn init(user_config: Option<&str>) -> Self {
+        let watcher =
+            ConfigWatcher::init(user_config).expect("The config watcher must be initialized");
 
         let (general, display, app_configs) = Self::parse(watcher.get_config_path());
 
