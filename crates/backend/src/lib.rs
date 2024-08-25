@@ -1,6 +1,7 @@
 use std::thread;
 
 use anyhow::Context;
+use config::Config;
 use tokio::sync::mpsc::unbounded_channel;
 
 mod internal_messages;
@@ -13,11 +14,11 @@ use dbus::server::Server;
 
 use render::Renderer;
 
-pub async fn run() -> anyhow::Result<()> {
+pub async fn run(config: Config) -> anyhow::Result<()> {
     let (sender, mut receiver) = unbounded_channel();
     let server = Server::init(sender).await?;
 
-    let (server_internal_channel, mut renderer) = Renderer::init()?;
+    let (server_internal_channel, mut renderer) = Renderer::init(config)?;
 
     let backend_thread = thread::spawn(move || renderer.run());
 

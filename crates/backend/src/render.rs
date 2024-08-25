@@ -3,7 +3,7 @@ use std::time::Duration;
 use super::internal_messages::{
     InternalChannel, RendererInternalChannel, ServerInternalChannel, ServerMessage,
 };
-use config::{watcher::ConfigState, CONFIG};
+use config::{watcher::ConfigState, Config};
 
 pub(super) use self::{banner::BannerRect, font::FontCollection, types::RectSize};
 use super::window_manager::WindowManager;
@@ -18,21 +18,21 @@ mod types;
 mod widget;
 
 pub(crate) struct Renderer {
+    config: Config,
     window_manager: WindowManager,
     channel: RendererInternalChannel,
 }
 
 impl Renderer {
-    pub(crate) fn init() -> anyhow::Result<(ServerInternalChannel, Self)> {
+    pub(crate) fn init(config: Config) -> anyhow::Result<(ServerInternalChannel, Self)> {
         let (server_internal_channel, renderer_internal_channel) = InternalChannel::new().split();
-        let config = CONFIG
-            .lock()
-            .expect("Acquire the Config struct in window manager initialization");
+
         Ok((
             server_internal_channel,
             Self {
                 window_manager: WindowManager::init(&config)?,
                 channel: renderer_internal_channel,
+                config,
             },
         ))
     }
@@ -55,47 +55,30 @@ impl Renderer {
             }
 
             if !notifications_to_create.is_empty() {
-                let config = CONFIG
-                    .lock()
-                    .expect("Acquire the Config struct before creating banners");
                 self.window_manager
-                    .create_notifications(notifications_to_create, &config)?;
+                    .create_notifications(notifications_to_create, &self.config)?;
                 notifications_to_create = vec![];
             }
 
             if !notifications_to_close.is_empty() {
-                let config = CONFIG
-                    .lock()
-                    .expect("Acquire the Config struct before closing banners");
                 self.window_manager
-                    .close_notifications(&notifications_to_close, &config)?;
+                    .close_notifications(&notifications_to_close, &self.config)?;
                 notifications_to_close.clear();
             }
-            self.window_manager.remove_expired(
-                &CONFIG
-                    .lock()
-                    .expect("Acquire the Config struct before expiring banners"),
-            )?;
+            self.window_manager.remove_expired(&self.config)?;
 
             while let Some(message) = self.window_manager.pop_event() {
                 self.channel.send_to_server(message)?;
             }
 
-            self.window_manager.handle_actions(
-                &CONFIG
-                    .lock()
-                    .expect("Acquire the Config struct before handling actions"),
-            )?;
+            self.window_manager.handle_actions(&self.config)?;
             self.window_manager.dispatch()?;
 
             {
-                let mut config = CONFIG
-                    .lock()
-                    .expect("Acquire the Config struct before checking updates");
-                match config.check_updates() {
+                match self.config.check_updates() {
                     ConfigState::NotFound | ConfigState::Updated => {
-                        config.update();
-                        self.window_manager.update_by_config(&config)?;
+                        self.config.update();
+                        self.window_manager.update_by_config(&self.config)?;
                     }
                     ConfigState::NothingChanged => (),
                 };

@@ -22,10 +22,14 @@ pub(super) struct ConfigWatcher {
 }
 
 impl ConfigWatcher {
-    pub(super) fn init() -> anyhow::Result<Self> {
+    pub(super) fn init(user_config: Option<&str>) -> anyhow::Result<Self> {
         let inotify = Inotify::init()?;
 
         let mut paths = vec![];
+        if let Some(user_config_path) = ConfigPath::new_user_config(user_config) {
+            paths.push(user_config_path);
+        }
+
         if let Some(xdg_path) = ConfigPath::new_xdg() {
             paths.push(xdg_path);
         }
@@ -136,6 +140,13 @@ struct ConfigPath {
 }
 
 impl ConfigPath {
+    fn new_user_config(user_config: Option<&str>) -> Option<Self> {
+        user_config.map(|path| Self {
+            path_buf: PathBuf::from(path),
+            destination: ConfigDestination::UserConfig,
+        })
+    }
+
     fn new_xdg() -> Option<Self> {
         Some(Self {
             path_buf: Self::to_config_file(PathBuf::from(env::var(XDG_CONFIG_HOME).ok()?)),
@@ -170,6 +181,7 @@ impl ConfigPath {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ConfigDestination {
+    UserConfig,
     Xdg,
     Home,
 }

@@ -10,6 +10,5 @@ dbus = { path = "../dbus" }
 anyhow = { workspace = true }
 
 inotify = "0.10.2"
-once_cell = "1.19.0"
 serde = "1.0.205"
 toml = "0.8.19"

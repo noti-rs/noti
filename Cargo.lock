@@ -542,7 +542,6 @@ dependencies = [
  "dbus",
  "inotify",
  "macros",
- "once_cell",
  "serde",
  "toml",
 ]
