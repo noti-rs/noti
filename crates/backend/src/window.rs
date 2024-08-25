@@ -1,5 +1,6 @@
-use itertools::*;
+use indexmap::{indexmap, IndexMap};
 use std::{
+    cmp::Ordering,
     fs::File,
     os::{
         fd::{AsFd, BorrowedFd},
@@ -29,7 +30,7 @@ use dbus::notification::{self, Notification};
 use super::render::{BannerRect, FontCollection, RectSize};
 
 pub(super) struct Window {
-    banners: Vec<BannerRect>,
+    banners: IndexMap<u32, BannerRect>,
     font_collection: Arc<FontCollection>,
 
     rect_size: RectSize,
@@ -58,7 +59,7 @@ pub(super) enum ConfigurationState {
 impl Window {
     pub(super) fn init(font_collection: Arc<FontCollection>, config: &Config) -> Self {
         Self {
-            banners: vec![],
+            banners: indexmap! {},
             font_collection,
 
             rect_size: RectSize::new(
@@ -137,7 +138,7 @@ impl Window {
     pub(super) fn reconfigure(&mut self, config: &Config) {
         self.relocate(config.general().offset, &config.general().anchor);
         self.banners
-            .sort_by(config.general().sorting.get_cmp::<BannerRect>());
+            .sort_by_values(config.general().sorting.get_cmp::<BannerRect>());
     }
 
     fn relocate(&mut self, (x, y): (u8, u8), anchor_cfg: &config::Anchor) {
@@ -175,10 +176,10 @@ impl Window {
             .extend(notifications.into_iter().map(|notification| {
                 let mut banner_rect = BannerRect::init(notification);
                 banner_rect.draw(&self.font_collection, config);
-                banner_rect
+                (banner_rect.notification().id, banner_rect)
             }));
         self.banners
-            .sort_by(config.general().sorting.get_cmp::<BannerRect>());
+            .sort_by_values(config.general().sorting.get_cmp::<BannerRect>());
     }
 
     pub(super) fn replace_by_indices(
@@ -186,65 +187,43 @@ impl Window {
         notifications: &mut Vec<Notification>,
         config: &Config,
     ) {
-        let matching_indices: Vec<(usize, usize)> = notifications
+        let matching_indices: Vec<usize> = notifications
             .iter()
             .enumerate()
-            .filter_map(|(i, notification)| {
-                self.banners
-                    .iter()
-                    .position(|rect| rect.notification().id == notification.id)
-                    .map(|stack_index| (i, stack_index))
-            })
+            .filter_map(|(i, notification)| self.banners.get(&notification.id).map(|_| i))
             .collect();
 
-        for (notification_index, stack_index) in matching_indices.into_iter().rev() {
+        for notification_index in matching_indices.into_iter().rev() {
             let notification = notifications.remove(notification_index);
-            let rect = &mut self.banners[stack_index];
+
+            let rect = &mut self.banners[&notification.id];
             rect.update_data(notification);
             rect.draw(&self.font_collection, config);
         }
-    }
-
-    pub(super) fn remove_banners(&mut self, indices_to_remove: &[usize]) -> Vec<Notification> {
-        indices_to_remove
-            .iter()
-            .sorted()
-            .rev()
-            .map(|id| self.banners.remove(*id).destroy_and_get_notification())
-            .collect()
     }
 
     pub(super) fn remove_banners_by_id(
         &mut self,
         notification_indices: &[u32],
     ) -> Vec<Notification> {
-        let indices_to_remove: Vec<usize> = self
-            .banners
+        notification_indices
             .iter()
-            .enumerate()
-            .filter_map(|(i, banner_rect)| {
-                notification_indices
-                    .contains(&banner_rect.notification().id)
-                    .then_some(i)
+            .filter_map(|notification_id| {
+                self.banners
+                    .shift_remove(notification_id)
+                    .map(|banner| banner.destroy_and_get_notification())
             })
-            .collect();
-
-        if indices_to_remove.is_empty() {
-            vec![]
-        } else {
-            self.remove_banners(&indices_to_remove)
-        }
+            .collect()
     }
 
     pub(super) fn remove_expired_banners(&mut self, config: &Config) -> Vec<Notification> {
-        let indices_to_remove: Vec<usize> = self
+        let indices_to_remove: Vec<u32> = self
             .banners
-            .iter()
-            .enumerate()
-            .filter_map(|(i, rect)| match &rect.notification().expire_timeout {
+            .values()
+            .filter_map(|rect| match &rect.notification().expire_timeout {
                 notification::Timeout::Millis(millis) => {
                     if rect.created_at().elapsed().as_millis() > *millis as u128 {
-                        Some(i)
+                        Some(rect.notification().id)
                     } else {
                         None
                     }
@@ -253,7 +232,7 @@ impl Window {
                 notification::Timeout::Configurable => {
                     let timeout = config.display_by_app(&rect.notification().app_name).timeout;
                     if timeout != 0 && rect.created_at().elapsed().as_millis() > timeout as u128 {
-                        Some(i)
+                        Some(rect.notification().id)
                     } else {
                         None
                     }
@@ -264,13 +243,13 @@ impl Window {
         if indices_to_remove.is_empty() {
             vec![]
         } else {
-            self.remove_banners(&indices_to_remove)
+            self.remove_banners_by_id(&indices_to_remove)
         }
     }
 
     pub(super) fn handle_hover(&mut self, config: &Config) {
         if let Some(index) = self.get_hovered_banner(config) {
-            self.banners[index].update_timeout();
+            self.banners[&index].update_timeout();
         }
     }
 
@@ -287,7 +266,7 @@ impl Window {
             }
 
             return self
-                .remove_banners(&[i])
+                .remove_banners_by_id(&[i])
                 .into_iter()
                 .map(|notification| RendererMessage::ClosedNotification {
                     id: notification.id,
@@ -299,7 +278,7 @@ impl Window {
         vec![]
     }
 
-    fn get_hovered_banner(&self, config: &Config) -> Option<usize> {
+    fn get_hovered_banner(&self, config: &Config) -> Option<u32> {
         if !self.pointer_state.entered {
             return None;
         }
@@ -307,26 +286,28 @@ impl Window {
         let rect_height = config.general().height as usize;
         let gap = config.general().gap as usize;
 
-        (0..self.rect_size.height)
-            .step_by(rect_height + gap)
-            .enumerate()
-            .take(self.banners.len())
-            .find(|&(_, rect_top)| {
-                let rect_bottom = rect_top + rect_height;
-                (rect_top as f64..rect_bottom as f64).contains(&(self.pointer_state.y))
-            })
-            .map(|(i, _)| {
-                if config.general().anchor.is_top() {
-                    self.banners.len() - i - 1
-                } else {
-                    i
-                }
-            })
+        let region_iter = (0..self.rect_size.height).step_by(rect_height + gap);
+        let finder = |(banner, rect_top): (&BannerRect, usize)| {
+            let rect_bottom = rect_top + rect_height;
+            (rect_top as f64..rect_bottom as f64)
+                .contains(&(self.pointer_state.y))
+                .then(|| banner.notification().id)
+        };
+
+        if config.general().anchor.is_top() {
+            self.banners
+                .values()
+                .rev()
+                .zip(region_iter)
+                .find_map(finder)
+        } else {
+            self.banners.values().zip(region_iter).find_map(finder)
+        }
     }
 
     pub(super) fn redraw(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
         self.banners
-            .iter_mut()
+            .values_mut()
             .for_each(|banner| banner.draw(&self.font_collection, config));
 
         self.draw(qhandle, config);
@@ -375,9 +356,9 @@ impl Window {
         };
 
         if anchor.is_top() {
-            self.banners.iter().rev().enumerate().for_each(writer)
+            self.banners.values().rev().enumerate().for_each(writer)
         } else {
-            self.banners.iter().enumerate().for_each(writer)
+            self.banners.values().enumerate().for_each(writer)
         }
     }
 
@@ -450,6 +431,16 @@ impl Window {
     pub(super) fn commit(&self) {
         let surface = unsafe { self.surface.as_ref().unwrap_unchecked() };
         surface.commit();
+    }
+}
+
+trait SortByValues<K, V> {
+    fn sort_by_values(&mut self, cmp: for<'a> fn(&'a V, &'a V) -> Ordering);
+}
+
+impl<K, V> SortByValues<K, V> for IndexMap<K, V> {
+    fn sort_by_values(&mut self, cmp: for<'a> fn(&'a V, &'a V) -> Ordering) {
+        self.sort_by(|_, lhs, _, rhs| cmp(lhs, rhs));
     }
 }
 
