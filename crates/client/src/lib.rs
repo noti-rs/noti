@@ -122,7 +122,7 @@ fn build_hints<'a>(
 fn parse_hint_value<'a>(hint_type: &'_ str, hint_value: &'a str) -> anyhow::Result<Value<'a>> {
     Ok(match hint_type {
         "int" => Value::I32(hint_value.parse()?),
-        "uint" => Value::U32(hint_value.parse()?),
+        "uint" => Value::U8(hint_value.parse()?),
         "bool" => Value::Bool(hint_value.parse()?),
         "string" => Value::from(hint_value),
         _ => anyhow::bail!(
