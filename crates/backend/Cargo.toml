@@ -22,3 +22,4 @@ wayland-client = "0.31.5"
 wayland-protocols = { version = "0.32.3", features = ["client", "wayland-client"] }
 wayland-protocols-wlr = { version = "0.3.3", features = ["client", "wayland-client"] }
 derive_more = { version = "1.0.0", features = ["display"] }
+indexmap = "2.4.0"
