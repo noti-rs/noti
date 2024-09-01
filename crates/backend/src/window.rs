@@ -1,4 +1,5 @@
 use indexmap::{indexmap, IndexMap};
+use log::{debug, error, trace};
 use std::{
     cmp::Ordering,
     fs::File,
@@ -58,6 +59,8 @@ pub(super) enum ConfigurationState {
 
 impl Window {
     pub(super) fn init(font_collection: Arc<FontCollection>, config: &Config) -> Self {
+        debug!("Window: Initialized");
+
         Self {
             banners: indexmap! {},
             font_collection,
@@ -99,11 +102,13 @@ impl Window {
         if let Some(shm_pool) = self.shm_pool.as_ref() {
             shm_pool.destroy()
         }
+
+        debug!("Window: Deinitialized");
     }
 
     pub(super) fn configure(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
         let Some(layer_shell) = self.layer_shell.as_ref() else {
-            eprintln!("Tried to configure window when it doesn't have zwlr_layer_shell_v1!");
+            error!("Tried to configure window when it doesn't have zwlr_layer_shell_v1");
             return;
         };
 
@@ -112,6 +117,7 @@ impl Window {
                             "The wl_compositor protocol must be before than the zwlr-layer-shell-v1 protocol.\
                             If it is not correct, please contact to developers with this information"
                         ).create_surface(qhandle, ());
+        debug!("Window: Created surface");
 
         self.layer_surface = Some(layer_shell.get_layer_surface(
             &surface,
@@ -121,6 +127,7 @@ impl Window {
             qhandle,
             (),
         ));
+        debug!("Window: Created layer surface");
 
         self.relocate(config.general().offset, &config.general().anchor);
 
@@ -133,16 +140,22 @@ impl Window {
         surface.commit();
 
         self.surface = Some(surface);
+
+        debug!("Window: Configured");
     }
 
     pub(super) fn reconfigure(&mut self, config: &Config) {
         self.relocate(config.general().offset, &config.general().anchor);
         self.banners
             .sort_by_values(config.general().sorting.get_cmp::<BannerRect>());
+        debug!("Window: Re-sorted the notification banners");
+
+        debug!("Window: Reconfigured by updated config");
     }
 
     fn relocate(&mut self, (x, y): (u8, u8), anchor_cfg: &config::Anchor) {
         if let Some(layer_surface) = self.layer_surface.as_ref() {
+            debug!("Window: Relocate to anchor {anchor_cfg:?} with offsets x - {x} and y - {y}");
             self.margin = Margin::from_anchor(x as i32, y as i32, anchor_cfg);
 
             let anchor = match anchor_cfg {
@@ -178,8 +191,12 @@ impl Window {
                 banner_rect.draw(&self.font_collection, config);
                 (banner_rect.notification().id, banner_rect)
             }));
+
         self.banners
             .sort_by_values(config.general().sorting.get_cmp::<BannerRect>());
+        debug!("Window: Sorted the notification banners");
+
+        debug!("Window: Completed update the notification banners")
     }
 
     pub(super) fn replace_by_indices(
@@ -199,6 +216,11 @@ impl Window {
             let rect = &mut self.banners[&notification.id];
             rect.update_data(notification);
             rect.draw(&self.font_collection, config);
+
+            debug!(
+                "Window: Replaced notification by id {}",
+                rect.notification().id
+            );
         }
     }
 
@@ -206,6 +228,8 @@ impl Window {
         &mut self,
         notification_indices: &[u32],
     ) -> Vec<Notification> {
+        debug!("Window: Remove banners by id");
+
         notification_indices
             .iter()
             .filter_map(|notification_id| {
@@ -243,6 +267,7 @@ impl Window {
         if indices_to_remove.is_empty() {
             vec![]
         } else {
+            debug!("Window: Remove expired banners by indices: {indices_to_remove:?}");
             self.remove_banners_by_id(&indices_to_remove)
         }
     }
@@ -250,6 +275,10 @@ impl Window {
     pub(super) fn handle_hover(&mut self, config: &Config) {
         if let Some(index) = self.get_hovered_banner(config) {
             self.banners[&index].update_timeout();
+
+            // INFO: because of every tracking pointer position, it emits very frequently and it's
+            // annoying. So moved to 'TRACE' level for specific situations.
+            trace!("Window: Updated timeout of hovered notification banner with id {index}");
         }
     }
 
@@ -259,14 +288,16 @@ impl Window {
         }
         self.pointer_state.press_state.clear();
 
-        if let Some(i) = self.get_hovered_banner(config) {
+        if let Some(id) = self.get_hovered_banner(config) {
             if config.general().anchor.is_bottom() {
                 self.pointer_state.y -=
                     config.general().height as f64 + config.general().gap as f64;
             }
 
+            debug!("Window: Clicked to notification banner with id {id}");
+
             return self
-                .remove_banners_by_id(&[i])
+                .remove_banners_by_id(&[id])
                 .into_iter()
                 .map(|notification| RendererMessage::ClosedNotification {
                     id: notification.id,
@@ -311,6 +342,8 @@ impl Window {
             .for_each(|banner| banner.draw(&self.font_collection, config));
 
         self.draw(qhandle, config);
+
+        debug!("Window: Redrawed banners");
     }
 
     pub(super) fn draw(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
@@ -334,6 +367,11 @@ impl Window {
 
         let layer_surface = unsafe { self.layer_surface.as_ref().unwrap_unchecked() };
         layer_surface.set_size(self.rect_size.width as u32, self.rect_size.height as u32);
+
+        debug!(
+            "Window: Resized to width - {}, height - {}",
+            self.rect_size.width, self.rect_size.height
+        );
     }
 
     fn allocate_gap_buffer(&self, gap: u8) -> Vec<u8> {
@@ -360,6 +398,8 @@ impl Window {
         } else {
             self.banners.values().enumerate().for_each(writer)
         }
+
+        debug!("Window: Writed banners to buffer");
     }
 
     fn create_buffer(&mut self, qhandle: &QueueHandle<Window>) {
@@ -386,6 +426,8 @@ impl Window {
         }
 
         self.buffer = Some(buffer);
+
+        debug!("Window: Created buffer");
     }
 
     fn build_buffer(&mut self, qhandle: &QueueHandle<Window>) {
@@ -419,6 +461,8 @@ impl Window {
             qhandle,
             (),
         ));
+
+        debug!("Window: Builded buffer");
     }
 
     pub(super) fn frame(&self, qhandle: &QueueHandle<Window>) {
@@ -426,11 +470,15 @@ impl Window {
         surface.damage(0, 0, i32::MAX, i32::MAX);
         surface.frame(qhandle, ());
         surface.attach(self.wl_buffer.as_ref(), 0, 0);
+
+        debug!("Window: Requested a frame to the Wayland compositor");
     }
 
     pub(super) fn commit(&self) {
         let surface = unsafe { self.surface.as_ref().unwrap_unchecked() };
         surface.commit();
+
+        debug!("Window: Commited")
     }
 }
 
@@ -452,6 +500,7 @@ struct Buffer {
 
 impl Buffer {
     fn new() -> Self {
+        debug!("Buffer: Trying to create");
         Self {
             file: tempfile::tempfile().expect("The tempfile must be created"),
             cursor: 0,
@@ -461,6 +510,7 @@ impl Buffer {
 
     fn reset(&mut self) {
         self.cursor = 0;
+        debug!("Buffer: Reset");
     }
 
     fn push(&mut self, data: &[u8]) {
@@ -470,6 +520,8 @@ impl Buffer {
         self.cursor += data.len() as u64;
 
         self.size = std::cmp::max(self.size, self.cursor as usize);
+
+        debug!("Buffer: Received a data to write")
     }
 
     fn size(&self) -> usize {
@@ -571,19 +623,28 @@ impl PointerState {
 
     fn leave(&mut self) {
         self.entered = false;
+
+        debug!("Pointer: Left");
     }
 
     fn enter_and_relocate(&mut self, x: f64, y: f64) {
         self.entered = true;
-        self.relocate(x, y)
+        debug!("Pointer: Entered");
+
+        self.relocate(x, y);
     }
 
     fn relocate(&mut self, x: f64, y: f64) {
         self.x = x;
         self.y = y;
+
+        // INFO: Pointer state updates very frequently so in 'DEBUG' level rows will be filled with
+        // useless information about pointer. So moved into 'TRACE' level.
+        trace!("Pointer: Relocate to x - {x}, y - {y}")
     }
 
     fn press(&mut self, button: u32) {
+        debug!("Pointer: Pressed button {button}");
         match button {
             PointerState::LEFT_BTN => self.press_state.update(PrioritiedPressState::Lmb),
             PointerState::RIGHT_BTN => self.press_state.update(PrioritiedPressState::Rmb),
@@ -616,13 +677,16 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Window {
                         qhandle,
                         (),
                     ));
+                    debug!("Window: Bound the wl_compositor");
                 }
                 "wl_shm" => {
                     state.shm =
-                        Some(registry.bind::<wl_shm::WlShm, _, _>(name, version, qhandle, ()))
+                        Some(registry.bind::<wl_shm::WlShm, _, _>(name, version, qhandle, ()));
+                    debug!("Window: Bound the wl_shm");
                 }
                 "wl_seat" => {
                     registry.bind::<wl_seat::WlSeat, _, _>(name, version, qhandle, ());
+                    debug!("Window: Bound the wl_seat");
                 }
                 "zwlr_layer_shell_v1" => {
                     state.layer_shell = Some(
@@ -633,8 +697,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Window {
                             (),
                         ),
                     );
+                    debug!("Window: Bound the zwlr_layer_shell_v1");
 
                     state.configuration_state = ConfigurationState::Ready;
+                    debug!("Window: Ready to configure")
                 }
                 _ => (),
             }
@@ -665,6 +731,7 @@ impl Dispatch<wl_seat::WlSeat, ()> for Window {
         {
             if capability.contains(wl_seat::Capability::Pointer) {
                 seat.get_pointer(qhandle, ());
+                debug!("Window: Received a pointer");
             }
         }
     }
@@ -723,7 +790,8 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Window {
                 state.rect_size.height = height as usize;
             }
 
-            state.configuration_state = ConfigurationState::Configured
+            state.configuration_state = ConfigurationState::Configured;
+            debug!("Window: Configured layer surface")
         }
     }
 }

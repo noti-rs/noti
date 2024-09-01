@@ -1,4 +1,5 @@
 use anyhow::bail;
+use log::debug;
 use std::collections::HashMap;
 use zbus::zvariant::Value;
 
@@ -40,8 +41,21 @@ impl<'a> NotiClient<'a> {
         hints: Vec<String>,
         hints_data: HintsData,
     ) -> anyhow::Result<()> {
+        debug!("Client: Building hints and actions from user prompt");
         let new_hints = build_hints(&hints, hints_data)?;
         let actions = build_actions(&actions)?;
+
+        debug!(
+            "Client: Send notification with metadata:\n\
+            \treplaces_id - {id},\n\
+            \tapp_name - {app_name},\n\
+            \tapp_icon - {icon},\n\
+            \tsummary - {summary},\n\
+            \tbody - {body},\n\
+            \tactions - {actions:?},\n\
+            \thints - {new_hints:?},\n\
+            \ttimeout - {timeout}"
+        );
 
         self.dbus_client
             .notify(
@@ -49,11 +63,16 @@ impl<'a> NotiClient<'a> {
             )
             .await?;
 
+        debug!("Client: Successful send");
+
         Ok(())
     }
 
     pub async fn get_server_info(&self) -> anyhow::Result<()> {
+        debug!("Client: Trying to request server information");
         let server_info = self.dbus_client.get_server_information().await?;
+        debug!("Client: Received server information");
+
         println!(
             "Name: {}\nVendor: {}\nVersion: {}\nSpecification version: {}",
             server_info.0, server_info.1, server_info.2, server_info.3

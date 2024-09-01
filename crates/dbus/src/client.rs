@@ -1,3 +1,4 @@
+use log::debug;
 use std::collections::HashMap;
 use zbus::{proxy, zvariant::Value, Connection};
 
@@ -28,9 +29,11 @@ pub struct Client<'a> {
 
 impl<'a> Client<'a> {
     pub async fn init() -> anyhow::Result<Self> {
+        debug!("D-Bus Client: Initializing");
         let connection = Connection::session().await?;
         let proxy = NotificationsProxy::new(&connection).await?;
 
+        debug!("D-Bus Client: Initialized");
         Ok(Self { proxy })
     }
 
@@ -46,6 +49,7 @@ impl<'a> Client<'a> {
         hints: HashMap<&str, Value<'_>>,
         expire_timeout: i32,
     ) -> anyhow::Result<u32> {
+        debug!("D-Bus Client: Trying to notify");
         let reply = self
             .proxy
             .notify(
@@ -60,11 +64,15 @@ impl<'a> Client<'a> {
             )
             .await?;
 
+        debug!("D-Bus Client: Notified");
         Ok(reply)
     }
 
     pub async fn get_server_information(&self) -> anyhow::Result<(String, String, String, String)> {
+        debug!("D-Bus Client: Trying to get server information");
         let reply = self.proxy.get_server_information().await?;
+
+        debug!("D-Bus Client: Receieved server information");
         Ok(reply)
     }
 }

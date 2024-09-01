@@ -1,3 +1,4 @@
+use log::debug;
 use macros::ConfigProperty;
 use serde::Deserialize;
 use std::{collections::HashMap, fs, path::Path};
@@ -25,10 +26,12 @@ pub struct Config {
 
 impl Config {
     pub fn init(user_config: Option<&str>) -> Self {
+        debug!("Config: Initializing");
         let watcher =
             ConfigWatcher::init(user_config).expect("The config watcher must be initialized");
 
         let (general, display, app_configs) = Self::parse(watcher.get_config_path());
+        debug!("Config: Initialized");
 
         Self {
             watcher,
@@ -61,6 +64,8 @@ impl Config {
         self.general = general;
         self.display = display;
         self.app_configs = app_configs;
+
+        debug!("Config: Updated");
     }
 
     fn parse(
@@ -81,6 +86,8 @@ impl Config {
                 app_configs.insert(app.name, app.display.unwrap().unwrap_or_default());
             }
         }
+
+        debug!("Config: Parsed from files");
 
         (
             general.unwrap_or_default().into(),
