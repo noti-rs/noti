@@ -91,6 +91,18 @@ justification = "center"
 line_spacing = 5
 ```
 
+## Troubleshooting
+
+If you encounter any issues or unexpected behavior with our application, please open a new issue or pull request (PR) if you have a solution to the problem.
+
+Before submitting an issue, set the environment variable `NOTI_LOG` to `debug` or `trace` level and run the application while saving the output to a file:
+
+```bash
+NOTI_LOG=debug noti run >> log.txt
+```
+
+Include the log file when submitting your issue. This information is very helpful for our developers!
+
 ## Contributing
 
 Contributions are welcome! Please fork the repository and submit a pull request for any changes. For major changes, please open an issue first to discuss what you would like to change
