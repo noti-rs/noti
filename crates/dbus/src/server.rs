@@ -10,6 +10,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use log::debug;
 use zbus::{
     connection, fdo::Result, interface, object_server::SignalContext, zvariant::Value, Connection,
 };
@@ -27,6 +28,8 @@ impl Server {
     const NOTIFICATIONS_NAME: &'static str = "org.freedesktop.Notifications";
 
     pub async fn init(sender: UnboundedSender<Action>) -> anyhow::Result<Self> {
+        debug!("D-Bus Server: Initializing");
+
         let handler = Handler { sender };
 
         let connection = connection::Builder::session()?
@@ -35,10 +38,14 @@ impl Server {
             .build()
             .await?;
 
+        debug!("D-Bus Server: Initialized");
+
         Ok(Self { connection })
     }
 
     pub async fn emit_signal(&self, signal: Signal) -> zbus::Result<()> {
+        debug!("D-Bus Server: Emitting signal {signal}");
+
         let ctxt = SignalContext::new(&self.connection, Self::NOTIFICATIONS_PATH)?;
         match signal {
             Signal::NotificationClosed {
@@ -78,6 +85,8 @@ impl Handler {
         hints: HashMap<&str, Value<'_>>,
         expire_timeout: i32,
     ) -> Result<u32> {
+        debug!("D-Bus Server: Received notification");
+
         let id = match replaces_id {
             0 => UNIQUE_ID.fetch_add(1, Ordering::Relaxed),
             _ => replaces_id,
@@ -112,6 +121,7 @@ impl Handler {
         id: u32,
         #[zbus(signal_context)] ctxt: SignalContext<'_>,
     ) -> Result<()> {
+        debug!("D-Bus Server: Called method 'CloseNotification' by id {id}");
         Self::notification_closed(&ctxt, id, ClosingReason::CallCloseNotification.into()).await?;
         self.sender.send(Action::Close(Some(id))).unwrap();
 
@@ -123,6 +133,7 @@ impl Handler {
         &self,
         #[zbus(signal_context)] ctxt: SignalContext<'_>,
     ) -> Result<()> {
+        debug!("D-Bus Server: Called method 'CloseLastNotification'");
         //WARNING: temporary id value
         Self::notification_closed(&ctxt, 0, ClosingReason::CallCloseNotification.into()).await?;
         self.sender.send(Action::Close(None)).unwrap();
@@ -131,6 +142,7 @@ impl Handler {
     }
 
     async fn get_server_information(&self) -> Result<(String, String, String, String)> {
+        debug!("D-Bus Server: Called method 'GetServerInformation'");
         let name = String::from(env!("APP_NAME"));
         let vendor = String::from(env!("CARGO_PKG_AUTHORS"));
         let version = String::from(env!("CARGO_PKG_VERSION"));
@@ -140,6 +152,7 @@ impl Handler {
     }
 
     async fn get_capabilities(&self) -> Result<Vec<String>> {
+        debug!("D-Bus Server: Called method 'GetCapabilities'");
         let capabilities = vec![
             String::from("action-icons"),
             String::from("actions"),

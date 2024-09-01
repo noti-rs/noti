@@ -4,6 +4,7 @@ use std::{
 };
 
 use inotify::{EventMask, Inotify, WatchDescriptor, WatchMask};
+use log::{debug, info};
 
 const XDG_CONFIG_HOME: &str = "XDG_CONFIG_HOME";
 const HOME: &str = "HOME";
@@ -23,19 +24,23 @@ pub(super) struct ConfigWatcher {
 
 impl ConfigWatcher {
     pub(super) fn init(user_config: Option<&str>) -> anyhow::Result<Self> {
+        debug!("Config Watcher: Initializing");
         let inotify = Inotify::init()?;
 
         let mut paths = vec![];
         if let Some(user_config_path) = ConfigPath::new_user_config(user_config) {
             paths.push(user_config_path);
+            info!("Config Watcher: Detected user config path");
         }
 
         if let Some(xdg_path) = ConfigPath::new_xdg() {
             paths.push(xdg_path);
+            info!("Config Watcher: Detected xdg config path");
         }
 
         if let Some(home_path) = ConfigPath::new_home() {
             paths.push(home_path);
+            info!("Config Watcher: Detected home config path");
         }
 
         let config_wd = paths
@@ -43,6 +48,7 @@ impl ConfigWatcher {
             .find(|path| path.is_file())
             .map(|path| inotify.new_wd(path));
 
+        debug!("Config Watcher: Initialized");
         Ok(Self {
             inotify,
             paths,

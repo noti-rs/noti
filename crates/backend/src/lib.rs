@@ -2,6 +2,7 @@ use std::thread;
 
 use anyhow::Context;
 use config::Config;
+use log::{debug, info, warn};
 use tokio::sync::mpsc::unbounded_channel;
 
 mod internal_messages;
@@ -17,8 +18,10 @@ use render::Renderer;
 pub async fn run(config: Config) -> anyhow::Result<()> {
     let (sender, mut receiver) = unbounded_channel();
     let server = Server::init(sender).await?;
+    info!("Backend: Server initialized");
 
     let (server_internal_channel, mut renderer) = Renderer::init(config)?;
+    info!("Backend: Renderer initialized");
 
     let backend_thread = thread::spawn(move || renderer.run());
 
@@ -29,20 +32,23 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
                     server_internal_channel.send_to_renderer(
                         internal_messages::ServerMessage::ShowNotification(notification),
                     )?;
+                    debug!("Backend: Sended notification to render to show");
                 }
                 Action::Close(Some(id)) => {
                     server_internal_channel.send_to_renderer(
                         internal_messages::ServerMessage::CloseNotification { id },
                     )?;
+                    debug!("Backend: Sended notification with id {id} to render to close it");
                 }
                 Action::Close(None) => {
-                    dbg!("close last");
+                    warn!("Backend: Unsupported method 'Close'. Ignored");
                 }
                 Action::ShowLast => {
-                    todo!("show last");
+                    //TODO: make decision about this action. It may be very useless
+                    warn!("Backend: Unsupported method 'ShowLast'. Ignored");
                 }
                 Action::CloseAll => {
-                    todo!("show all");
+                    warn!("Backend: Unsupported method 'CloseAll'. Ignored");
                 }
             }
         }
@@ -60,6 +66,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
                         //INFO: ignore the first one because it always emits in server.
                         dbus::actions::ClosingReason::CallCloseNotification => (),
                         other_reason => {
+                            debug!("Backend: Closed notification with id {id} and reason {other_reason}");
                             server
                                 .emit_signal(dbus::actions::Signal::NotificationClosed {
                                     notification_id: id,

@@ -324,6 +324,7 @@ dependencies = [
  "image",
  "indexmap",
  "itertools 0.13.0",
+ "log",
  "owned_ttf_parser",
  "rayon",
  "resvg",
@@ -510,6 +511,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dbus",
+ "log",
  "tokio",
  "zbus",
 ]
@@ -542,6 +544,7 @@ dependencies = [
  "anyhow",
  "dbus",
  "inotify",
+ "log",
  "macros",
  "serde",
  "toml",
@@ -663,6 +666,7 @@ dependencies = [
  "anyhow",
  "derive_more",
  "html-escape",
+ "log",
  "regex",
  "tokio",
  "zbus",
@@ -776,6 +780,29 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "env_filter"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f2c92ceda6ceec50f43169f9ee8424fe2db276791afde7b2cd8bc084cb376ab"
+dependencies = [
+ "log",
+ "regex",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13fa619b91fb2381732789fc5de83b45675e882f66623b7d8cb4f643017018d"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "env_filter",
+ "humantime",
+ "log",
 ]
 
 [[package]]
@@ -1038,6 +1065,12 @@ checksum = "6d1ad449764d627e22bfd7cd5e8868264fc9236e07c752972b4080cd351cb476"
 dependencies = [
  "utf8-width",
 ]
+
+[[package]]
+name = "humantime"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "ident_case"
@@ -1367,6 +1400,7 @@ dependencies = [
  "clap",
  "client",
  "config",
+ "env_logger",
  "tokio",
 ]
 

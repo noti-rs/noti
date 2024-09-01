@@ -1,3 +1,5 @@
+use derive_more::derive::Display;
+
 use super::notification::Notification;
 
 pub enum Action {
@@ -7,17 +9,22 @@ pub enum Action {
     CloseAll,
 }
 
+#[derive(Display)]
+#[display("{_variant}")]
 pub enum Signal {
+    #[display("notification_id: {notification_id}, action_key: {action_key}")]
     ActionInvoked {
         notification_id: u32,
         action_key: String,
     },
+    #[display("notification_id: {notification_id}, action_key: {reason}")]
     NotificationClosed {
         notification_id: u32,
         reason: ClosingReason,
     },
 }
 
+#[derive(Display)]
 pub enum ClosingReason {
     Expired,
     DismissedByUser,

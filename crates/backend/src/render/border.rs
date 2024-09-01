@@ -1,4 +1,5 @@
 use derive_builder::Builder;
+use log::warn;
 
 use super::{
     color::Bgra,
@@ -250,7 +251,7 @@ impl Draw for Border {
         output: &mut Output,
     ) {
         let Some(corner) = self.corner_coverage.as_ref() else {
-            eprintln!("Border is not compiled, refused to draw border.");
+            warn!("Border: Not compiled, refused to draw itself");
             return;
         };
 

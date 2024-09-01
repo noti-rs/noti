@@ -1,3 +1,4 @@
+use log::debug;
 use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 
 use config::{ImageProperty, ResizingMethod};
@@ -61,6 +62,8 @@ impl Image {
                     height as u32,
                     image_property.resizing_method.to_filter_type(),
                 );
+
+                debug!("Image: Created from 'image_data'");
 
                 Image::Exists {
                     data: ImageData {
@@ -189,6 +192,8 @@ impl Image {
             resvg::usvg::Transform::from_scale(scale, scale),
             &mut pixmap.as_mut(),
         );
+
+        debug!("Image: Created image from svg by path {image_path}");
 
         Image::Exists {
             data: ImageData {

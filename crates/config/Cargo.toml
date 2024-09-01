@@ -8,6 +8,7 @@ edition.workspace = true
 macros = { path = "../macros" }
 dbus = { path = "../dbus" }
 anyhow = { workspace = true }
+log = { workspace = true }
 
 inotify = "0.10.2"
 serde = "1.0.205"

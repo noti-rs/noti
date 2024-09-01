@@ -1,5 +1,6 @@
 use ab_glyph::{point, Font as AbGlyphFont, OutlinedGlyph, ScaleFont};
 use derive_more::Display;
+use log::{debug, info, warn};
 use owned_ttf_parser::{AsFaceRef, OwnedFace};
 use rayon::prelude::*;
 use std::{
@@ -27,6 +28,8 @@ impl FontCollection {
     const ACCEPTED_STYLES: [&'static str; 3] = ["Regular", "Bold", "Italic"];
 
     pub(crate) fn load_by_font_name(font_name: &str) -> anyhow::Result<Self> {
+        debug!("Font: Trying load font by name {font_name}");
+
         let process_result = Command::new("fc-list")
             .args([font_name, "--format", "%{file}:%{style}\n"])
             .output()?;
@@ -58,6 +61,8 @@ impl FontCollection {
                 lhs
             });
 
+        info!("Font: Loaded fonts by name {font_name}");
+
         let emoji = OwnedFace::from_vec(
             std::fs::read(
                 Command::new("fc-list")
@@ -71,6 +76,10 @@ impl FontCollection {
             0,
         )
         .ok();
+
+        if emoji.is_none() {
+            warn!("Font: Not found the 'NotoColorEmoj' font, emoji will be not displayed");
+        }
 
         Ok(Self { map, emoji })
     }

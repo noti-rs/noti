@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use log::debug;
 use wayland_client::{Connection, EventQueue, QueueHandle};
 
 use super::internal_messages::RendererMessage;
@@ -29,6 +30,8 @@ impl WindowManager {
             &config.general().font.name,
         )?);
 
+        debug!("Window Manager: Created");
+
         Ok(Self {
             connection,
             event_queue: None,
@@ -50,6 +53,8 @@ impl WindowManager {
             window.frame(qhandle);
             window.commit();
         }
+
+        debug!("Window Manager: Updated the windows by updated config");
 
         self.roundtrip_event_queue()
     }
@@ -184,6 +189,8 @@ impl WindowManager {
             window.draw(qhandle, config);
             window.frame(qhandle);
             window.commit();
+
+            debug!("Window Manager: Updated the windows");
         }
 
         Ok(())
@@ -192,6 +199,8 @@ impl WindowManager {
     fn roundtrip_event_queue(&mut self) -> anyhow::Result<()> {
         if let Some(event_queue) = self.event_queue.as_mut() {
             event_queue.roundtrip(unsafe { self.window.as_mut().unwrap_unchecked() })?;
+
+            debug!("Window Manager: Roundtrip events for the windows");
         }
 
         Ok(())
@@ -219,6 +228,9 @@ impl WindowManager {
             self.event_queue = Some(event_queue);
             self.qhandle = Some(qhandle);
             self.window = Some(window);
+
+            debug!("Window Manager: Created a window");
+
             Ok(true)
         } else {
             Ok(false)
@@ -237,6 +249,8 @@ impl WindowManager {
         self.window = None;
         self.event_queue = None;
         self.qhandle = None;
+
+        debug!("Window Manager: Closed window");
 
         Ok(())
     }

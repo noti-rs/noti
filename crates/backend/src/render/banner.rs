@@ -2,6 +2,7 @@ use std::time;
 
 use config::{spacing::Spacing, Config, DisplayConfig};
 use dbus::notification::Notification;
+use log::{debug, trace};
 
 use super::{
     border::BorderBuilder,
@@ -23,6 +24,8 @@ pub struct BannerRect {
 
 impl BannerRect {
     pub(crate) fn init(notification: Notification) -> Self {
+        debug!("Banner (id={}): Created", notification.id);
+
         Self {
             data: notification,
             created_at: time::Instant::now(),
@@ -37,6 +40,7 @@ impl BannerRect {
     }
 
     pub(crate) fn destroy_and_get_notification(self) -> Notification {
+        debug!("Banner (id={}): Destroyed", self.data.id);
         self.data
     }
 
@@ -46,11 +50,19 @@ impl BannerRect {
 
     pub(crate) fn update_timeout(&mut self) {
         self.created_at = time::Instant::now();
+
+        // INFO: because of every tracking pointer position, it emits very frequently and it's
+        // annoying. So moved to 'TRACE' level for specific situations.
+        trace!("Banner (id={}): Updated timeout", self.data.id);
     }
 
     pub(crate) fn update_data(&mut self, notification: Notification) {
         self.data = notification;
         self.created_at = time::Instant::now();
+        debug!(
+            "Banner (id={}): Updated notification data and timeout",
+            self.data.id
+        );
     }
 
     #[inline]
@@ -59,6 +71,8 @@ impl BannerRect {
     }
 
     pub(crate) fn draw(&mut self, font_collection: &FontCollection, config: &Config) {
+        debug!("Banner (id={}): Beginning of draw", self.data.id);
+
         let rect_size = RectSize::new(
             config.general().width as usize,
             config.general().height as usize,
@@ -108,6 +122,8 @@ impl BannerRect {
             config.general().height.into(),
             display,
         );
+
+        debug!("Banner (id={}): Complete draw", self.data.id);
     }
 
     fn init_framebuffer(&mut self, rect_size: &RectSize, background: &Bgra) {
@@ -115,6 +131,8 @@ impl BannerRect {
             .into_iter()
             .flat_map(|bgra| bgra.into_slice())
             .collect();
+
+        debug!("Banner (id={}): Initialized framebuffer", self.data.id);
     }
 
     fn draw_border(&mut self, width: usize, height: usize, display: &DisplayConfig) {
