@@ -638,9 +638,9 @@ impl PointerState {
         self.x = x;
         self.y = y;
 
-        // INFO: Poitner state updates very frequently so in 'DEBUG' level rows will be filled with
+        // INFO: Pointer state updates very frequently so in 'DEBUG' level rows will be filled with
         // useless information about pointer. So moved into 'TRACE' level.
-        trace!("Poitner: Relocate to x - {x}, y - {y}")
+        trace!("Pointer: Relocate to x - {x}, y - {y}")
     }
 
     fn press(&mut self, button: u32) {
