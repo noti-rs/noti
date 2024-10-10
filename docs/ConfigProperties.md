@@ -12,7 +12,7 @@ Use this file as documentation for all properties.
 > Don't need to reload the application after changing config properties because it have
 > `hot-reload` or `watch-mode`.
 
-Before of all poperties, need to understand a few primitive type. The complex types like array or table will be explained in place.
+Before of all properties, need to understand a few primitive type. The complex types like array or table will be explained in place.
 
 | Type     | Explanation                                                                                                                                                                                                          |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -117,11 +117,11 @@ Possible values of the `ordering` property name:
 ## Display
 
 To change the visual styles of banners use `display` table. You cad define
-the values of `display` table for all the appications at the same time and
+the values of `display` table for all the applications at the same time and
 use specific values per application by [app config](#apps).
 
 If you curious about banner layout, please visit [the other document](#BannerLayout.md)
-which is maded specifically for it.
+that was made specifically for it.
 
 The display properties affects only and only for a banner, not the window entire.
 The currently possible properties of `display` table:
@@ -207,18 +207,18 @@ padding = { top = 3 }
 # Sets only top and right padding
 padding = { top = 5, right = 6 }
 
-# Insead of
+# Instead of
 # padding = { top = 5, right = 6, bottom = 5 }
 # Write
 padding = { vertical = 5, right = 6 }
 
-# If gots collision of values the error will throws because of ambuguity
+# If there are collisions of values, an error will be thrown due to ambiguity.
 # padding = { top = 5, vertical = 6 }
 
 # You can apply the same way for margin
 margin = { top = 5, horizontal = 10 }
 
-# For all-directional padding or margin, set only nubmer as above in CSS
+# For all-directional padding or margin, set only number as above in CSS
 padding = 10
 margin = 5
 ```
@@ -244,7 +244,7 @@ Here a table of `Image` properties:
 
 To notification banner you can apply border styles: border size, radius and color.
 
-- Border size - the width of stroke which is outlines around the banne. It draws in the rectangle, so the inner elements can overlay the border if you pick margin smaller than border size.
+- Border size - the width of stroke which is outlines around the banner. It draws in the rectangle, so the inner elements can overlay the border if you pick margin smaller than border size.
 - Border radius - the radius which will applied for rounding the corners of banner.
 - Border color - the color of stroke.
 
