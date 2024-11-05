@@ -113,6 +113,8 @@ impl Handler {
         };
 
         self.sender.send(Action::Show(notification.into())).unwrap();
+        self.sender.send(Action::PlaySound).unwrap();
+
         Ok(id)
     }
 

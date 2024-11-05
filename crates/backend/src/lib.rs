@@ -5,6 +5,9 @@ use config::Config;
 use log::{debug, info, warn};
 use tokio::sync::mpsc::unbounded_channel;
 
+use rodio::OutputStream;
+
+mod audio;
 mod internal_messages;
 mod render;
 mod window;
@@ -24,6 +27,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     info!("Backend: Renderer initialized");
 
     let backend_thread = thread::spawn(move || renderer.run());
+
+    let (_stream, stream_handle) = OutputStream::try_default().unwrap();
 
     loop {
         while let Ok(action) = receiver.try_recv() {
@@ -49,6 +54,10 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
                 }
                 Action::CloseAll => {
                     warn!("Backend: Unsupported method 'CloseAll'. Ignored");
+                }
+                Action::PlaySound => {
+                    audio::play_sound(&stream_handle).await;
+                    debug!("Backend: Played sound");
                 }
             }
         }

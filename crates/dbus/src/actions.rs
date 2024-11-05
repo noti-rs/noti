@@ -7,6 +7,7 @@ pub enum Action {
     ShowLast, // NOTE: consider removing this
     Close(Option<u32>),
     CloseAll,
+    PlaySound,
 }
 
 #[derive(Display)]
