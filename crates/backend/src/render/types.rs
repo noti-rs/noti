@@ -24,8 +24,12 @@ impl RectSize {
     }
 
     pub(crate) fn shrink_by(&mut self, spacing: &Spacing) {
-        self.width -= spacing.left() as usize + spacing.right() as usize;
-        self.height -= spacing.top() as usize + spacing.bottom() as usize;
+        self.width = self
+            .width
+            .saturating_sub(spacing.left() as usize + spacing.right() as usize);
+        self.height = self
+            .height
+            .saturating_sub(spacing.top() as usize + spacing.bottom() as usize);
     }
 
     pub(crate) fn area(&self) -> usize {

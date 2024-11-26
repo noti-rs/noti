@@ -228,7 +228,7 @@ impl TextRect {
             })
             .unwrap_or_default();
 
-        while let EllipsiationState::Continue(word) = state {
+        while let EllipsizationState::Continue(word) = state {
             self.lines.pop();
 
             state = self
@@ -245,6 +245,10 @@ impl TextRect {
         self.lines
             .iter_mut()
             .for_each(|line| line.set_color(self.foreground.clone()));
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.lines.is_empty() || self.lines.iter().all(|line| line.is_empty())
     }
 
     #[allow(unused)]
@@ -311,17 +315,17 @@ impl LineRect {
         last_word: Option<WordRect>,
         ellipsis: Glyph,
         ellipsize_at: &EllipsizeAt,
-    ) -> EllipsiationState {
+    ) -> EllipsizationState {
         match ellipsize_at {
             EllipsizeAt::Middle => {
                 self.ellipsize_middle(last_word, ellipsis);
-                EllipsiationState::Complete
+                EllipsizationState::Complete
             }
             EllipsizeAt::End => {
                 if last_word.is_some() || self.available_space < 0 {
                     self.ellipsize_end(ellipsis)
                 } else {
-                    EllipsiationState::Complete
+                    EllipsizationState::Complete
                 }
             }
         }
@@ -363,19 +367,23 @@ impl LineRect {
             last_word.pop_glyph();
         }
 
+        if last_word.is_blank() {
+            return;
+        }
+
         // INFO: here MUST be enough space for cutting word and ellipsization
         // so here doesn't check if the last word is blank
         last_word.push_glyph(ellipsis);
         self.push_word(last_word);
     }
 
-    fn ellipsize_end(&mut self, ellipsis: Glyph) -> EllipsiationState {
+    fn ellipsize_end(&mut self, ellipsis: Glyph) -> EllipsizationState {
         if ellipsis.advance_width() as isize <= self.available_space {
             self.push_ellipsis_to_last_word(ellipsis);
-            EllipsiationState::Complete
+            EllipsizationState::Complete
         } else {
             if self.pop_word().is_none() {
-                return EllipsiationState::Continue(Some(WordRect::new_empty()));
+                return EllipsizationState::Continue(Some(WordRect::new_empty()));
             };
 
             self.ellipsize_end(ellipsis)
@@ -461,7 +469,7 @@ impl Draw for LineRect {
 }
 
 #[derive(Default)]
-enum EllipsiationState {
+enum EllipsizationState {
     Continue(Option<WordRect>),
     #[default]
     Complete,
