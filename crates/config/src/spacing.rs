@@ -69,8 +69,8 @@ impl Spacing {
     }
 
     pub fn shrink(&self, width: &mut usize, height: &mut usize) {
-        *width -= self.left as usize + self.right as usize;
-        *height -= self.top as usize + self.bottom as usize;
+        *width = width.saturating_sub(self.left as usize + self.right as usize);
+        *height = height.saturating_sub(self.top as usize + self.bottom as usize);
     }
 }
 
