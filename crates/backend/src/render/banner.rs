@@ -10,7 +10,7 @@ use super::{
     font::FontCollection,
     types::RectSize,
     widget::{
-        self, Alignment, ContainerBuilder, Coverage, Draw, DrawColor, Position, WImage, WText,
+        self, Alignment, Coverage, Draw, DrawColor, FlexContainerBuilder, Position, WImage, WText,
     },
 };
 
@@ -91,13 +91,13 @@ impl BannerRect {
 
         let font_size = config.general().font.size as f32;
 
-        let mut container = ContainerBuilder::default()
+        let mut container = FlexContainerBuilder::default()
             .spacing(padding)
             .direction(widget::Direction::Horizontal)
             .alignment(Alignment::new(Position::Start, Position::Center))
             .elements(vec![
                 WImage::new(&self.data, display).into(),
-                ContainerBuilder::default()
+                FlexContainerBuilder::default()
                     .spacing(Default::default())
                     .direction(widget::Direction::Vertical)
                     .alignment(Alignment::new(Position::Center, Position::Center))

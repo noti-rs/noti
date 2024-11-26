@@ -2,6 +2,7 @@ use derive_builder::Builder;
 
 use config::{spacing::Spacing, text::TextProperty, DisplayConfig, ImageProperty};
 use dbus::notification::Notification;
+use log::warn;
 
 use super::{
     color::Bgra,
@@ -35,9 +36,14 @@ pub(super) trait Draw {
 
 #[derive(Builder)]
 #[builder(pattern = "owned")]
-pub(super) struct Container {
+pub(super) struct FlexContainer {
     #[builder(private, setter(skip))]
     rect_size: Option<RectSize>,
+
+    #[builder(default = "usize::MAX")]
+    max_width: usize,
+    #[builder(default = "usize::MAX")]
+    max_height: usize,
 
     spacing: Spacing,
 
@@ -47,21 +53,41 @@ pub(super) struct Container {
     elements: Vec<Widget>,
 }
 
-impl Container {
+impl FlexContainer {
     pub(super) fn compile(&mut self, mut rect_size: RectSize) -> CompileState {
+        self.max_width = self.max_width.min(rect_size.width);
+        self.max_height = self.max_height.min(rect_size.height);
+        rect_size = RectSize {
+            width: self.max_width,
+            height: self.max_height,
+        };
         self.rect_size = Some(rect_size.clone());
 
         rect_size.shrink_by(&self.spacing);
-        let mut container_axis = ContainerPlane::new(rect_size, &self.direction);
+        let mut container_axes = FlexContainerPlane::new(rect_size, &self.direction);
 
         self.elements.iter_mut().for_each(|element| {
-            element.compile(container_axis.as_rect_size());
+            element.compile(container_axes.as_rect_size());
 
-            container_axis.main_len -= element.len_by_direction(&self.direction);
+            container_axes.main_len = container_axes
+                .main_len
+                .saturating_sub(element.len_by_direction(&self.direction));
         });
         self.elements.retain(|element| !element.is_unknown());
 
-        CompileState::Success
+        if self.elements.is_empty() {
+            CompileState::Failure
+        } else {
+            CompileState::Success
+        }
+    }
+
+    pub(super) fn max_width(&self) -> usize {
+        self.max_width
+    }
+
+    pub(super) fn max_height(&self) -> usize {
+        self.max_height
     }
 
     pub(super) fn width(&self) -> usize {
@@ -82,6 +108,21 @@ impl Container {
         }
     }
 
+    fn max_main_len(&self) -> usize {
+        match &self.direction {
+            Direction::Horizontal => self.max_width(),
+            Direction::Vertical => self.max_height(),
+        }
+    }
+
+    #[allow(unused)]
+    fn max_auxiliary_len(&self) -> usize {
+        match &self.direction {
+            Direction::Horizontal => self.max_height(),
+            Direction::Vertical => self.max_width(),
+        }
+    }
+
     fn main_len(&self) -> usize {
         match &self.direction {
             Direction::Horizontal => self.width(),
@@ -89,7 +130,7 @@ impl Container {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(unused)]
     fn auxiliary_len(&self) -> usize {
         match &self.direction {
             Direction::Horizontal => self.height(),
@@ -112,7 +153,7 @@ impl Container {
     }
 }
 
-impl Draw for Container {
+impl Draw for FlexContainer {
     fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
         &self,
         offset: &Offset,
@@ -123,12 +164,12 @@ impl Draw for Container {
             "The rectangle size must be computed by `compile()` methot of parent container."
         );
 
-        let mut plane = ContainerPlane::new(
+        let mut plane = FlexContainerPlane::new(
             unsafe { self.rect_size.as_ref().cloned().unwrap_unchecked() },
             &self.direction,
         );
 
-        let initial_plane = ContainerPlane::new_only_offset(
+        let initial_plane = FlexContainerPlane::new_only_offset(
             Offset::from(&self.spacing) + offset.clone(),
             &self.direction,
         );
@@ -143,22 +184,20 @@ impl Draw for Container {
         let incrementor = match self.main_axis_alignment() {
             Position::Start | Position::Center | Position::End => 0,
             Position::SpaceBetween => {
-                if self.elements.len() == 1 {
+                if self.elements.len() <= 1 {
                     0
                 } else {
-                    (plane.main_len - self.main_len()) / self.elements.len().saturating_sub(1)
+                    (plane.main_len - self.max_main_len()) / self.elements.len().saturating_sub(1)
                 }
             }
         };
 
         self.elements.iter().for_each(|element| {
-            if !element.is_container() {
-                plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset
-                    + self.auxiliary_axis_alignment().compute_initial_pos(
-                        plane.auxiliary_len,
-                        element.len_by_direction(&self.direction.orthogonalize()),
-                    );
-            }
+            plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset
+                + self.auxiliary_axis_alignment().compute_initial_pos(
+                    plane.auxiliary_len,
+                    element.len_by_direction(&self.direction.orthogonalize()),
+                );
 
             element.draw_with_offset(&plane.as_offset(), output);
 
@@ -217,7 +256,7 @@ impl Direction {
     }
 }
 
-struct ContainerPlane<'a> {
+struct FlexContainerPlane<'a> {
     main_len: usize,
     auxiliary_len: usize,
 
@@ -227,7 +266,7 @@ struct ContainerPlane<'a> {
     direction: &'a Direction,
 }
 
-impl<'a> ContainerPlane<'a> {
+impl<'a> FlexContainerPlane<'a> {
     fn new(
         RectSize {
             mut width,
@@ -305,28 +344,37 @@ impl<'a> ContainerPlane<'a> {
 pub(super) enum Widget {
     Image(WImage),
     Text(WText),
-    Container(Container),
+    FlexContainer(FlexContainer),
     Unknown,
 }
 
 impl Widget {
-    pub(super) fn is_container(&self) -> bool {
-        matches!(self, Widget::Container(_))
-    }
-
     pub(super) fn is_unknown(&self) -> bool {
         matches!(self, Widget::Unknown)
+    }
+
+    fn get_type(&self) -> &'static str {
+        match self {
+            Widget::Image(_) => "image",
+            Widget::Text(_) => "text",
+            Widget::FlexContainer(_) => "flex container",
+            Widget::Unknown => "unknown",
+        }
     }
 
     pub(super) fn compile(&mut self, rect_size: RectSize) {
         let state = match self {
             Widget::Image(image) => image.compile(rect_size),
             Widget::Text(text) => text.compile(rect_size),
-            Widget::Container(container) => container.compile(rect_size),
+            Widget::FlexContainer(container) => container.compile(rect_size),
             Widget::Unknown => CompileState::Success,
         };
 
         if let CompileState::Failure = state {
+            warn!(
+                "A {wtype} widget is not compiled due errors!",
+                wtype = self.get_type()
+            );
             *self = Widget::Unknown;
         }
     }
@@ -342,7 +390,7 @@ impl Widget {
         match self {
             Widget::Image(image) => image.width(),
             Widget::Text(text) => text.width(),
-            Widget::Container(container) => container.width(),
+            Widget::FlexContainer(container) => container.max_width(),
             Widget::Unknown => 0,
         }
     }
@@ -351,7 +399,7 @@ impl Widget {
         match self {
             Widget::Image(image) => image.height(),
             Widget::Text(text) => text.height(),
-            Widget::Container(container) => container.height(),
+            Widget::FlexContainer(container) => container.max_height(),
             Widget::Unknown => 0,
         }
     }
@@ -366,7 +414,7 @@ impl Draw for Widget {
         match self {
             Widget::Image(image) => image.draw_with_offset(offset, output),
             Widget::Text(text) => text.draw_with_offset(offset, output),
-            Widget::Container(container) => container.draw_with_offset(offset, output),
+            Widget::FlexContainer(container) => container.draw_with_offset(offset, output),
             Widget::Unknown => (),
         }
     }
@@ -389,9 +437,9 @@ impl From<WText> for Widget {
     }
 }
 
-impl From<Container> for Widget {
-    fn from(value: Container) -> Self {
-        Widget::Container(value)
+impl From<FlexContainer> for Widget {
+    fn from(value: FlexContainer) -> Self {
+        Widget::FlexContainer(value)
     }
 }
 
@@ -449,14 +497,14 @@ impl WImage {
         let image_width = unsafe { self.data.width().unwrap_unchecked() };
 
         if image_width > rect_size.width {
-            eprintln!("Image width exceeds the possbile width!");
+            warn!("Image width exceeds the possbile width!");
             return CompileState::Failure;
         }
 
         let image_height = unsafe { self.data.height().unwrap_unchecked() };
 
         if image_height > rect_size.height {
-            eprintln!("Image height exceeds the possbile height!");
+            warn!("Image height exceeds the possbile height!");
             return CompileState::Failure;
         }
 
@@ -600,7 +648,11 @@ impl WText {
 
     pub(super) fn compile(&mut self, rect_size: RectSize) -> CompileState {
         self.data.compile(rect_size);
-        CompileState::Success
+        if self.data.is_empty() {
+            CompileState::Failure
+        } else {
+            CompileState::Success
+        }
     }
 
     pub(super) fn width(&self) -> usize {
