@@ -1,35 +1,63 @@
-# Noti
+# :zap: Noti
 
-Noti is a modern, lightweight notification manager designed for the Wayland display server protocol. It aims to provide a seamless and efficient notification experience for Wayland users.
+**Noti** is a lightweight desktop notification daemon for Wayland compositors. It offers a customizable and efficient notification experience, designed for modern Linux desktops.
 
-## Features
+## :star2: Features
 
-- **Wayland Support**: Fully compatible with Wayland, ensuring smooth operation on modern Linux desktops.
-- **Lightweight**: Minimal resource usage for efficient performance.
-- **Customizable**: Easily configurable to fit your notification style preferences
-- **Custom Configurations:** Supports per-application custom configurations with a mergeable settings system.
+- **Native Wayland Support**: Seamlessly integrated with Wayland
+- **Highly Configurable**: Detailed customization options for appearance and behavior
+- **Per-App Styling**: Unique notification styles for different applications
+- **Modern Design**: Clean, minimalist approach to desktop notifications
 
-## Installation
+## :inbox_tray: Installation
 
-Install binary via `cargo install`:
+### 1. Install via Cargo (Recommended)
 
 ```bash
+# Install directly from GitHub
 cargo install --git https://github.com/noti-rs/noti/
+
+# Or clone and install locally
+git clone https://github.com/noti-rs/noti.git
+cd noti
+cargo install --path .
 ```
 
-### Running Noti
-
-After installation, you can start Noti with:
+### 2. Build from Source
 
 ```bash
+# Clone the repository
+git clone https://github.com/noti-rs/noti.git
+cd noti
+
+# Build in release mode
+cargo build --release
+
+# Install the binary
+cargo install --path .
+```
+
+## :rocket: Running Noti
+
+### Manual Startup
+
+```bash
+# Start Noti daemon
 noti run
 ```
 
-To enable Noti to start automatically with your Wayland session, add it to your session startup script.
+### Automatic Startup
 
-## Configuration
+For detailed instructions on setting up automatic startup with `systemd`, please refer to the [Autostart Guide](docs/Autostart.md).
 
-Noti can be configured via a configuration file located at `$XDG_CONFIG_HOME/noti/config.toml` or `~/.config/noti/config.toml`. Below is an example configuration:
+## :hammer_and_wrench: Configuration
+
+Noti uses a TOML configuration file located at:
+
+- `$XDG_CONFIG_HOME/noti/config.toml`
+- `~/.config/noti/config.toml`
+
+**Example configuration**:
 
 ```toml
 [general]
@@ -58,14 +86,11 @@ foreground = "#1E1E2E"
 size = 4
 radius = 10
 color = "#000"
-# also applicable
-# color = "#FF000050"
-# which the last two digits defines opacity aka alpha-channel
 
 [display.image]
 max_size = 64
 margin = { right = 25 }
-# For old computers you can use simplier method of resize
+# For old computers you can use simplier resizing method
 # resizing_method = "nearest"
 
 [display.text]
@@ -91,28 +116,56 @@ justification = "center"
 line_spacing = 5
 ```
 
-## Troubleshooting
+> [!TIP]
+> Check ![ConfigProperties.md](docs/ConfigProperties.md) for comprehensive configuration options!
 
-If you encounter any issues or unexpected behavior with our application, please open a new issue or pull request (PR) if you have a solution to the problem.
+## :bug: Troubleshooting
 
-Before submitting an issue, set the environment variable `NOTI_LOG` to `debug` or `trace` level and run the application while saving the output to a file:
+Having issues?
 
-```bash
-NOTI_LOG=debug noti run >> log.txt
-```
+- Set the `NOTI_LOG` environment variable to `debug` or `trace` for detailed logs:
 
-Include the log file when submitting your issue. This information is very helpful for our developers!
+  ```bash
+  NOTI_LOG=debug noti run >> debug.log
+  ```
 
-## Contributing
+- Open a GitHub issue and attach the log file. This will help us resolve the problem faster.
 
-Contributions are welcome! Please fork the repository and submit a pull request for any changes. For major changes, please open an issue first to discuss what you would like to change
+## :handshake: Contributing
 
-- Fork the repository
-- Create your feature branch: `git checkout -b your-feature`
-- Commit your changes: `git commit -am 'Add some feature'`
-- Push to the branch: `git push origin your-feature`
-- Create a new Pull Request
+Interested in improving **Noti**? Here's how to contribute:
 
-## Contact
+1. Fork the repo and create your branch:
 
-For any inquiries or support, please open an issue on GitHub.
+   ```bash
+   git checkout -b feature/my-improvement
+   ```
+
+2. Make your changes and commit them:
+
+   ```bash
+   git commit -am "feat: describe your changes"
+   ```
+
+3. Push your changes:
+
+   ```bash
+   git push origin feature/my-improvement
+   ```
+
+4. Open a Pull Request
+
+> [!NOTE]
+> For major changes, please open an issue first to discuss the changes you'd like to make.
+
+## 📄 License
+
+**Noti** is licensed under the GNU General Public License v3.0 (GPL-3.0).
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+See the [LICENSE](LICENSE) file for complete details.
+
+## 📬 Contact
+
+Have questions or need support? We're here to help! Open an issue on GitHub and we'll get back to you as soon as possible.
