@@ -6,7 +6,7 @@ edition.workspace = true
 
 [dependencies]
 macros = { path = "../macros" }
-dbus = { path = "../dbus" }
+dbus = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
 

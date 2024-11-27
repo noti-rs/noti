@@ -28,7 +28,8 @@ use super::internal_messages::RendererMessage;
 use config::{self, Config};
 use dbus::notification::{self, Notification};
 
-use super::render::{BannerRect, FontCollection, RectSize};
+use crate::banner::BannerRect;
+use render::{font::FontCollection, types::RectSize};
 
 pub(super) struct Window {
     banners: IndexMap<u32, BannerRect>,

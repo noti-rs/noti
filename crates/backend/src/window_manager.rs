@@ -7,10 +7,8 @@ use super::internal_messages::RendererMessage;
 use config::Config;
 use dbus::notification::Notification;
 
-use super::{
-    render::FontCollection,
-    window::{ConfigurationState, Window},
-};
+use super::window::{ConfigurationState, Window};
+use render::font::FontCollection;
 
 pub(crate) struct WindowManager {
     connection: Connection,

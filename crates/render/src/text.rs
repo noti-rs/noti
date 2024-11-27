@@ -17,7 +17,7 @@ use super::{
 };
 
 #[derive(Default)]
-pub(crate) struct TextRect {
+pub struct TextRect {
     words: VecDeque<WordRect>,
     lines: Vec<LineRect>,
     wrap: bool,
@@ -38,7 +38,7 @@ pub(crate) struct TextRect {
 }
 
 impl TextRect {
-    pub(crate) fn from_str<Style: Into<FontStyle> + Clone>(
+    pub fn from_str<Style: Into<FontStyle> + Clone>(
         string: &str,
         px_size: f32,
         base_style: Style,
@@ -61,7 +61,7 @@ impl TextRect {
         }
     }
 
-    pub(crate) fn from_text<Style: Into<FontStyle>>(
+    pub fn from_text<Style: Into<FontStyle>>(
         text: &Text,
         px_size: f32,
         base_style: Style,
@@ -136,31 +136,31 @@ impl TextRect {
         font_collection.get_spacebar_width(px_size).round() as usize
     }
 
-    pub(crate) fn set_wrap(&mut self, wrap: bool) {
+    pub fn set_wrap(&mut self, wrap: bool) {
         self.wrap = wrap;
     }
 
-    pub(crate) fn set_line_spacing(&mut self, line_spacing: usize) {
+    pub fn set_line_spacing(&mut self, line_spacing: usize) {
         self.line_spacing = line_spacing;
     }
 
-    pub(crate) fn set_margin(&mut self, margin: &Spacing) {
+    pub fn set_margin(&mut self, margin: &Spacing) {
         self.margin = margin.clone();
     }
 
-    pub(crate) fn set_foreground(&mut self, color: Bgra) {
+    pub fn set_foreground(&mut self, color: Bgra) {
         self.foreground = color;
     }
 
-    pub(crate) fn set_ellipsize_at(&mut self, ellipsize_at: &EllipsizeAt) {
+    pub fn set_ellipsize_at(&mut self, ellipsize_at: &EllipsizeAt) {
         self.ellipsize_at = ellipsize_at.clone();
     }
 
-    pub(crate) fn set_justification(&mut self, justification: &TextJustification) {
+    pub fn set_justification(&mut self, justification: &TextJustification) {
         self.justification = justification.to_owned();
     }
 
-    pub(crate) fn compile(&mut self, mut rect_size: RectSize) {
+    pub fn compile(&mut self, mut rect_size: RectSize) {
         self.rect_size.width = rect_size.width;
         rect_size.shrink_by(&self.margin);
 
@@ -252,11 +252,11 @@ impl TextRect {
     }
 
     #[allow(unused)]
-    pub(crate) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.rect_size.width
     }
 
-    pub(crate) fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         let total_lines = self.lines.len();
         total_lines * self.line_height
             + total_lines.saturating_sub(1) * self.line_spacing
@@ -475,7 +475,7 @@ enum EllipsizationState {
     Complete,
 }
 
-pub(crate) struct WordRect {
+pub struct WordRect {
     advance_width: usize,
     glyphs: Vec<Glyph>,
 }

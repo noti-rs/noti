@@ -12,7 +12,7 @@ use super::{
 };
 
 #[derive(Clone)]
-pub(crate) enum Image {
+pub enum Image {
     Exists {
         data: ImageData,
         border: Option<Border>,
@@ -21,7 +21,7 @@ pub(crate) enum Image {
 }
 
 impl Image {
-    pub(crate) fn from_image_data(
+    pub fn from_image_data(
         image_data: Option<&ImageData>,
         image_property: &ImageProperty,
     ) -> Self {
@@ -85,11 +85,11 @@ impl Image {
             .unwrap_or(Image::Unknown)
     }
 
-    pub(crate) fn exists(&self) -> bool {
+    pub fn exists(&self) -> bool {
         matches!(self, Image::Exists { .. })
     }
 
-    pub(crate) fn from_raster_glyph_image(from: RasterGlyphImage, size: u32) -> Option<Self> {
+    pub fn from_raster_glyph_image(from: RasterGlyphImage, size: u32) -> Option<Self> {
         let RasterGlyphImage {
             width,
             height,
@@ -154,7 +154,7 @@ impl Image {
         })
     }
 
-    pub(crate) fn or_svg(self, image_path: Option<&str>, image_property: &ImageProperty) -> Self {
+    pub fn or_svg(self, image_path: Option<&str>, image_property: &ImageProperty) -> Self {
         if self.exists() || image_path.is_none() {
             return self;
         }
@@ -213,14 +213,14 @@ impl Image {
         }
     }
 
-    pub(crate) fn width(&self) -> Option<usize> {
+    pub fn width(&self) -> Option<usize> {
         match self {
             Image::Exists { data, .. } => Some(data.width as usize),
             Image::Unknown => None,
         }
     }
 
-    pub(crate) fn height(&self) -> Option<usize> {
+    pub fn height(&self) -> Option<usize> {
         match self {
             Image::Exists { data, .. } => Some(data.height as usize),
             Image::Unknown => None,

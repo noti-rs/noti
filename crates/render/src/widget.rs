@@ -12,17 +12,17 @@ use super::{
     types::{Offset, RectSize},
 };
 #[derive(Clone)]
-pub(super) struct Coverage(pub(super) f32);
+pub struct Coverage(pub f32);
 
 #[derive(Clone)]
-pub(super) enum DrawColor {
+pub enum DrawColor {
     Replace(Bgra),
     Overlay(Bgra),
     OverlayWithCoverage(Bgra, Coverage),
     Transparent(Coverage),
 }
 
-pub(super) trait Draw {
+pub trait Draw {
     fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
         &self,
         offset: &Offset,
@@ -36,7 +36,7 @@ pub(super) trait Draw {
 
 #[derive(Builder)]
 #[builder(pattern = "owned")]
-pub(super) struct FlexContainer {
+pub struct FlexContainer {
     #[builder(private, setter(skip))]
     rect_size: Option<RectSize>,
 
@@ -54,7 +54,7 @@ pub(super) struct FlexContainer {
 }
 
 impl FlexContainer {
-    pub(super) fn compile(&mut self, mut rect_size: RectSize) -> CompileState {
+    pub fn compile(&mut self, mut rect_size: RectSize) -> CompileState {
         self.max_width = self.max_width.min(rect_size.width);
         self.max_height = self.max_height.min(rect_size.height);
         rect_size = RectSize {
@@ -90,7 +90,7 @@ impl FlexContainer {
         self.max_height
     }
 
-    pub(super) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         let widths = self.elements.iter().map(|element| element.width());
 
         match self.direction {
@@ -99,7 +99,7 @@ impl FlexContainer {
         }
     }
 
-    pub(super) fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         let heights = self.elements.iter().map(|element| element.height());
 
         match self.direction {
@@ -208,13 +208,13 @@ impl Draw for FlexContainer {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(super) struct Alignment {
-    pub(super) horizontal: Position,
-    pub(super) vertical: Position,
+pub struct Alignment {
+    pub horizontal: Position,
+    pub vertical: Position,
 }
 
 impl Alignment {
-    pub(super) fn new(horizontal: Position, vertical: Position) -> Self {
+    pub fn new(horizontal: Position, vertical: Position) -> Self {
         Self {
             horizontal,
             vertical,
@@ -242,7 +242,7 @@ impl Position {
     }
 }
 
-pub(super) enum Direction {
+pub enum Direction {
     Horizontal,
     Vertical,
 }
@@ -341,7 +341,7 @@ impl<'a> FlexContainerPlane<'a> {
     }
 }
 
-pub(super) enum Widget {
+pub enum Widget {
     Image(WImage),
     Text(WText),
     FlexContainer(FlexContainer),
@@ -349,7 +349,7 @@ pub(super) enum Widget {
 }
 
 impl Widget {
-    pub(super) fn is_unknown(&self) -> bool {
+    pub fn is_unknown(&self) -> bool {
         matches!(self, Widget::Unknown)
     }
 
@@ -362,7 +362,7 @@ impl Widget {
         }
     }
 
-    pub(super) fn compile(&mut self, rect_size: RectSize) {
+    pub fn compile(&mut self, rect_size: RectSize) {
         let state = match self {
             Widget::Image(image) => image.compile(rect_size),
             Widget::Text(text) => text.compile(rect_size),
@@ -379,14 +379,14 @@ impl Widget {
         }
     }
 
-    pub(super) fn len_by_direction(&self, direction: &Direction) -> usize {
+    pub fn len_by_direction(&self, direction: &Direction) -> usize {
         match direction {
             Direction::Horizontal => self.width(),
             Direction::Vertical => self.height(),
         }
     }
 
-    pub(super) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         match self {
             Widget::Image(image) => image.width(),
             Widget::Text(text) => text.width(),
@@ -395,7 +395,7 @@ impl Widget {
         }
     }
 
-    pub(super) fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         match self {
             Widget::Image(image) => image.height(),
             Widget::Text(text) => text.height(),
@@ -420,7 +420,7 @@ impl Draw for Widget {
     }
 }
 
-pub(super) enum CompileState {
+pub enum CompileState {
     Success,
     Failure,
 }
@@ -443,7 +443,7 @@ impl From<FlexContainer> for Widget {
     }
 }
 
-pub(super) struct WImage {
+pub struct WImage {
     data: Image,
 
     rect_size: Option<RectSize>,
@@ -451,7 +451,7 @@ pub(super) struct WImage {
 }
 
 impl WImage {
-    pub(super) fn new(notification: &Notification, display_config: &DisplayConfig) -> Self {
+    pub fn new(notification: &Notification, display_config: &DisplayConfig) -> Self {
         let property = display_config.image.clone();
         let image = Image::from_image_data(notification.hints.image_data.as_ref(), &property)
             .or_svg(
@@ -470,7 +470,7 @@ impl WImage {
         }
     }
 
-    pub(super) fn compile(&mut self, rect_size: RectSize) -> CompileState {
+    pub fn compile(&mut self, rect_size: RectSize) -> CompileState {
         fn reduce_spacing(first: &mut u8, second: &mut u8, diff: u8) {
             let mut swapped = false;
             if first > second {
@@ -540,12 +540,12 @@ impl WImage {
         CompileState::Success
     }
 
-    pub(super) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         assert!(self.rect_size.is_some());
         unsafe { self.rect_size.as_ref().unwrap_unchecked() }.width
     }
 
-    pub(super) fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         assert!(self.rect_size.is_some());
         unsafe { self.rect_size.as_ref().unwrap_unchecked() }.height
     }
@@ -562,14 +562,14 @@ impl Draw for WImage {
     }
 }
 
-pub(super) struct WText {
+pub struct WText {
     data: TextRect,
     #[allow(dead_code)]
     property: TextProperty,
 }
 
 impl WText {
-    pub(super) fn new_title(
+    pub fn new_title(
         notification: &Notification,
         font_collection: &FontCollection,
         font_size: f32,
@@ -597,7 +597,7 @@ impl WText {
         }
     }
 
-    pub(super) fn new_body(
+    pub fn new_body(
         notification: &Notification,
         font_collection: &FontCollection,
         font_size: f32,
@@ -646,7 +646,7 @@ impl WText {
         element.set_foreground(foreground);
     }
 
-    pub(super) fn compile(&mut self, rect_size: RectSize) -> CompileState {
+    pub fn compile(&mut self, rect_size: RectSize) -> CompileState {
         self.data.compile(rect_size);
         if self.data.is_empty() {
             CompileState::Failure
@@ -655,11 +655,11 @@ impl WText {
         }
     }
 
-    pub(super) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.data.width()
     }
 
-    pub(super) fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         self.data.height()
     }
 }

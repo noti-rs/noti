@@ -11,7 +11,7 @@ type Matrix<T> = Vec<Vec<T>>;
 type MaybeColor = Option<DrawColor>;
 
 #[derive(Default, Builder, Clone)]
-pub(crate) struct Border {
+pub struct Border {
     color: Bgra,
     frame_width: usize,
     frame_height: usize,
@@ -26,7 +26,7 @@ pub(crate) struct Border {
 }
 
 impl BorderBuilder {
-    pub(super) fn compile(&self) -> anyhow::Result<Border> {
+    pub fn compile(&self) -> anyhow::Result<Border> {
         let mut border = self.build()?;
         border.compile();
         Ok(border)
@@ -41,7 +41,7 @@ enum Corner {
 }
 
 impl Border {
-    pub(super) fn compile(&mut self) {
+    pub fn compile(&mut self) {
         self.corner_coverage = Some(match (self.size, self.radius) {
             (0, 0) => return,
             (size, 0) => self.get_bordered_coverage(size),
@@ -50,7 +50,7 @@ impl Border {
         });
     }
 
-    pub(super) fn get_color_at(&self, x: usize, y: usize) -> MaybeColor {
+    pub fn get_color_at(&self, x: usize, y: usize) -> MaybeColor {
         assert!(x <= self.frame_width && y <= self.frame_height);
 
         let corner = self.corner_coverage.as_ref()?;

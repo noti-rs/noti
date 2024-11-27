@@ -1,0 +1,20 @@
+[package]
+name = "render"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+log = { workspace = true }
+config = { workspace = true }
+anyhow = { workspace = true }
+dbus = { workspace = true }
+
+derive_builder = "0.20.0"
+derive_more = { version = "1.0.0", features = ["display"] }
+ab_glyph = "0.2.28"
+owned_ttf_parser = "0.24.0"
+rayon = "1.10.0"
+resvg = "0.43.0"
+image = "0.25.2"
+itertools = "0.13.0"

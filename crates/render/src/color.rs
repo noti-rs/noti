@@ -5,15 +5,15 @@ use config::colors::Color;
 use super::widget::Coverage;
 
 #[derive(Clone, Default)]
-pub(crate) struct Bgra {
-    pub(crate) blue: f32,
-    pub(crate) green: f32,
-    pub(crate) red: f32,
-    pub(crate) alpha: f32,
+pub struct Bgra {
+    pub blue: f32,
+    pub green: f32,
+    pub red: f32,
+    pub alpha: f32,
 }
 
 impl Bgra {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             blue: 0.0,
             green: 0.0,
@@ -23,7 +23,7 @@ impl Bgra {
     }
 
     #[allow(unused)]
-    pub(crate) fn new_black() -> Self {
+    pub fn new_black() -> Self {
         Self {
             blue: 0.0,
             green: 0.0,
@@ -33,7 +33,7 @@ impl Bgra {
     }
 
     #[allow(unused)]
-    pub(crate) fn new_white() -> Self {
+    pub fn new_white() -> Self {
         Self {
             blue: 1.0,
             green: 1.0,
@@ -42,11 +42,11 @@ impl Bgra {
         }
     }
 
-    pub(crate) fn into_rgba(self) -> Rgba {
+    pub fn into_rgba(self) -> Rgba {
         self.into()
     }
 
-    pub(crate) fn into_slice(self) -> [u8; 4] {
+    pub fn into_slice(self) -> [u8; 4] {
         [
             (self.blue * 255.0).round() as u8,
             (self.green * 255.0).round() as u8,
@@ -154,15 +154,15 @@ impl MulAssign<Coverage> for Bgra {
     }
 }
 
-pub(crate) struct Rgba {
-    pub(crate) red: f32,
-    pub(crate) green: f32,
-    pub(crate) blue: f32,
-    pub(crate) alpha: f32,
+pub struct Rgba {
+    pub red: f32,
+    pub green: f32,
+    pub blue: f32,
+    pub alpha: f32,
 }
 
 impl Rgba {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             red: 0.0,
             green: 0.0,
@@ -172,7 +172,7 @@ impl Rgba {
     }
 
     #[allow(unused)]
-    pub(crate) fn new_white() -> Self {
+    pub fn new_white() -> Self {
         Self {
             red: 1.0,
             green: 1.0,
@@ -181,11 +181,11 @@ impl Rgba {
         }
     }
 
-    pub(crate) fn into_bgra(self) -> Bgra {
+    pub fn into_bgra(self) -> Bgra {
         self.into()
     }
 
-    pub(crate) fn into_slice(self) -> [u8; 4] {
+    pub fn into_slice(self) -> [u8; 4] {
         [
             (self.red * 255.0).round() as u8,
             (self.green * 255.0).round() as u8,
@@ -282,7 +282,7 @@ macro_rules! overlay_on {
     ($($type:path),+) => {
         $(impl $type {
             #[allow(unused)]
-            pub(crate) fn linearly_interpolate(&self, dst: &Bgra, alpha: f32) -> Bgra {
+            pub fn linearly_interpolate(&self, dst: &Bgra, alpha: f32) -> Bgra {
                 Bgra {
                     blue: self.blue * alpha + dst.blue * (1.0 - alpha),
                     green: self.green * alpha + dst.green * (1.0 - alpha),
@@ -292,7 +292,7 @@ macro_rules! overlay_on {
             }
 
             #[allow(unused)]
-            pub(crate) fn overlay_on(self, background: &Self) -> Self {
+            pub fn overlay_on(self, background: &Self) -> Self {
                 let mut new_color = Self::new();
                 new_color.alpha = 1.0 - (1.0 - self.alpha) * (1.0 - background.alpha);
                 if new_color.alpha < f32::EPSILON {

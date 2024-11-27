@@ -315,19 +315,12 @@ dependencies = [
 name = "backend"
 version = "0.1.0"
 dependencies = [
- "ab_glyph",
  "anyhow",
  "config",
  "dbus",
- "derive_builder",
- "derive_more",
- "image",
  "indexmap",
- "itertools 0.13.0",
  "log",
- "owned_ttf_parser",
- "rayon",
- "resvg",
+ "render",
  "tempfile",
  "tokio",
  "wayland-client",
@@ -1799,6 +1792,24 @@ name = "regex-syntax"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
+
+[[package]]
+name = "render"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "anyhow",
+ "config",
+ "dbus",
+ "derive_builder",
+ "derive_more",
+ "image",
+ "itertools 0.13.0",
+ "log",
+ "owned_ttf_parser",
+ "rayon",
+ "resvg",
+]
 
 [[package]]
 name = "resvg"

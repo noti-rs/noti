@@ -7,6 +7,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 mod internal_messages;
 mod render;
+mod banner;
 mod window;
 mod window_manager;
 

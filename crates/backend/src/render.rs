@@ -6,17 +6,7 @@ use super::internal_messages::{
 use config::{watcher::ConfigState, Config};
 use log::{debug, info};
 
-pub(super) use self::{banner::BannerRect, font::FontCollection, types::RectSize};
 use super::window_manager::WindowManager;
-
-mod banner;
-mod border;
-mod color;
-mod font;
-mod image;
-mod text;
-mod types;
-mod widget;
 
 pub(crate) struct Renderer {
     config: Config,

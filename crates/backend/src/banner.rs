@@ -4,7 +4,7 @@ use config::{spacing::Spacing, Config, DisplayConfig};
 use dbus::notification::Notification;
 use log::{debug, trace};
 
-use super::{
+use render::{
     border::BorderBuilder,
     color::Bgra,
     font::FontCollection,
