@@ -8,7 +8,7 @@ use syn::{
     spanned::Spanned, Token,
 };
 
-use crate::propagate_err;
+use crate::{general::{field_name, DefaultAssignment}, propagate_err};
 
 pub(super) fn make_derive(item: TokenStream) -> TokenStream {
     let mut cfg_struct = parse_macro_input!(item as ConfigStructure);
@@ -26,7 +26,6 @@ pub(super) fn make_derive(item: TokenStream) -> TokenStream {
 
     tokens.into()
 }
-
 
 #[derive(Clone)]
 struct ConfigStructure {
@@ -478,24 +477,6 @@ impl Parse for FieldAttrInfo {
     }
 }
 
-enum DefaultAssignment {
-    DefaultCall,
-    Expression(syn::Expr),
-    FunctionCall(syn::Path),
-}
-
-impl Parse for DefaultAssignment {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        Ok(if input.peek(Ident::peek_any) && input.peek2(Token![=]) {
-            let _ = input.parse::<syn::Ident>()?;
-            let _ = input.parse::<Token![=]>()?;
-            DefaultAssignment::FunctionCall(input.parse()?)
-        } else {
-            DefaultAssignment::Expression(input.parse()?)
-        })
-    }
-}
-
 struct InheritsField(syn::Ident);
 
 impl Parse for InheritsField {
@@ -513,12 +494,4 @@ impl Parse for InheritsField {
 
         Ok(Self(input.parse()?))
     }
-}
-
-fn field_name(field: &syn::Field) -> String {
-    field
-        .ident
-        .as_ref()
-        .expect("Must be a named field")
-        .to_string()
 }
