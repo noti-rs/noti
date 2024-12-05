@@ -68,6 +68,14 @@ impl Spacing {
         self.left = left;
     }
 
+    pub fn horizontal(&self) -> u16 {
+        self.left as u16 + self.right as u16
+    }
+
+    pub fn vertical(&self) -> u16 {
+        self.top as u16 + self.bottom as u16
+    }
+
     pub fn shrink(&self, width: &mut usize, height: &mut usize) {
         *width = width.saturating_sub(self.left as usize + self.right as usize);
         *height = height.saturating_sub(self.top as usize + self.bottom as usize);

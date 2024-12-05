@@ -1,7 +1,7 @@
 use derive_builder::Builder;
 
 use config::{spacing::Spacing, text::TextProperty, DisplayConfig, ImageProperty};
-use dbus::notification::Notification;
+use dbus::{notification::Notification, text::Text};
 use log::warn;
 
 use super::{
@@ -34,6 +34,115 @@ pub trait Draw {
     }
 }
 
+pub enum Widget {
+    Image(WImage),
+    Text(WText),
+    FlexContainer(FlexContainer),
+    Unknown,
+}
+
+impl Widget {
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, Widget::Unknown)
+    }
+
+    fn get_type(&self) -> &'static str {
+        match self {
+            Widget::Image(_) => "image",
+            Widget::Text(_) => "text",
+            Widget::FlexContainer(_) => "flex container",
+            Widget::Unknown => "unknown",
+        }
+    }
+
+    pub fn compile(&mut self, rect_size: RectSize, configuration: &WidgetConfiguration) {
+        let state = match self {
+            Widget::Image(image) => image.compile(rect_size, configuration),
+            Widget::Text(text) => text.compile(rect_size, configuration),
+            Widget::FlexContainer(container) => container.compile(rect_size, configuration),
+            Widget::Unknown => CompileState::Success,
+        };
+
+        if let CompileState::Failure = state {
+            warn!(
+                "A {wtype} widget is not compiled due errors!",
+                wtype = self.get_type()
+            );
+            *self = Widget::Unknown;
+        }
+    }
+
+    pub fn len_by_direction(&self, direction: &Direction) -> usize {
+        match direction {
+            Direction::Horizontal => self.width(),
+            Direction::Vertical => self.height(),
+        }
+    }
+
+    pub fn width(&self) -> usize {
+        match self {
+            Widget::Image(image) => image.width(),
+            Widget::Text(text) => text.width(),
+            Widget::FlexContainer(container) => container.max_width(),
+            Widget::Unknown => 0,
+        }
+    }
+
+    pub fn height(&self) -> usize {
+        match self {
+            Widget::Image(image) => image.height(),
+            Widget::Text(text) => text.height(),
+            Widget::FlexContainer(container) => container.max_height(),
+            Widget::Unknown => 0,
+        }
+    }
+}
+
+impl Draw for Widget {
+    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
+        &self,
+        offset: &Offset,
+        output: &mut Output,
+    ) {
+        match self {
+            Widget::Image(image) => image.draw_with_offset(offset, output),
+            Widget::Text(text) => text.draw_with_offset(offset, output),
+            Widget::FlexContainer(container) => container.draw_with_offset(offset, output),
+            Widget::Unknown => (),
+        }
+    }
+}
+
+pub enum CompileState {
+    Success,
+    Failure,
+}
+
+pub struct WidgetConfiguration<'a> {
+    pub notification: &'a Notification,
+    pub font_collection: &'a FontCollection,
+    pub font_size: f32,
+    pub display_config: &'a DisplayConfig,
+}
+
+impl From<WImage> for Widget {
+    fn from(value: WImage) -> Self {
+        Widget::Image(value)
+    }
+}
+
+impl From<WText> for Widget {
+    fn from(value: WText) -> Self {
+        Widget::Text(value)
+    }
+}
+
+impl From<FlexContainer> for Widget {
+    fn from(value: FlexContainer) -> Self {
+        Widget::FlexContainer(value)
+    }
+}
+
 #[derive(Builder)]
 #[builder(pattern = "owned")]
 pub struct FlexContainer {
@@ -54,7 +163,11 @@ pub struct FlexContainer {
 }
 
 impl FlexContainer {
-    pub fn compile(&mut self, mut rect_size: RectSize) -> CompileState {
+    pub fn compile(
+        &mut self,
+        mut rect_size: RectSize,
+        configuration: &WidgetConfiguration,
+    ) -> CompileState {
         self.max_width = self.max_width.min(rect_size.width);
         self.max_height = self.max_height.min(rect_size.height);
         rect_size = RectSize {
@@ -67,7 +180,7 @@ impl FlexContainer {
         let mut container_axes = FlexContainerPlane::new(rect_size, &self.direction);
 
         self.elements.iter_mut().for_each(|element| {
-            element.compile(container_axes.as_rect_size());
+            element.compile(container_axes.as_rect_size(), configuration);
 
             container_axes.main_len = container_axes
                 .main_len
@@ -341,213 +454,78 @@ impl<'a> FlexContainerPlane<'a> {
     }
 }
 
-pub enum Widget {
-    Image(WImage),
-    Text(WText),
-    FlexContainer(FlexContainer),
-    Unknown,
-}
-
-impl Widget {
-    pub fn is_unknown(&self) -> bool {
-        matches!(self, Widget::Unknown)
-    }
-
-    fn get_type(&self) -> &'static str {
-        match self {
-            Widget::Image(_) => "image",
-            Widget::Text(_) => "text",
-            Widget::FlexContainer(_) => "flex container",
-            Widget::Unknown => "unknown",
-        }
-    }
-
-    pub fn compile(&mut self, rect_size: RectSize) {
-        let state = match self {
-            Widget::Image(image) => image.compile(rect_size),
-            Widget::Text(text) => text.compile(rect_size),
-            Widget::FlexContainer(container) => container.compile(rect_size),
-            Widget::Unknown => CompileState::Success,
-        };
-
-        if let CompileState::Failure = state {
-            warn!(
-                "A {wtype} widget is not compiled due errors!",
-                wtype = self.get_type()
-            );
-            *self = Widget::Unknown;
-        }
-    }
-
-    pub fn len_by_direction(&self, direction: &Direction) -> usize {
-        match direction {
-            Direction::Horizontal => self.width(),
-            Direction::Vertical => self.height(),
-        }
-    }
-
-    pub fn width(&self) -> usize {
-        match self {
-            Widget::Image(image) => image.width(),
-            Widget::Text(text) => text.width(),
-            Widget::FlexContainer(container) => container.max_width(),
-            Widget::Unknown => 0,
-        }
-    }
-
-    pub fn height(&self) -> usize {
-        match self {
-            Widget::Image(image) => image.height(),
-            Widget::Text(text) => text.height(),
-            Widget::FlexContainer(container) => container.max_height(),
-            Widget::Unknown => 0,
-        }
-    }
-}
-
-impl Draw for Widget {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
-        match self {
-            Widget::Image(image) => image.draw_with_offset(offset, output),
-            Widget::Text(text) => text.draw_with_offset(offset, output),
-            Widget::FlexContainer(container) => container.draw_with_offset(offset, output),
-            Widget::Unknown => (),
-        }
-    }
-}
-
-pub enum CompileState {
-    Success,
-    Failure,
-}
-
-impl From<WImage> for Widget {
-    fn from(value: WImage) -> Self {
-        Widget::Image(value)
-    }
-}
-
-impl From<WText> for Widget {
-    fn from(value: WText) -> Self {
-        Widget::Text(value)
-    }
-}
-
-impl From<FlexContainer> for Widget {
-    fn from(value: FlexContainer) -> Self {
-        Widget::FlexContainer(value)
-    }
-}
-
 pub struct WImage {
-    data: Image,
+    content: Image,
 
-    rect_size: Option<RectSize>,
-    property: ImageProperty,
+    width: usize,
+    height: usize,
+
+    // TODO: make decision about deletion this line
+    property: Option<ImageProperty>,
 }
 
 impl WImage {
-    pub fn new(notification: &Notification, display_config: &DisplayConfig) -> Self {
+    pub fn new() -> Self {
+        Self {
+            content: Image::Unknown,
+            width: 0,
+            height: 0,
+            property: None,
+        }
+    }
+
+    pub fn compile(
+        &mut self,
+        rect_size: RectSize,
+        WidgetConfiguration {
+            notification,
+            display_config,
+            ..
+        }: &WidgetConfiguration,
+    ) -> CompileState {
         let property = display_config.image.clone();
-        let image = Image::from_image_data(notification.hints.image_data.as_ref(), &property)
-            .or_svg(
+        self.content = notification
+            .hints
+            .image_data
+            .as_ref()
+            .cloned()
+            .map(|image_data| Image::from_image_data(image_data, &property, &rect_size))
+            .or_else(|| {
                 notification
                     .hints
                     .image_path
                     .as_deref()
-                    .or(Some(notification.app_icon.as_str())),
-                &property,
-            );
+                    .or(Some(notification.app_icon.as_str()))
+                    .map(|svg_path| Image::from_svg(svg_path, &property, &rect_size))
+            })
+            .unwrap_or(Image::Unknown);
 
-        Self {
-            data: image,
-            rect_size: None,
-            property,
+        self.width = self
+            .content
+            .width()
+            .map(|width| width + property.margin.horizontal() as usize)
+            .unwrap_or(0);
+        self.height = self
+            .content
+            .height()
+            .map(|height| height + property.margin.vertical() as usize)
+            .unwrap_or(0);
+
+        self.property = Some(property);
+
+        if self.content.is_exists() {
+            CompileState::Success
+        } else {
+            CompileState::Failure
         }
-    }
-
-    pub fn compile(&mut self, rect_size: RectSize) -> CompileState {
-        fn reduce_spacing(first: &mut u8, second: &mut u8, diff: u8) {
-            let mut swapped = false;
-            if first > second {
-                std::mem::swap(first, second);
-                swapped = true;
-            }
-
-            if diff > *first {
-                *second -= diff - *first;
-            }
-
-            *first = first.saturating_sub(diff);
-            *second = second.saturating_sub(diff);
-
-            if swapped {
-                std::mem::swap(first, second);
-            }
-        }
-
-        if !self.data.exists() {
-            return CompileState::Failure;
-        }
-
-        let image_width = unsafe { self.data.width().unwrap_unchecked() };
-
-        if image_width > rect_size.width {
-            warn!("Image width exceeds the possbile width!");
-            return CompileState::Failure;
-        }
-
-        let image_height = unsafe { self.data.height().unwrap_unchecked() };
-
-        if image_height > rect_size.height {
-            warn!("Image height exceeds the possbile height!");
-            return CompileState::Failure;
-        }
-
-        let margin = &mut self.property.margin;
-        let horizontal_margin = (margin.left() + margin.right()) as usize;
-
-        if image_width + horizontal_margin > rect_size.width {
-            let diff = (image_width + horizontal_margin - rect_size.width) as u8 / 2;
-
-            let (mut left, mut right) = (margin.left(), margin.right());
-            reduce_spacing(&mut left, &mut right, diff);
-
-            margin.set_left(left);
-            margin.set_right(right);
-        }
-
-        let vertical_margin = (margin.top() + margin.bottom()) as usize;
-        if image_height + vertical_margin > rect_size.height {
-            let diff = (image_height + vertical_margin - rect_size.height) as u8 / 2;
-
-            let (mut top, mut bottom) = (margin.top(), margin.bottom());
-            reduce_spacing(&mut top, &mut bottom, diff);
-
-            margin.set_top(top);
-            margin.set_bottom(bottom);
-        }
-
-        self.rect_size = Some(RectSize::new(
-            image_width + margin.left() as usize + margin.right() as usize,
-            image_height + margin.top() as usize + margin.bottom() as usize,
-        ));
-
-        CompileState::Success
     }
 
     pub fn width(&self) -> usize {
-        assert!(self.rect_size.is_some());
-        unsafe { self.rect_size.as_ref().unwrap_unchecked() }.width
+        self.width
     }
 
     pub fn height(&self) -> usize {
-        assert!(self.rect_size.is_some());
-        unsafe { self.rect_size.as_ref().unwrap_unchecked() }.height
+        self.height
     }
 }
 
@@ -557,80 +535,89 @@ impl Draw for WImage {
         offset: &Offset,
         output: &mut Output,
     ) {
-        let offset = Offset::from(&self.property.margin) + offset.clone();
-        self.data.draw_with_offset(&offset, output);
+        if !self.content.is_exists() {
+            return;
+        }
+
+        // INFO: The ImageProperty initializes with Image so we can calmly unwrap
+        let offset = Offset::from(&self.property.as_ref().unwrap().margin) + offset.clone();
+        self.content.draw_with_offset(&offset, output);
     }
 }
 
 pub struct WText {
-    data: TextRect,
+    kind: WTextKind,
+    content: Option<TextRect>,
+
+    //TODO: make decision about deletion this field
     #[allow(dead_code)]
-    property: TextProperty,
+    property: Option<TextProperty>,
+}
+
+pub enum WTextKind {
+    Title,
+    Body,
 }
 
 impl WText {
-    pub fn new_title(
-        notification: &Notification,
-        font_collection: &FontCollection,
-        font_size: f32,
-        display_config: &DisplayConfig,
-    ) -> Self {
-        let colors = display_config
-            .colors
-            .by_urgency(&notification.hints.urgency);
-        let foreground = Bgra::from(&colors.foreground);
-
-        let title_cfg = display_config.title.clone();
-        let mut summary = TextRect::from_str(
-            &notification.summary,
-            font_size,
-            &title_cfg.style,
-            font_collection,
-        );
-
-        Self::apply_properties(&mut summary, &title_cfg);
-        Self::apply_color(&mut summary, foreground);
-
+    pub fn new(kind: WTextKind) -> Self {
         Self {
-            data: summary,
-            property: title_cfg,
+            kind,
+            content: None,
+            property: None,
         }
     }
 
-    pub fn new_body(
-        notification: &Notification,
-        font_collection: &FontCollection,
-        font_size: f32,
-        display_config: &DisplayConfig,
-    ) -> Self {
+    pub fn compile(
+        &mut self,
+        rect_size: RectSize,
+        WidgetConfiguration {
+            display_config,
+            notification,
+            font_size,
+            font_collection,
+        }: &WidgetConfiguration,
+    ) -> CompileState {
         let colors = display_config
             .colors
             .by_urgency(&notification.hints.urgency);
         let foreground = Bgra::from(&colors.foreground);
 
-        let body_cfg = display_config.body.clone();
-        let mut body = if display_config.markup {
-            TextRect::from_text(
-                &notification.body,
-                font_size,
-                &body_cfg.style,
-                font_collection,
-            )
-        } else {
-            TextRect::from_str(
-                &notification.body.body,
-                font_size,
-                &body_cfg.style,
-                font_collection,
-            )
+        let (text_cfg, notification_content): (TextProperty, NotificationContent) = match self.kind
+        {
+            WTextKind::Title => (
+                display_config.title.clone(),
+                notification.summary.as_str().into(),
+            ),
+            WTextKind::Body => (
+                display_config.body.clone(),
+                if display_config.markup {
+                    (&notification.body).into()
+                } else {
+                    notification.body.body.as_str().into()
+                },
+            ),
         };
 
-        Self::apply_properties(&mut body, &body_cfg);
-        Self::apply_color(&mut body, foreground);
+        let mut content = match notification_content {
+            NotificationContent::Text(text) => {
+                TextRect::from_text(text, *font_size, &text_cfg.style, font_collection)
+            }
+            NotificationContent::String(str) => {
+                TextRect::from_str(str, *font_size, &text_cfg.style, font_collection)
+            }
+        };
 
-        Self {
-            data: body,
-            property: body_cfg,
+        Self::apply_properties(&mut content, &text_cfg);
+        Self::apply_color(&mut content, foreground);
+
+        content.compile(rect_size);
+        if content.is_empty() {
+            CompileState::Failure
+        } else {
+            self.content = Some(content);
+            self.property = Some(text_cfg);
+            CompileState::Success
         }
     }
 
@@ -646,21 +633,18 @@ impl WText {
         element.set_foreground(foreground);
     }
 
-    pub fn compile(&mut self, rect_size: RectSize) -> CompileState {
-        self.data.compile(rect_size);
-        if self.data.is_empty() {
-            CompileState::Failure
-        } else {
-            CompileState::Success
-        }
-    }
-
     pub fn width(&self) -> usize {
-        self.data.width()
+        self.content
+            .as_ref()
+            .map(|content| content.width())
+            .unwrap_or(0)
     }
 
     pub fn height(&self) -> usize {
-        self.data.height()
+        self.content
+            .as_ref()
+            .map(|content| content.height())
+            .unwrap_or(0)
     }
 }
 
@@ -670,6 +654,25 @@ impl Draw for WText {
         offset: &Offset,
         output: &mut Output,
     ) {
-        self.data.draw_with_offset(offset, output)
+        if let Some(content) = self.content.as_ref() {
+            content.draw_with_offset(offset, output)
+        }
+    }
+}
+
+enum NotificationContent<'a> {
+    String(&'a str),
+    Text(&'a Text),
+}
+
+impl<'a> From<&'a str> for NotificationContent<'a> {
+    fn from(value: &'a str) -> Self {
+        NotificationContent::String(value)
+    }
+}
+
+impl<'a> From<&'a Text> for NotificationContent<'a> {
+    fn from(value: &'a Text) -> Self {
+        NotificationContent::Text(value)
     }
 }

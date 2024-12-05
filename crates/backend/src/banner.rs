@@ -11,6 +11,7 @@ use render::{
     types::RectSize,
     widget::{
         self, Alignment, Coverage, Draw, DrawColor, FlexContainerBuilder, Position, WImage, WText,
+        WTextKind, WidgetConfiguration,
     },
 };
 
@@ -96,14 +97,14 @@ impl BannerRect {
             .direction(widget::Direction::Horizontal)
             .alignment(Alignment::new(Position::Start, Position::Center))
             .elements(vec![
-                WImage::new(&self.data, display).into(),
+                WImage::new().into(),
                 FlexContainerBuilder::default()
                     .spacing(Default::default())
                     .direction(widget::Direction::Vertical)
                     .alignment(Alignment::new(Position::Center, Position::Center))
                     .elements(vec![
-                        WText::new_title(&self.data, font_collection, font_size, display).into(),
-                        WText::new_body(&self.data, font_collection, font_size, display).into(),
+                        WText::new(WTextKind::Title).into(),
+                        WText::new(WTextKind::Body).into(),
                     ])
                     .build()
                     .unwrap()
@@ -112,7 +113,15 @@ impl BannerRect {
             .build()
             .unwrap();
 
-        container.compile(rect_size);
+        container.compile(
+            rect_size,
+            &WidgetConfiguration {
+                display_config: display,
+                notification: &self.data,
+                font_collection,
+                font_size,
+            },
+        );
         container.draw(&mut |x, y, color| {
             self.put_color_at(x, y, Self::convert_color(color, self.get_color_at(x, y)))
         });

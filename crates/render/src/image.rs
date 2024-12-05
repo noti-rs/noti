@@ -1,8 +1,10 @@
-use log::debug;
+use log::{debug, warn};
 use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 
 use config::{ImageProperty, ResizingMethod};
 use dbus::image::ImageData;
+
+use crate::types::RectSize;
 
 use super::{
     border::{Border, BorderBuilder},
@@ -22,82 +24,75 @@ pub enum Image {
 
 impl Image {
     pub fn from_image_data(
-        image_data: Option<&ImageData>,
+        image_data: ImageData,
         image_property: &ImageProperty,
+        max_size: &RectSize,
     ) -> Self {
-        image_data
-            .map(|image_data| {
-                let mut width = image_data.width;
-                let mut height = image_data.height;
-                let has_alpha = image_data.has_alpha;
+        let origin_width = image_data.width as u32;
+        let origin_height = image_data.height as u32;
 
-                let image = if has_alpha {
-                    let Some(rgba_image) = image::RgbaImage::from_vec(
-                        width as u32,
-                        height as u32,
-                        image_data.data.clone(),
-                    ) else {
-                        return Image::Unknown;
-                    };
+        let Some((width, height)) = Self::try_fit_into_restricted_space(
+            image_data.width,
+            image_data.height,
+            image_property,
+            max_size,
+        ) else {
+            warn!("The margins for image is very large! The image will not rendered!");
+            return Image::Unknown;
+        };
 
-                    image::DynamicImage::from(rgba_image)
-                } else {
-                    let Some(rgb_image) = image::RgbImage::from_vec(
-                        width as u32,
-                        height as u32,
-                        image_data.data.clone(),
-                    ) else {
-                        return Image::Unknown;
-                    };
+        let resized_image = if image_data.has_alpha {
+            image::RgbaImage::from_vec(origin_width, origin_height, image_data.data)
+                .map(image::DynamicImage::from)
+        } else {
+            image::RgbImage::from_vec(origin_width, origin_height, image_data.data)
+                .map(image::DynamicImage::from)
+        }
+        .map(|image| {
+            image::imageops::resize(
+                &image,
+                width as u32,
+                height as u32,
+                image_property.resizing_method.to_filter_type(),
+            )
+            .to_vec()
+        });
 
-                    image::DynamicImage::from(rgb_image)
-                };
+        let Some(resized_image) = resized_image else {
+            warn!("Image doesn't fits into its size");
+            return Image::Unknown;
+        };
 
-                Self::resize(&mut width, &mut height, image_property.max_size);
-                let rowstride = width * 4;
+        debug!("Image: Created from 'image_data'");
 
-                let image = image::imageops::resize(
-                    &image,
-                    width as u32,
-                    height as u32,
-                    image_property.resizing_method.to_filter_type(),
-                );
-
-                debug!("Image: Created from 'image_data'");
-
-                Image::Exists {
-                    data: ImageData {
-                        width,
-                        height,
-                        rowstride,
-                        has_alpha: true,
-                        bits_per_sample: image_data.bits_per_sample,
-                        channels: 4,
-                        data: image.to_vec(),
-                    },
-                    border: Some(Self::border_with_rounding(
-                        width,
-                        height,
-                        image_property.rounding,
-                    )),
-                }
-            })
-            .unwrap_or(Image::Unknown)
+        Image::Exists {
+            data: ImageData {
+                width,
+                height,
+                rowstride: width * 4,
+                has_alpha: true,
+                bits_per_sample: image_data.bits_per_sample,
+                channels: 4,
+                data: resized_image,
+            },
+            border: Some(Self::border_with_rounding(
+                width,
+                height,
+                image_property.rounding,
+            )),
+        }
     }
 
-    pub fn exists(&self) -> bool {
-        matches!(self, Image::Exists { .. })
-    }
-
-    pub fn from_raster_glyph_image(from: RasterGlyphImage, size: u32) -> Option<Self> {
-        let RasterGlyphImage {
+    pub fn from_raster_glyph_image(
+        RasterGlyphImage {
             width,
             height,
             format,
             data,
             ..
-        } = from;
-
+        }: RasterGlyphImage,
+        size: u32,
+    ) -> Option<Self> {
         let rgba_image = match format {
             RasterImageFormat::PNG => {
                 image::load_from_memory_with_format(data, image::ImageFormat::Png)
@@ -120,31 +115,32 @@ impl Image {
                 height as u32,
                 data.chunks_exact(4)
                     .flat_map(|chunk| {
-                        Bgra::from(TryInto::<&[u8; 4]>::try_into(chunk).expect("Current chunk is not correct. Please contact to developer with this information."))
-                            .into_rgba()
-                            .into_slice()
+                        Bgra::from(
+                            TryInto::<&[u8; 4]>::try_into(chunk)
+                                .expect("The image should have 4 channels"),
+                        )
+                        .into_rgba()
+                        .into_slice()
                     })
                     .collect::<Vec<u8>>(),
-            )
-            .expect("Can't parse image data of emoji. Please contact to developer with this information."),
+            )?,
         };
 
-        let factor = size as f32 / width as f32;
-        let new_width = size;
-        let new_height = (factor * height as f32).round() as u32;
+        let (mut width, mut height) = (width as i32, height as i32);
+        Self::limit_size(&mut width, &mut height, size as u16);
 
         let rgba_image = image::imageops::resize(
             &rgba_image,
-            new_width,
-            new_width,
+            width as u32,
+            width as u32,
             image::imageops::FilterType::Gaussian,
         );
 
         Some(Image::Exists {
             data: ImageData {
-                width: new_width as i32,
-                height: new_height as i32,
-                rowstride: new_width as i32 * 4,
+                width,
+                height,
+                rowstride: width * 4,
                 has_alpha: true,
                 bits_per_sample: 8,
                 channels: 4,
@@ -154,30 +150,55 @@ impl Image {
         })
     }
 
-    pub fn or_svg(self, image_path: Option<&str>, image_property: &ImageProperty) -> Self {
-        if self.exists() || image_path.is_none() {
-            return self;
-        }
+    pub fn from_svg(image_path: &str, image_property: &ImageProperty, max_size: &RectSize) -> Self {
+        let data = match std::fs::read(image_path) {
+            Ok(data) => data,
+            Err(err) => {
+                match err.kind() {
+                    std::io::ErrorKind::NotFound => {
+                        warn!("Not found SVG image in path: {}", image_path)
+                    }
+                    std::io::ErrorKind::PermissionDenied => warn!(
+                        "Permission to read SVG image in path is denied: {}",
+                        image_path
+                    ),
+                    _ => warn!(
+                        "Something wrong happened during reading SVG image in path: {}",
+                        image_path
+                    ),
+                }
 
-        let image_path = unsafe { image_path.unwrap_unchecked() };
-
-        let tree = if let Ok(data) = std::fs::read(image_path) {
-            resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default())
-        } else {
-            return self;
+                return Image::Unknown;
+            }
         };
 
-        let Ok(tree) = tree else {
-            return self;
+        let tree = match resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()) {
+            Ok(tree) => tree,
+            Err(err) => {
+                match err {
+                    resvg::usvg::Error::MalformedGZip => {
+                        warn!("Malformed gzip format of SVG image in path: {}", image_path)
+                    }
+                    resvg::usvg::Error::NotAnUtf8Str => warn!(
+                        "The SVG image file contains non-UTF-8 string in path: {}",
+                        image_path
+                    ),
+                    _ => warn!("Something wrong with SVG image in path: {}", image_path),
+                }
+                return Image::Unknown;
+            }
         };
 
         let tree_size = tree.size();
-        let (mut width, mut height) = (
+        let Some((width, height)) = Self::try_fit_into_restricted_space(
             tree_size.width().round() as i32,
             tree_size.height().round() as i32,
-        );
-
-        Self::resize(&mut width, &mut height, image_property.max_size);
+            image_property,
+            max_size,
+        ) else {
+            warn!("The margins for image is very large! The image will not rendered!");
+            return Image::Unknown;
+        };
 
         let scale = if width > height {
             width as f32 / tree_size.width()
@@ -185,8 +206,11 @@ impl Image {
             height as f32 / tree_size.height()
         };
 
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(width as u32, height as u32)
-            .expect("The Pixmap must be created. Something happened wrong. Please contact to developer with this information.");
+        let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(width as u32, height as u32) else {
+            warn!("The SVG Image width or height is equal to zero!");
+            return Image::Unknown;
+        };
+
         resvg::render(
             &tree,
             resvg::usvg::Transform::from_scale(scale, scale),
@@ -213,6 +237,26 @@ impl Image {
         }
     }
 
+    pub fn or(self, other: Self) -> Self {
+        if self.is_exists() {
+            self
+        } else {
+            other
+        }
+    }
+
+    pub fn or_else<F: FnOnce() -> Self>(self, other: F) -> Self {
+        if self.is_exists() {
+            self
+        } else {
+            other()
+        }
+    }
+
+    pub fn is_exists(&self) -> bool {
+        matches!(self, Image::Exists { .. })
+    }
+
     pub fn width(&self) -> Option<usize> {
         match self {
             Image::Exists { data, .. } => Some(data.width as usize),
@@ -227,7 +271,33 @@ impl Image {
         }
     }
 
-    fn resize(width: &mut i32, height: &mut i32, max_size: u16) {
+    fn try_fit_into_restricted_space(
+        mut width: i32,
+        mut height: i32,
+        image_property: &ImageProperty,
+        max_size: &RectSize,
+    ) -> Option<(i32, i32)> {
+        Self::limit_size(&mut width, &mut height, image_property.max_size);
+        let (horizontal_spacing, vertical_spacing) = {
+            let spacing = &image_property.margin;
+            (spacing.horizontal() as usize, spacing.vertical() as usize)
+        };
+
+        if width as usize + horizontal_spacing > max_size.width {
+            width -= horizontal_spacing as i32;
+        }
+        if height as usize + vertical_spacing > max_size.height {
+            height -= vertical_spacing as i32;
+        }
+
+        if width <= 0 || height <= 0 {
+            None
+        } else {
+            Some((width, height))
+        }
+    }
+
+    fn limit_size(width: &mut i32, height: &mut i32, max_size: u16) {
         let swap = height > width;
         if swap {
             std::mem::swap(width, height);
