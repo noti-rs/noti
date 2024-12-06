@@ -1,0 +1,8 @@
+[package]
+name = "shared"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+derive_more = { workspace = true }
