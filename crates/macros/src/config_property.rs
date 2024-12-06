@@ -8,7 +8,10 @@ use syn::{
     spanned::Spanned, Token,
 };
 
-use crate::{general::{field_name, DefaultAssignment}, propagate_err};
+use crate::{
+    general::{field_name, DefaultAssignment},
+    propagate_err,
+};
 
 pub(super) fn make_derive(item: TokenStream) -> TokenStream {
     let mut cfg_struct = parse_macro_input!(item as ConfigStructure);
@@ -117,6 +120,7 @@ impl ConfigStructure {
         if let Some(derive_info) = &attr_info.struct_attr_info.derive_info {
             derive_info.to_tokens(tokens);
         }
+        attr_info.struct_attr_info.attributes.to_tokens(tokens);
 
         self.visibility.to_tokens(tokens);
         self.struct_token.to_tokens(tokens);
@@ -125,8 +129,17 @@ impl ConfigStructure {
             self.fields
                 .iter()
                 .filter(|field| !attr_info.is_temporary_field(field))
-                .collect::<Punctuated<&syn::Field, Token![,]>>()
-                .to_tokens(tokens)
+                .map(|field| {
+                    let attribute_tokens = attr_info
+                        .field_attr_info
+                        .get(&field_name(field))
+                        .map(|field_attr_info| field_attr_info.attributes.clone())
+                        .unwrap_or(proc_macro2::TokenStream::new());
+                    quote! {
+                        #attribute_tokens #field,
+                    }
+                })
+                .for_each(|field_tokens| field_tokens.to_tokens(tokens));
         });
     }
 
@@ -357,6 +370,7 @@ impl AttrInfo {
 struct StructAttrInfo {
     name: syn::Ident,
     derive_info: Option<DeriveInfo>,
+    attributes: proc_macro2::TokenStream,
 }
 
 impl Parse for StructAttrInfo {
@@ -364,6 +378,7 @@ impl Parse for StructAttrInfo {
         let beginning_span = input.span();
         let mut name = None;
         let mut derive_info = None;
+        let mut attributes = proc_macro2::TokenStream::new();
 
         loop {
             let ident = input.parse::<syn::Ident>()?;
@@ -382,6 +397,11 @@ impl Parse for StructAttrInfo {
                         traits: content.parse_terminated(syn::Ident::parse_any, Token![,])?,
                     });
                 }
+                "attributes" => {
+                    let content;
+                    let _paren = parenthesized!(content in input);
+                    attributes = content.parse()?;
+                }
                 _ => return Err(syn::Error::new(ident.span(), "Unknown attribute")),
             }
 
@@ -399,7 +419,11 @@ impl Parse for StructAttrInfo {
             ));
         };
 
-        Ok(Self { name, derive_info })
+        Ok(Self {
+            name,
+            derive_info,
+            attributes,
+        })
     }
 }
 
@@ -426,6 +450,7 @@ struct FieldAttrInfo {
     default: DefaultAssignment,
     inherits: Option<InheritsField>,
     use_type: Option<syn::Ident>,
+    attributes: proc_macro2::TokenStream,
 }
 
 impl Parse for FieldAttrInfo {
@@ -435,6 +460,7 @@ impl Parse for FieldAttrInfo {
         let mut default = DefaultAssignment::DefaultCall;
         let mut inherits: Option<InheritsField> = None;
         let mut use_type: Option<syn::Ident> = None;
+        let mut attributes = proc_macro2::TokenStream::new();
 
         loop {
             let ident = input.parse::<syn::Ident>()?;
@@ -457,6 +483,11 @@ impl Parse for FieldAttrInfo {
                     let _paren = parenthesized!(content in input);
                     use_type = Some(content.parse()?);
                 }
+                "attributes" => {
+                    let content;
+                    let _paren = parenthesized!(content in input);
+                    attributes = content.parse()?;
+                }
                 _ => return Err(syn::Error::new(ident.span(), "Unknown attribute")),
             }
 
@@ -473,6 +504,7 @@ impl Parse for FieldAttrInfo {
             default,
             inherits,
             use_type,
+            attributes,
         })
     }
 }
