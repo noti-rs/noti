@@ -96,13 +96,13 @@ impl BannerRect {
             .spacing(padding)
             .direction(widget::Direction::Horizontal)
             .alignment(Alignment::new(Position::Start, Position::Center))
-            .elements(vec![
+            .children(vec![
                 WImage::new().into(),
                 FlexContainerBuilder::default()
                     .spacing(Default::default())
                     .direction(widget::Direction::Vertical)
                     .alignment(Alignment::new(Position::Center, Position::Center))
-                    .elements(vec![
+                    .children(vec![
                         WText::new(WTextKind::Title).into(),
                         WText::new(WTextKind::Body).into(),
                     ])

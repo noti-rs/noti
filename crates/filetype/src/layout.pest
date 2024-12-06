@@ -1,0 +1,58 @@
+// BASE TOKENS
+// They are created because the Pest parser is not very smart
+// to figure out what to expect from next token while parsing
+// and with hardcoded values parser will throw error in other
+// place than needed when received text have mistakes.
+//
+// Also these rule should NOT be silent. The silent tokens
+// behaves like a hardcoded values. It's a deal with the Pest
+// parser.
+//
+// They will be here until the Pest parser gets better token
+// analyzing.
+
+OpeningBrace = { "{" }
+ClosingBrace = { "}" }
+
+OpeningParenthesis = { "(" }
+ClosingParenthesis = { ")" }
+
+Equal = { "=" }
+Comma = { "," }
+
+// END BASE TOKENS
+
+Layout = { SOI ~ NodeType ~ EOI }
+
+NodeType = { 
+  Identifier ~ OpeningParenthesis
+    ~ Properties?
+  ~ ClosingParenthesis ~ (OpeningBrace
+    ~ Children?
+  ~ ClosingBrace)? 
+}
+
+Children = { NodeType+ }
+
+Properties = { Property ~ (Comma ~ Property)* ~ Comma? }
+
+Property = { Identifier ~ Equal ~ PropertyValue }
+
+PropertyValue = { TypeValue | UInt | Literal }
+
+TypeValue = {
+  Identifier ~ OpeningParenthesis
+    ~ Properties?
+  ~ ClosingParenthesis }
+
+Literal = ${ ASCII_ALPHANUMERIC ~ (ASCII_ALPHANUMERIC | "_")* }
+
+UInt = @{ ASCII_DIGIT+ }
+
+Identifier = ${ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+
+WHITESPACE = _{ " " | "\n" | "\t" }
+
+SingleLineComment = { "//" ~ (!"\n" ~ ANY)* }
+BlockComment = { "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+COMMENT = _{ SingleLineComment | BlockComment }

@@ -3,6 +3,10 @@ use derive_builder::Builder;
 use config::{spacing::Spacing, text::TextProperty, DisplayConfig, ImageProperty};
 use dbus::{notification::Notification, text::Text};
 use log::warn;
+use shared::{
+    error::ConversionError,
+    value::{TryDowncast, Value},
+};
 
 use super::{
     color::Bgra,
@@ -143,23 +147,29 @@ impl From<FlexContainer> for Widget {
     }
 }
 
-#[derive(Builder)]
+#[derive(macros::GenericBuilder, Builder)]
 #[builder(pattern = "owned")]
+#[gbuilder(name(GBuilderFlexContainer))]
 pub struct FlexContainer {
     #[builder(private, setter(skip))]
+    #[gbuilder(hidden, default(None))]
     rect_size: Option<RectSize>,
 
     #[builder(default = "usize::MAX")]
+    #[gbuilder(default(usize::MAX))]
     max_width: usize,
+
     #[builder(default = "usize::MAX")]
+    #[gbuilder(default(usize::MAX))]
     max_height: usize,
 
+    #[gbuilder(default)]
     spacing: Spacing,
 
     direction: Direction,
     alignment: Alignment,
 
-    elements: Vec<Widget>,
+    children: Vec<Widget>,
 }
 
 impl FlexContainer {
@@ -179,16 +189,16 @@ impl FlexContainer {
         rect_size.shrink_by(&self.spacing);
         let mut container_axes = FlexContainerPlane::new(rect_size, &self.direction);
 
-        self.elements.iter_mut().for_each(|element| {
-            element.compile(container_axes.as_rect_size(), configuration);
+        self.children.iter_mut().for_each(|child| {
+            child.compile(container_axes.as_rect_size(), configuration);
 
             container_axes.main_len = container_axes
                 .main_len
-                .saturating_sub(element.len_by_direction(&self.direction));
+                .saturating_sub(child.len_by_direction(&self.direction));
         });
-        self.elements.retain(|element| !element.is_unknown());
+        self.children.retain(|child| !child.is_unknown());
 
-        if self.elements.is_empty() {
+        if self.children.is_empty() {
             CompileState::Failure
         } else {
             CompileState::Success
@@ -204,7 +214,7 @@ impl FlexContainer {
     }
 
     pub fn width(&self) -> usize {
-        let widths = self.elements.iter().map(|element| element.width());
+        let widths = self.children.iter().map(|child| child.width());
 
         match self.direction {
             Direction::Horizontal => widths.sum(),
@@ -213,7 +223,7 @@ impl FlexContainer {
     }
 
     pub fn height(&self) -> usize {
-        let heights = self.elements.iter().map(|element| element.height());
+        let heights = self.children.iter().map(|child| child.height());
 
         match self.direction {
             Direction::Horizontal => heights.max().unwrap_or_default(),
@@ -297,30 +307,31 @@ impl Draw for FlexContainer {
         let incrementor = match self.main_axis_alignment() {
             Position::Start | Position::Center | Position::End => 0,
             Position::SpaceBetween => {
-                if self.elements.len() <= 1 {
+                if self.children.len() <= 1 {
                     0
                 } else {
-                    (plane.main_len - self.max_main_len()) / self.elements.len().saturating_sub(1)
+                    (plane.main_len - self.max_main_len()) / self.children.len().saturating_sub(1)
                 }
             }
         };
 
-        self.elements.iter().for_each(|element| {
+        self.children.iter().for_each(|child| {
             plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset
                 + self.auxiliary_axis_alignment().compute_initial_pos(
                     plane.auxiliary_len,
-                    element.len_by_direction(&self.direction.orthogonalize()),
+                    child.len_by_direction(&self.direction.orthogonalize()),
                 );
 
-            element.draw_with_offset(&plane.as_offset(), output);
+            child.draw_with_offset(&plane.as_offset(), output);
 
-            plane.main_axis_offset += element.len_by_direction(&self.direction) + incrementor;
+            plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
             plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset;
         });
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(macros::GenericBuilder, Debug, Default, Clone)]
+#[gbuilder(name(GBuilderAlignment))]
 pub struct Alignment {
     pub horizontal: Position,
     pub vertical: Position,
@@ -335,14 +346,45 @@ impl Alignment {
     }
 }
 
+impl TryFrom<Value> for Alignment {
+    type Error = ConversionError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(ConversionError::CannotConvert),
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
-#[allow(dead_code)]
 pub enum Position {
     Start,
     #[default]
     Center,
     End,
     SpaceBetween,
+}
+
+impl TryFrom<Value> for Position {
+    type Error = ConversionError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(str) => Ok(match str.to_lowercase().as_str() {
+                "start" => Position::Start,
+                "center" => Position::Center,
+                "end" => Position::End,
+                "space-between" | "space_between" => Position::SpaceBetween,
+                _ => Err(ConversionError::InvalidValue {
+                    expected: "start, center, end, space-between or space_between",
+                    actual: str,
+                })?,
+            }),
+            Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(ConversionError::CannotConvert),
+        }
+    }
 }
 
 impl Position {
@@ -365,6 +407,25 @@ impl Direction {
         match self {
             Direction::Horizontal => Direction::Vertical,
             Direction::Vertical => Direction::Horizontal,
+        }
+    }
+}
+
+impl TryFrom<Value> for Direction {
+    type Error = ConversionError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(str) => Ok(match str.to_lowercase().as_str() {
+                "horizontal" => Direction::Horizontal,
+                "vertical" => Direction::Vertical,
+                _ => Err(ConversionError::InvalidValue {
+                    expected: "horizontal or vertical",
+                    actual: str,
+                })?,
+            }),
+            Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(ConversionError::CannotConvert),
         }
     }
 }
@@ -454,14 +515,19 @@ impl<'a> FlexContainerPlane<'a> {
     }
 }
 
+#[derive(macros::GenericBuilder)]
+#[gbuilder(name(GBuilderWImage))]
 pub struct WImage {
+    #[gbuilder(hidden, default(Image::Unknown))]
     content: Image,
 
+    #[gbuilder(hidden, default(0))]
     width: usize,
+    #[gbuilder(hidden, default(0))]
     height: usize,
 
-    // TODO: make decision about deletion this line
-    property: Option<ImageProperty>,
+    #[gbuilder(default)]
+    property: ImageProperty,
 }
 
 impl WImage {
@@ -470,7 +536,7 @@ impl WImage {
             content: Image::Unknown,
             width: 0,
             height: 0,
-            property: None,
+            property: Default::default(),
         }
     }
 
@@ -511,7 +577,7 @@ impl WImage {
             .map(|height| height + property.margin.vertical() as usize)
             .unwrap_or(0);
 
-        self.property = Some(property);
+        self.property = property;
 
         if self.content.is_exists() {
             CompileState::Success
@@ -540,18 +606,20 @@ impl Draw for WImage {
         }
 
         // INFO: The ImageProperty initializes with Image so we can calmly unwrap
-        let offset = Offset::from(&self.property.as_ref().unwrap().margin) + offset.clone();
+        let offset = Offset::from(&self.property.margin) + offset.clone();
         self.content.draw_with_offset(&offset, output);
     }
 }
 
+#[derive(macros::GenericBuilder)]
+#[gbuilder(name(GBuilderWText))]
 pub struct WText {
     kind: WTextKind,
+    #[gbuilder(hidden, default(None))]
     content: Option<TextRect>,
 
-    //TODO: make decision about deletion this field
-    #[allow(dead_code)]
-    property: Option<TextProperty>,
+    #[gbuilder(default)]
+    property: TextProperty,
 }
 
 pub enum WTextKind {
@@ -559,12 +627,31 @@ pub enum WTextKind {
     Body,
 }
 
+impl TryFrom<Value> for WTextKind {
+    type Error = ConversionError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(val) => Ok(match val.to_lowercase().as_str() {
+                "title" | "summary" => WTextKind::Title,
+                "body" => WTextKind::Body,
+                _ => Err(ConversionError::InvalidValue {
+                    expected: "title or body",
+                    actual: val,
+                })?,
+            }),
+            Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(ConversionError::CannotConvert),
+        }
+    }
+}
+
 impl WText {
     pub fn new(kind: WTextKind) -> Self {
         Self {
             kind,
             content: None,
-            property: None,
+            property: Default::default(),
         }
     }
 
@@ -616,7 +703,7 @@ impl WText {
             CompileState::Failure
         } else {
             self.content = Some(content);
-            self.property = Some(text_cfg);
+            self.property = text_cfg;
             CompileState::Success
         }
     }

@@ -1,6 +1,7 @@
 use log::debug;
-use macros::ConfigProperty;
+use macros::{ConfigProperty, GenericBuilder};
 use serde::Deserialize;
+use shared::value::TryDowncast;
 use std::{collections::HashMap, fs, path::Path};
 
 pub mod colors;
@@ -272,14 +273,46 @@ public! {
 
 public! {
     #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(name(ImageProperty), derive(Debug, Clone))]
+    #[cfg_prop(
+        name(ImageProperty),
+        derive(GenericBuilder, Debug, Clone),
+        attributes(#[gbuilder(name(GBuilderImageProperty))])
+    )]
     struct TomlImageProperty {
-        #[cfg_prop(default(64))]
+        #[cfg_prop(
+            default(64),
+            attributes(#[gbuilder(default(64))])
+        )]
         max_size: Option<u16>,
-        #[cfg_prop(default(0))]
+
+        #[cfg_prop(
+            default(0),
+            attributes(#[gbuilder(default(0))])
+        )]
         rounding: Option<u16>,
+
+        #[cfg_prop(attributes(#[gbuilder(default)]))]
         margin: Option<Spacing>,
+
+        #[cfg_prop(attributes(#[gbuilder(default)]))]
         resizing_method: Option<ResizingMethod>,
+    }
+}
+
+impl Default for ImageProperty {
+    fn default() -> Self {
+        TomlImageProperty::default().into()
+    }
+}
+
+impl TryFrom<shared::value::Value> for ImageProperty {
+    type Error = shared::error::ConversionError;
+
+    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(shared::error::ConversionError::CannotConvert),
+        }
     }
 }
 
@@ -296,6 +329,28 @@ pub enum ResizingMethod {
     Gaussian,
     #[serde(rename = "lanczos3")]
     Lanczos3,
+}
+
+impl TryFrom<shared::value::Value> for ResizingMethod {
+    type Error = shared::error::ConversionError;
+
+    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            shared::value::Value::String(str) => Ok(match str.to_lowercase().as_str() {
+                "nearest" => ResizingMethod::Nearest,
+                "triangle" => ResizingMethod::Triangle,
+                "catmull-rom" | "catmull_rom" => ResizingMethod::CatmullRom,
+                "gaussian" => ResizingMethod::Gaussian,
+                "lanczos3" => ResizingMethod::Lanczos3,
+                _ => Err(shared::error::ConversionError::InvalidValue {
+                    expected: "nearest, triangle, gaussian, lanczos3, catmull-rom or catmull_rom",
+                    actual: str,
+                })?,
+            }),
+            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(shared::error::ConversionError::CannotConvert),
+        }
+    }
 }
 
 public! {

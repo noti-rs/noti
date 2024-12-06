@@ -69,3 +69,40 @@ impl TryDowncast for Box<dyn std::any::Any> {
             })?)
     }
 }
+
+macro_rules! impl_try_from_value_for_uint {
+    ($($type:path),*) => {
+        $(
+            impl TryFrom<Value> for $type {
+                type Error = ConversionError;
+
+                fn try_from(value: Value) -> Result<Self, Self::Error> {
+                    match value {
+                        Value::UInt(val) => Ok(val as $type),
+                        Value::Any(dyn_value) => dyn_value.try_downcast(),
+                        _ => Err(ConversionError::CannotConvert),
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_try_from_value_for_uint!(u8, u16, u32, i8, i16, i32);
+
+impl TryFrom<Value> for bool {
+    type Error = ConversionError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(str) => str
+                .parse::<bool>()
+                .map_err(|_| ConversionError::InvalidValue {
+                    expected: "true or false",
+                    actual: str,
+                }),
+            Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(ConversionError::CannotConvert),
+        }
+    }
+}

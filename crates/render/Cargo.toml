@@ -9,9 +9,11 @@ log = { workspace = true }
 config = { workspace = true }
 anyhow = { workspace = true }
 dbus = { workspace = true }
+shared = { workspace = true }
+macros = { path = "../macros" }
+derive_more = { workspace = true }
 
 derive_builder = "0.20.0"
-derive_more = { version = "1.0.0", features = ["display"] }
 ab_glyph = "0.2.28"
 owned_ttf_parser = "0.24.0"
 rayon = "1.10.0"

@@ -9,6 +9,7 @@ macros = { path = "../macros" }
 dbus = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
+shared = { workspace = true }
 
 inotify = "0.10.2"
 serde = "1.0.205"
