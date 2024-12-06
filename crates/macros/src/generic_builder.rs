@@ -74,9 +74,10 @@ impl Structure {
 
         braces.surround(tokens, |tokens| {
             let mut fields = fields.clone();
-            fields
-                .iter_mut()
-                .for_each(|field| field.ty = wrap_by_option(field.ty.clone()));
+            fields.iter_mut().for_each(|field| {
+                field.attrs.clear();
+                field.ty = wrap_by_option(field.ty.clone())
+            });
             fields.to_tokens(tokens)
         });
     }
@@ -120,8 +121,9 @@ impl Structure {
             .map(|field_ident| quote! { #field_ident: None })
             .collect();
 
+        let visibility = &self.visibility;
         quote! {
-            fn new() -> Self {
+            #visibility fn new() -> Self {
                 Self {
                     #init_members
                 }
@@ -145,19 +147,13 @@ impl Structure {
             .collect();
         let field_count = quoted_field_names.len();
 
-        if field_count == 0 {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "All fields are hidden. Nothing to use!",
-            ));
-        }
-
+        let visibility = &self.visibility;
         Ok(quote! {
             const FIELD_NAMES: [&'static str; #field_count] = [
                 #quoted_field_names
             ];
 
-            fn contains_field(&self, field_name: &str) -> bool {
+            #visibility fn contains_field(&self, field_name: &str) -> bool {
                 Self::FIELD_NAMES.contains(&field_name)
             }
         })
@@ -177,13 +173,29 @@ impl Structure {
             })
             .collect();
 
-        quote! {
-            fn set_value(&mut self, field_name: &str, value: Value) -> std::result::Result<&mut Self, std::boxed::Box<dyn std::error::Error>> {
+        let err_expression = quote! {
+            Err(shared::error::ConversionError::UnknownField { field_name: field_name.to_string() })
+        };
+        let function_body = if set_members.is_empty() {
+            err_expression
+        } else {
+            quote! {
                 match field_name {
                     #set_members,
-                    _ => return Err("Unknown field".into())
+                    _ => return #err_expression
                 }
                 Ok(self)
+            }
+        };
+
+        let visibility = &self.visibility;
+        quote! {
+            #visibility fn set_value(
+                &mut self,
+                field_name: &str,
+                value: shared::value::Value
+            ) -> std::result::Result<&mut Self, shared::error::ConversionError> {
+                #function_body
             }
         }
     }
@@ -229,8 +241,9 @@ impl Structure {
             })
             .collect();
 
+        let visibility = &self.visibility;
         quote! {
-            fn try_build(self) -> std::result::Result<#target_type, String> {
+            #visibility fn try_build(self) -> std::result::Result<#target_type, String> {
                 Ok(#target_type {
                     #init_members
                 })
