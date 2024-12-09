@@ -11,9 +11,16 @@ use shared::value::TryDowncast;
 #[derive(GenericBuilder, Debug, Default, Clone)]
 #[gbuilder(name(GBuilderSpacing))]
 pub struct Spacing {
+    #[gbuilder(default(0))]
     top: u8,
+
+    #[gbuilder(default(0))]
     right: u8,
+
+    #[gbuilder(default(0))]
     bottom: u8,
+
+    #[gbuilder(default(0))]
     left: u8,
 }
 

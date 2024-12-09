@@ -1,8 +1,6 @@
 use anyhow::bail;
 use config::{
-    spacing::{GBuilderSpacing, Spacing},
-    text::{GBuilderTextProperty, TextProperty},
-    GBuilderImageProperty, ImageProperty,
+    spacing::{GBuilderSpacing, Spacing}, text::{GBuilderTextProperty, TextProperty}, Border, GBuilderBorder, GBuilderImageProperty, ImageProperty
 };
 use log::warn;
 use pest::iterators::{Pair, Pairs};
@@ -178,6 +176,7 @@ enum GBuilder {
 
     Spacing(GBuilderSpacing),
     Alignment(GBuilderAlignment),
+    Border(GBuilderBorder),
 }
 
 impl GBuilder {
@@ -245,7 +244,8 @@ impl GBuilder {
             TextProperty,
             ImageProperty,
             Spacing,
-            Alignment
+            Alignment,
+            Border
         )
     }
 
@@ -269,7 +269,8 @@ impl GBuilder {
             TextProperty,
             ImageProperty,
             Spacing,
-            Alignment
+            Alignment,
+            Border
         );
         Ok(self)
     }
@@ -296,7 +297,8 @@ impl GBuilder {
             ImageProperty into ImageProperty,
 
             Spacing into Spacing,
-            Alignment into Alignment
+            Alignment into Alignment,
+            Border into Border
         ))
     }
 }
@@ -311,6 +313,7 @@ impl TryFrom<&str> for GBuilder {
             "Text" => GBuilder::WText(GBuilderWText::new()),
             "Spacing" => GBuilder::Spacing(GBuilderSpacing::new()),
             "Alignment" => GBuilder::Alignment(GBuilderAlignment::new()),
+            "Border" => GBuilder::Border(GBuilderBorder::new()),
             _ => bail!("Unknown type: {value}!"),
         })
     }

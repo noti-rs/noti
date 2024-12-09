@@ -1,11 +1,10 @@
 use std::time;
 
-use config::{spacing::Spacing, Config, DisplayConfig};
+use config::{Border, Config, DisplayConfig};
 use dbus::notification::Notification;
 use log::{debug, trace};
 
 use render::{
-    border::BorderBuilder,
     color::Bgra,
     font::FontCollection,
     types::RectSize,
@@ -94,38 +93,13 @@ impl BannerRect {
         self.init_framebuffer(&rect_size, &background);
         self.stride = rect_size.width * 4;
 
-        let border_spacing = Spacing::all_directional(display.border.size);
-        let padding = &display.padding + border_spacing;
-
-        let mut layout: Widget = FlexContainerBuilder::default()
-            .spacing(padding)
-            .direction(widget::Direction::Horizontal)
-            .alignment(Alignment::new(Position::Start, Position::Center))
-            .children(vec![
-                WImage::new().into(),
-                FlexContainerBuilder::default()
-                    .spacing(Default::default())
-                    .direction(widget::Direction::Vertical)
-                    .alignment(Alignment::new(Position::Center, Position::Center))
-                    .children(vec![
-                        WText::new(WTextKind::Title).into(),
-                        WText::new(WTextKind::Body).into(),
-                    ])
-                    .build()
-                    .unwrap()
-                    .into(),
-            ])
-            .build()
-            .unwrap()
-            .into();
-
-        layout = match &display.layout {
-            config::Layout::Default => layout,
+        let mut layout = match &display.layout {
+            config::Layout::Default => Self::default_layout(display),
             config::Layout::FromPath { path_buf } => cached_layouts
                 .get(path_buf)
                 .and_then(CachedLayout::layout)
                 .map(Clone::clone)
-                .unwrap_or(layout),
+                .unwrap_or_else(|| Self::default_layout(display)),
         };
 
         let font_size = config.general().font.size as f32;
@@ -145,12 +119,6 @@ impl BannerRect {
             self.put_color_at(x, y, Self::convert_color(color, self.get_color_at(x, y)))
         });
 
-        self.draw_border(
-            config.general().width.into(),
-            config.general().height.into(),
-            display,
-        );
-
         debug!("Banner (id={}): Complete draw", self.data.id);
     }
 
@@ -161,22 +129,6 @@ impl BannerRect {
             .collect();
 
         debug!("Banner (id={}): Initialized framebuffer", self.data.id);
-    }
-
-    fn draw_border(&mut self, width: usize, height: usize, display: &DisplayConfig) {
-        let border_cfg = &display.border;
-
-        BorderBuilder::default()
-            .size(border_cfg.size as usize)
-            .radius(border_cfg.radius as usize)
-            .color(Bgra::from(&border_cfg.color))
-            .frame_width(width)
-            .frame_height(height)
-            .compile()
-            .expect("Create Border for banner rounding")
-            .draw(&mut |x, y, color| {
-                self.put_color_at(x, y, Self::convert_color(color, self.get_color_at(x, y)))
-            });
     }
 
     fn convert_color(color: DrawColor, background: Bgra) -> Bgra {
@@ -205,6 +157,32 @@ impl BannerRect {
             *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
                 .unwrap_unchecked() = color.into_slice()
         }
+    }
+
+    fn default_layout(display_config: &DisplayConfig) -> Widget {
+        FlexContainerBuilder::default()
+            .spacing(display_config.padding.clone())
+            .border(display_config.border.clone())
+            .direction(widget::Direction::Horizontal)
+            .alignment(Alignment::new(Position::Start, Position::Center))
+            .children(vec![
+                WImage::new().into(),
+                FlexContainerBuilder::default()
+                    .spacing(Default::default())
+                    .border(Border::default())
+                    .direction(widget::Direction::Vertical)
+                    .alignment(Alignment::new(Position::Center, Position::Center))
+                    .children(vec![
+                        WText::new(WTextKind::Title).into(),
+                        WText::new(WTextKind::Body).into(),
+                    ])
+                    .build()
+                    .unwrap()
+                    .into(),
+            ])
+            .build()
+            .unwrap()
+            .into()
     }
 }
 

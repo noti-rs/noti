@@ -1,6 +1,6 @@
 use derive_builder::Builder;
 
-use config::{spacing::Spacing, text::TextProperty, DisplayConfig, ImageProperty};
+use config::{spacing::Spacing, text::TextProperty, Border, DisplayConfig, ImageProperty};
 use dbus::{notification::Notification, text::Text};
 use log::warn;
 use shared::{
@@ -8,7 +8,10 @@ use shared::{
     value::{TryDowncast, Value},
 };
 
+use crate::border::BorderBuilder;
+
 use super::{
+    border::Border as RenderableBorder,
     color::Bgra,
     font::FontCollection,
     image::Image,
@@ -168,6 +171,13 @@ pub struct FlexContainer {
     #[gbuilder(default)]
     spacing: Spacing,
 
+    #[gbuilder(default)]
+    border: Border,
+
+    #[builder(private, setter(skip))]
+    #[gbuilder(hidden, default)]
+    compiled_border: Option<RenderableBorder>,
+
     direction: Direction,
     alignment: Alignment,
 
@@ -188,7 +198,18 @@ impl FlexContainer {
         };
         self.rect_size = Some(rect_size.clone());
 
-        rect_size.shrink_by(&self.spacing);
+        self.compiled_border = Some(
+            BorderBuilder::default()
+                .color((&self.border.color).into())
+                .frame_width(rect_size.width)
+                .frame_height(rect_size.height)
+                .size(self.border.size)
+                .radius(self.border.radius)
+                .compile()
+                .expect("Border should be have possibility to compile"),
+        );
+
+        rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
         let mut container_axes = FlexContainerPlane::new(rect_size, &self.direction);
 
         self.children.iter_mut().for_each(|child| {
@@ -329,6 +350,10 @@ impl Draw for FlexContainer {
             plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
             plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset;
         });
+
+        if let Some(compiled_border) = self.compiled_border.as_ref() {
+            compiled_border.draw_with_offset(offset, output);
+        }
     }
 }
 

@@ -20,6 +20,8 @@ ClosingParenthesis = { ")" }
 Equal = { "=" }
 Comma = { "," }
 
+Hashtag = { "#" }
+
 // END BASE TOKENS
 
 Layout = { SOI ~ NodeType ~ EOI }
@@ -45,7 +47,7 @@ TypeValue = {
     ~ Properties?
   ~ ClosingParenthesis }
 
-Literal = ${ ASCII_ALPHANUMERIC ~ (ASCII_ALPHANUMERIC | "_")* }
+Literal = ${ Hashtag? ~ ASCII_ALPHANUMERIC ~ (ASCII_ALPHANUMERIC | "_"  | "-")* }
 
 UInt = @{ ASCII_DIGIT+ }
 

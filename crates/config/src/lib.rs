@@ -2,6 +2,7 @@ use log::debug;
 use macros::{ConfigProperty, GenericBuilder};
 use serde::Deserialize;
 use shared::{
+    error::ConversionError,
     file_watcher::{FileState, FilesWatcher},
     value::TryDowncast,
 };
@@ -427,14 +428,40 @@ impl TryFrom<shared::value::Value> for ResizingMethod {
 
 public! {
     #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(name(Border), derive(Debug))]
+    #[cfg_prop(
+        name(Border),
+        derive(GenericBuilder, Debug, Clone, Default),
+        attributes(#[gbuilder(name(GBuilderBorder))])
+    )]
     struct TomlBorder {
-        #[cfg_prop(default(0))]
+        #[cfg_prop(
+            default(0),
+            attributes(#[gbuilder(default(0))])
+        )]
         size: Option<u8>,
-        #[cfg_prop(default(0))]
+
+        #[cfg_prop(
+            default(0),
+            attributes(#[gbuilder(default(0))])
+        )]
         radius: Option<u8>,
-        #[cfg_prop(default(Color::new_black()))]
+
+        #[cfg_prop(
+            default(Color::new_black()),
+            attributes(#[gbuilder(default(path = Color::new_black))])
+        )]
         color: Option<Color>,
+    }
+}
+
+impl TryFrom<shared::value::Value> for Border {
+    type Error = ConversionError;
+
+    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(ConversionError::CannotConvert),
+        }
     }
 }
 

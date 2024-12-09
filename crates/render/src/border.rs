@@ -23,6 +23,9 @@ pub struct Border {
 
     #[builder(setter(skip))]
     corner_coverage: Option<Matrix<MaybeColor>>,
+
+    #[builder(setter(skip), default = "false")]
+    compiled: bool,
 }
 
 impl BorderBuilder {
@@ -42,6 +45,8 @@ enum Corner {
 
 impl Border {
     pub fn compile(&mut self) {
+        self.compiled = true;
+
         self.corner_coverage = Some(match (self.size, self.radius) {
             (0, 0) => return,
             (size, 0) => self.get_bordered_coverage(size),
@@ -247,33 +252,36 @@ impl Border {
 impl Draw for Border {
     fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
         &self,
-        _: &Offset,
+        offset: &Offset,
         output: &mut Output,
     ) {
         let Some(corner) = self.corner_coverage.as_ref() else {
-            warn!("Border: Not compiled, refused to draw itself");
+            if !self.compiled {
+                warn!("Border: Not compiled, refused to draw itself");
+            }
             return;
         };
 
         let corner_size = corner.len();
-        Self::draw_corner(Offset::no_offset(), corner, Corner::TopLeft, output);
+        Self::draw_corner(offset.clone(), corner, Corner::TopLeft, output);
         Self::draw_corner(
-            Offset::new_x(self.frame_width - corner_size),
+            offset.clone() + Offset::new_x(self.frame_width - corner_size),
             corner,
             Corner::TopRight,
             output,
         );
         Self::draw_corner(
-            Offset::new(
-                self.frame_width - corner_size,
-                self.frame_height - corner_size,
-            ),
+            offset.clone()
+                + Offset::new(
+                    self.frame_width - corner_size,
+                    self.frame_height - corner_size,
+                ),
             corner,
             Corner::BottomRight,
             output,
         );
         Self::draw_corner(
-            Offset::new_y(self.frame_height - corner_size),
+            offset.clone() + Offset::new_y(self.frame_height - corner_size),
             corner,
             Corner::BottomLeft,
             output,
@@ -282,7 +290,7 @@ impl Draw for Border {
         if self.size != 0 {
             // Top
             self.draw_rectangle(
-                Offset::new_x(corner_size),
+                offset.clone() + Offset::new_x(corner_size),
                 self.frame_width - corner_size * 2,
                 self.size,
                 output,
@@ -290,7 +298,7 @@ impl Draw for Border {
 
             // Bottom
             self.draw_rectangle(
-                Offset::new(corner_size, self.frame_height - self.size),
+                offset.clone() + Offset::new(corner_size, self.frame_height - self.size),
                 self.frame_width - corner_size * 2,
                 self.size,
                 output,
@@ -298,7 +306,7 @@ impl Draw for Border {
 
             // Left
             self.draw_rectangle(
-                Offset::new_y(corner_size),
+                offset.clone() + Offset::new_y(corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
                 output,
@@ -306,7 +314,7 @@ impl Draw for Border {
 
             // Right
             self.draw_rectangle(
-                Offset::new(self.frame_width - self.size, corner_size),
+                offset.clone() + Offset::new(self.frame_width - self.size, corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
                 output,
