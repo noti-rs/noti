@@ -28,7 +28,7 @@ use super::internal_messages::RendererMessage;
 use config::{self, Config};
 use dbus::notification::{self, Notification};
 
-use crate::banner::BannerRect;
+use crate::{banner::BannerRect, cache::CachedLayouts};
 use render::{font::FontCollection, types::RectSize};
 
 pub(super) struct Window {
@@ -183,13 +183,18 @@ impl Window {
         self.banners.is_empty()
     }
 
-    pub(super) fn update_banners(&mut self, mut notifications: Vec<Notification>, config: &Config) {
-        self.replace_by_indices(&mut notifications, config);
+    pub(super) fn update_banners(
+        &mut self,
+        mut notifications: Vec<Notification>,
+        config: &Config,
+        cached_layouts: &CachedLayouts,
+    ) {
+        self.replace_by_indices(&mut notifications, config, cached_layouts);
 
         self.banners
             .extend(notifications.into_iter().map(|notification| {
                 let mut banner_rect = BannerRect::init(notification);
-                banner_rect.draw(&self.font_collection, config);
+                banner_rect.draw(&self.font_collection, config, cached_layouts);
                 (banner_rect.notification().id, banner_rect)
             }));
 
@@ -204,6 +209,7 @@ impl Window {
         &mut self,
         notifications: &mut Vec<Notification>,
         config: &Config,
+        cached_layouts: &CachedLayouts,
     ) {
         let matching_indices: Vec<usize> = notifications
             .iter()
@@ -216,7 +222,7 @@ impl Window {
 
             let rect = &mut self.banners[&notification.id];
             rect.update_data(notification);
-            rect.draw(&self.font_collection, config);
+            rect.draw(&self.font_collection, config, cached_layouts);
 
             debug!(
                 "Window: Replaced notification by id {}",
@@ -337,10 +343,15 @@ impl Window {
         }
     }
 
-    pub(super) fn redraw(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
+    pub(super) fn redraw(
+        &mut self,
+        qhandle: &QueueHandle<Window>,
+        config: &Config,
+        cached_layouts: &CachedLayouts,
+    ) {
         self.banners
             .values_mut()
-            .for_each(|banner| banner.draw(&self.font_collection, config));
+            .for_each(|banner| banner.draw(&self.font_collection, config, cached_layouts));
 
         self.draw(qhandle, config);
 

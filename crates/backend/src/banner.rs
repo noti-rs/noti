@@ -11,9 +11,11 @@ use render::{
     types::RectSize,
     widget::{
         self, Alignment, Coverage, Draw, DrawColor, FlexContainerBuilder, Position, WImage, WText,
-        WTextKind, WidgetConfiguration,
+        WTextKind, Widget, WidgetConfiguration,
     },
 };
+
+use crate::cache::{CachedLayout, CachedLayouts};
 
 pub struct BannerRect {
     data: Notification,
@@ -71,7 +73,12 @@ impl BannerRect {
         &self.framebuffer
     }
 
-    pub(crate) fn draw(&mut self, font_collection: &FontCollection, config: &Config) {
+    pub(crate) fn draw(
+        &mut self,
+        font_collection: &FontCollection,
+        config: &Config,
+        cached_layouts: &CachedLayouts,
+    ) {
         debug!("Banner (id={}): Beginning of draw", self.data.id);
 
         let rect_size = RectSize::new(
@@ -90,9 +97,7 @@ impl BannerRect {
         let border_spacing = Spacing::all_directional(display.border.size);
         let padding = &display.padding + border_spacing;
 
-        let font_size = config.general().font.size as f32;
-
-        let mut container = FlexContainerBuilder::default()
+        let mut layout: Widget = FlexContainerBuilder::default()
             .spacing(padding)
             .direction(widget::Direction::Horizontal)
             .alignment(Alignment::new(Position::Start, Position::Center))
@@ -111,18 +116,32 @@ impl BannerRect {
                     .into(),
             ])
             .build()
-            .unwrap();
+            .unwrap()
+            .into();
 
-        container.compile(
+        layout = match &display.layout {
+            config::Layout::Default => layout,
+            config::Layout::FromPath { path_buf } => cached_layouts
+                .get(path_buf)
+                .and_then(CachedLayout::layout)
+                .map(Clone::clone)
+                .unwrap_or(layout),
+        };
+
+        let font_size = config.general().font.size as f32;
+
+        layout.compile(
             rect_size,
             &WidgetConfiguration {
                 display_config: display,
                 notification: &self.data,
                 font_collection,
                 font_size,
+                override_properties: display.layout.is_default(),
             },
         );
-        container.draw(&mut |x, y, color| {
+
+        layout.draw(&mut |x, y, color| {
             self.put_color_at(x, y, Self::convert_color(color, self.get_color_at(x, y)))
         });
 

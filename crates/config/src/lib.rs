@@ -1,24 +1,34 @@
 use log::debug;
 use macros::{ConfigProperty, GenericBuilder};
 use serde::Deserialize;
-use shared::value::TryDowncast;
-use std::{collections::HashMap, fs, path::Path};
+use shared::{
+    file_watcher::{FileState, FilesWatcher},
+    value::TryDowncast,
+};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub mod colors;
 pub mod sorting;
 pub mod spacing;
 pub mod text;
-pub mod watcher;
 
 use colors::{Color, TomlUrgencyColors, UrgencyColors};
 use sorting::Sorting;
 use spacing::Spacing;
 use text::{TextProperty, TomlTextProperty};
-use watcher::{ConfigState, ConfigWatcher};
+
+const XDG_CONFIG_HOME: &str = "XDG_CONFIG_HOME";
+const HOME: &str = "HOME";
+const APP_NAME: &str = env!("APP_NAME");
+const CONFIG_FILE: &str = "config.toml";
 
 #[derive(Debug)]
 pub struct Config {
-    watcher: ConfigWatcher,
+    watcher: FilesWatcher,
     general: GeneralConfig,
     display: DisplayConfig,
 
@@ -27,11 +37,33 @@ pub struct Config {
 
 impl Config {
     pub fn init(user_config: Option<&str>) -> Self {
+        fn to_config_file(prefix: String) -> PathBuf {
+            let mut path_buf: PathBuf = prefix.into();
+            path_buf.push(APP_NAME);
+            path_buf.push(CONFIG_FILE);
+            path_buf
+        }
+
+        let config_paths = [
+            user_config.map(PathBuf::from),
+            std::env::var(XDG_CONFIG_HOME).map(to_config_file).ok(),
+            std::env::var(HOME)
+                .map(|mut path| {
+                    path.push_str("/.config");
+                    path
+                })
+                .map(to_config_file)
+                .ok(),
+        ]
+        .into_iter()
+        .filter_map(|maybe_path| maybe_path)
+        .collect();
+
         debug!("Config: Initializing");
         let watcher =
-            ConfigWatcher::init(user_config).expect("The config watcher must be initialized");
+            FilesWatcher::init(config_paths).expect("The config watcher must be initialized");
 
-        let (general, display, app_configs) = Self::parse(watcher.get_config_path());
+        let (general, display, app_configs) = Self::parse(watcher.get_watching_path());
         debug!("Config: Initialized");
 
         Self {
@@ -55,12 +87,18 @@ impl Config {
         self.app_configs.get(name).unwrap_or(&self.display)
     }
 
-    pub fn check_updates(&mut self) -> ConfigState {
+    pub fn displays(&self) -> impl Iterator<Item = &DisplayConfig> {
+        vec![&self.display]
+            .into_iter()
+            .chain(self.app_configs.values())
+    }
+
+    pub fn check_updates(&mut self) -> FileState {
         self.watcher.check_updates()
     }
 
     pub fn update(&mut self) {
-        let (general, display, app_configs) = Self::parse(self.watcher.get_config_path());
+        let (general, display, app_configs) = Self::parse(self.watcher.get_watching_path());
 
         self.general = general;
         self.display = display;
@@ -244,6 +282,8 @@ public! {
     #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
     #[cfg_prop(name(DisplayConfig), derive(Debug))]
     struct TomlDisplayConfig {
+        layout: Option<Layout>,
+
         #[cfg_prop(use_type(ImageProperty), mergeable)]
         image: Option<TomlImageProperty>,
 
@@ -268,6 +308,38 @@ public! {
 
         #[cfg_prop(default(0))]
         timeout: Option<u16>,
+    }
+}
+
+#[derive(Deserialize, Debug, Default, Clone)]
+#[serde(from = "String")]
+pub enum Layout {
+    #[default]
+    Default,
+    FromPath {
+        path_buf: PathBuf,
+    },
+}
+
+impl Layout {
+    pub fn is_default(&self) -> bool {
+        matches!(self, Layout::Default)
+    }
+}
+
+impl From<String> for Layout {
+    fn from(value: String) -> Self {
+        if value == "default" {
+            return Layout::Default;
+        }
+
+        Layout::FromPath {
+            path_buf: PathBuf::from(
+                shellexpand::env(&value)
+                    .map(|value| value.into_owned())
+                    .unwrap_or(shellexpand::tilde(&value).into_owned()),
+            ),
+        }
     }
 }
 

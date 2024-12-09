@@ -38,6 +38,7 @@ pub trait Draw {
     }
 }
 
+#[derive(Clone)]
 pub enum Widget {
     Image(WImage),
     Text(WText),
@@ -127,6 +128,7 @@ pub struct WidgetConfiguration<'a> {
     pub font_collection: &'a FontCollection,
     pub font_size: f32,
     pub display_config: &'a DisplayConfig,
+    pub override_properties: bool,
 }
 
 impl From<WImage> for Widget {
@@ -147,7 +149,7 @@ impl From<FlexContainer> for Widget {
     }
 }
 
-#[derive(macros::GenericBuilder, Builder)]
+#[derive(macros::GenericBuilder, Builder, Clone)]
 #[builder(pattern = "owned")]
 #[gbuilder(name(GBuilderFlexContainer))]
 pub struct FlexContainer {
@@ -397,6 +399,7 @@ impl Position {
     }
 }
 
+#[derive(Clone)]
 pub enum Direction {
     Horizontal,
     Vertical,
@@ -515,7 +518,7 @@ impl<'a> FlexContainerPlane<'a> {
     }
 }
 
-#[derive(macros::GenericBuilder)]
+#[derive(macros::GenericBuilder, Clone)]
 #[gbuilder(name(GBuilderWImage))]
 pub struct WImage {
     #[gbuilder(hidden, default(Image::Unknown))]
@@ -546,38 +549,40 @@ impl WImage {
         WidgetConfiguration {
             notification,
             display_config,
+            override_properties,
             ..
         }: &WidgetConfiguration,
     ) -> CompileState {
-        let property = display_config.image.clone();
+        if *override_properties {
+            self.property = display_config.image.clone();
+        }
+
         self.content = notification
             .hints
             .image_data
             .as_ref()
             .cloned()
-            .map(|image_data| Image::from_image_data(image_data, &property, &rect_size))
+            .map(|image_data| Image::from_image_data(image_data, &self.property, &rect_size))
             .or_else(|| {
                 notification
                     .hints
                     .image_path
                     .as_deref()
                     .or(Some(notification.app_icon.as_str()))
-                    .map(|svg_path| Image::from_svg(svg_path, &property, &rect_size))
+                    .map(|svg_path| Image::from_svg(svg_path, &self.property, &rect_size))
             })
             .unwrap_or(Image::Unknown);
 
         self.width = self
             .content
             .width()
-            .map(|width| width + property.margin.horizontal() as usize)
+            .map(|width| width + self.property.margin.horizontal() as usize)
             .unwrap_or(0);
         self.height = self
             .content
             .height()
-            .map(|height| height + property.margin.vertical() as usize)
+            .map(|height| height + self.property.margin.vertical() as usize)
             .unwrap_or(0);
-
-        self.property = property;
 
         if self.content.is_exists() {
             CompileState::Success
@@ -622,6 +627,18 @@ pub struct WText {
     property: TextProperty,
 }
 
+impl Clone for WText {
+    fn clone(&self) -> Self {
+        // INFO: we shouldn't clone compiled info about text
+        Self {
+            kind: self.kind.clone(),
+            content: None,
+            property: self.property.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum WTextKind {
     Title,
     Body,
@@ -663,39 +680,45 @@ impl WText {
             notification,
             font_size,
             font_collection,
+            override_properties,
         }: &WidgetConfiguration,
     ) -> CompileState {
+        let mut override_if = |r#override: bool, property: &TextProperty| {
+            if r#override {
+                self.property = property.clone()
+            }
+        };
+
         let colors = display_config
             .colors
             .by_urgency(&notification.hints.urgency);
         let foreground = Bgra::from(&colors.foreground);
 
-        let (text_cfg, notification_content): (TextProperty, NotificationContent) = match self.kind
-        {
-            WTextKind::Title => (
-                display_config.title.clone(),
-                notification.summary.as_str().into(),
-            ),
-            WTextKind::Body => (
-                display_config.body.clone(),
+        let notification_content: NotificationContent = match self.kind {
+            WTextKind::Title => {
+                override_if(*override_properties, &display_config.title);
+                notification.summary.as_str().into()
+            }
+            WTextKind::Body => {
+                override_if(*override_properties, &display_config.body);
                 if display_config.markup {
                     (&notification.body).into()
                 } else {
                     notification.body.body.as_str().into()
-                },
-            ),
+                }
+            }
         };
 
         let mut content = match notification_content {
             NotificationContent::Text(text) => {
-                TextRect::from_text(text, *font_size, &text_cfg.style, font_collection)
+                TextRect::from_text(text, *font_size, &self.property.style, font_collection)
             }
             NotificationContent::String(str) => {
-                TextRect::from_str(str, *font_size, &text_cfg.style, font_collection)
+                TextRect::from_str(str, *font_size, &self.property.style, font_collection)
             }
         };
 
-        Self::apply_properties(&mut content, &text_cfg);
+        Self::apply_properties(&mut content, &self.property);
         Self::apply_color(&mut content, foreground);
 
         content.compile(rect_size);
@@ -703,7 +726,6 @@ impl WText {
             CompileState::Failure
         } else {
             self.content = Some(content);
-            self.property = text_cfg;
             CompileState::Success
         }
     }

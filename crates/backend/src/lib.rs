@@ -10,6 +10,7 @@ mod render;
 mod banner;
 mod window;
 mod window_manager;
+mod cache;
 
 use dbus::actions::Action;
 use dbus::server::Server;

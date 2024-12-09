@@ -11,6 +11,7 @@ log = { workspace = true }
 dbus = { workspace = true }
 config = { workspace = true }
 render = { workspace = true }
+shared = { workspace = true }
 filetype = { path = "../filetype" }
 
 tempfile = "3.12.0"
