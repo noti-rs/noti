@@ -8,5 +8,5 @@ edition.workspace = true
 anyhow = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
-dbus = { path = "../dbus" }
-zbus = "4.4.0"
+dbus = { workspace = true }
+zbus = { workspace = true }

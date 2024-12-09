@@ -11,3 +11,6 @@ proc-macro = true
 proc-macro2 = "1.0.86"
 quote = "1.0.36"
 syn = "2.0.72"
+
+[dev-dependencies]
+shared = { workspace = true }

@@ -3,20 +3,11 @@ use std::time::Duration;
 use super::internal_messages::{
     InternalChannel, RendererInternalChannel, ServerInternalChannel, ServerMessage,
 };
-use config::{watcher::ConfigState, Config};
+use config::Config;
 use log::{debug, info};
+use shared::file_watcher::FileState;
 
-pub(super) use self::{banner::BannerRect, font::FontCollection, types::RectSize};
 use super::window_manager::WindowManager;
-
-mod banner;
-mod border;
-mod color;
-mod font;
-mod image;
-mod text;
-mod types;
-mod widget;
 
 pub(crate) struct Renderer {
     config: Config,
@@ -81,13 +72,15 @@ impl Renderer {
 
             {
                 match self.config.check_updates() {
-                    ConfigState::NotFound | ConfigState::Updated => {
+                    FileState::NotFound | FileState::Updated => {
                         self.config.update();
                         self.window_manager.update_by_config(&self.config)?;
                         info!("Renderer: Detected changes of config files and updated")
                     }
-                    ConfigState::NothingChanged => (),
+                    FileState::NothingChanged => (),
                 };
+
+                self.window_manager.update_cache();
             }
 
             std::thread::sleep(Duration::from_millis(50));

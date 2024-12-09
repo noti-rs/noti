@@ -3,6 +3,7 @@ use std::str::Chars;
 use dbus::notification::Urgency;
 use macros::ConfigProperty;
 use serde::Deserialize;
+use shared::value::TryDowncast;
 
 use super::public;
 
@@ -136,6 +137,17 @@ impl From<String> for Color {
                 },
             }
             .pre_mul_alpha()
+        }
+    }
+}
+
+impl TryFrom<shared::value::Value> for Color {
+    type Error = shared::error::ConversionError;
+    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            shared::value::Value::String(str) => Ok(str.into()),
+            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(shared::error::ConversionError::CannotConvert),
         }
     }
 }

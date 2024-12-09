@@ -1,0 +1,15 @@
+[package]
+name = "filetype"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared = { workspace = true }
+render = { workspace = true }
+config = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+
+pest = { version = "2.7.14", features = ["miette-error", "pretty-print"] }
+pest_derive = { version = "2.7.14", features = ["grammar-extras"] }

@@ -3,14 +3,13 @@ use std::sync::Arc;
 use log::debug;
 use wayland_client::{Connection, EventQueue, QueueHandle};
 
+use super::cache::CachedLayouts;
 use super::internal_messages::RendererMessage;
 use config::Config;
 use dbus::notification::Notification;
 
-use super::{
-    render::FontCollection,
-    window::{ConfigurationState, Window},
-};
+use super::window::{ConfigurationState, Window};
+use render::font::FontCollection;
 
 pub(crate) struct WindowManager {
     connection: Connection,
@@ -19,6 +18,7 @@ pub(crate) struct WindowManager {
     window: Option<Window>,
 
     font_collection: Arc<FontCollection>,
+    cached_layouts: CachedLayouts,
 
     events: Vec<RendererMessage>,
 }
@@ -29,6 +29,13 @@ impl WindowManager {
         let font_collection = Arc::new(FontCollection::load_by_font_name(
             &config.general().font.name,
         )?);
+        let cached_layouts: CachedLayouts = config
+            .displays()
+            .filter_map(|display| match &display.layout {
+                config::Layout::Default => None,
+                config::Layout::FromPath { path_buf } => Some(path_buf),
+            })
+            .collect();
 
         debug!("Window Manager: Created");
 
@@ -39,17 +46,32 @@ impl WindowManager {
             window: None,
 
             font_collection,
+            cached_layouts,
 
             events: vec![],
         })
     }
 
+    pub(crate) fn update_cache(&mut self) {
+        self.cached_layouts.update();
+    }
+
     pub(crate) fn update_by_config(&mut self, config: &Config) -> anyhow::Result<()> {
+        self.cached_layouts.extend_by_paths(
+            config
+                .displays()
+                .filter_map(|display| match &display.layout {
+                    config::Layout::Default => None,
+                    config::Layout::FromPath { path_buf } => Some(path_buf),
+                })
+                .collect(),
+        );
+
         if let Some(window) = self.window.as_mut() {
             let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
             window.reconfigure(config);
-            window.redraw(qhandle, config);
+            window.redraw(qhandle, config, &self.cached_layouts);
             window.frame(qhandle);
             window.commit();
         }
@@ -67,7 +89,7 @@ impl WindowManager {
         self.init_window(config)?;
 
         let window = unsafe { self.window.as_mut().unwrap_unchecked() };
-        window.update_banners(notifications, config);
+        window.update_banners(notifications, config, &self.cached_layouts);
 
         self.update_window(config)?;
         self.roundtrip_event_queue()
