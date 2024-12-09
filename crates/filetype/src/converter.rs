@@ -1,6 +1,8 @@
 use anyhow::bail;
 use config::{
-    spacing::{GBuilderSpacing, Spacing}, text::{GBuilderTextProperty, TextProperty}, Border, GBuilderBorder, GBuilderImageProperty, ImageProperty
+    spacing::{GBuilderSpacing, Spacing},
+    text::{GBuilderTextProperty, TextProperty},
+    Border, GBuilderBorder, GBuilderImageProperty, ImageProperty,
 };
 use log::warn;
 use pest::iterators::{Pair, Pairs};
@@ -194,13 +196,11 @@ impl GBuilder {
         for Property { name, value } in properties {
             let this = if self.contains_field(&name) {
                 &mut *self
+            } else if let Some(property) = associated_property.as_mut() {
+                property
             } else {
-                if let Some(property) = associated_property.as_mut() {
-                    property
-                } else {
-                    warn!("The '{name}' field for the {self_name} widget is unknown. Skipped.");
-                    continue;
-                }
+                warn!("The '{name}' field for the {self_name} widget is unknown. Skipped.");
+                continue;
             };
 
             if let Err(err) = this.set_value(&name, value) {

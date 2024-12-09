@@ -1,6 +1,6 @@
 mod config_property;
-mod generic_builder;
 mod general;
+mod generic_builder;
 
 use proc_macro::TokenStream;
 

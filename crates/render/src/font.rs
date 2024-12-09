@@ -84,12 +84,7 @@ impl FontCollection {
         Ok(Self { map, emoji })
     }
 
-    pub fn load_glyph_by_style(
-        &self,
-        font_style: &FontStyle,
-        ch: char,
-        px_size: f32,
-    ) -> Glyph {
+    pub fn load_glyph_by_style(&self, font_style: &FontStyle, ch: char, px_size: f32) -> Glyph {
         let font = self.map.get(font_style).unwrap_or(self.default_font());
         let glyph = font.load_glyph(ch, px_size);
 

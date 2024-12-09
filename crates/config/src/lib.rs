@@ -57,7 +57,7 @@ impl Config {
                 .ok(),
         ]
         .into_iter()
-        .filter_map(|maybe_path| maybe_path)
+        .flatten()
         .collect();
 
         debug!("Config: Initializing");

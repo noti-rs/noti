@@ -134,7 +134,7 @@ impl ConfigStructure {
                         .field_attr_info
                         .get(&field_name(field))
                         .map(|field_attr_info| field_attr_info.attributes.clone())
-                        .unwrap_or(proc_macro2::TokenStream::new());
+                        .unwrap_or_default();
                     quote! {
                         #attribute_tokens #field,
                     }

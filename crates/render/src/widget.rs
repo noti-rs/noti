@@ -625,6 +625,12 @@ impl WImage {
     }
 }
 
+impl Default for WImage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Draw for WImage {
     fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
         &self,

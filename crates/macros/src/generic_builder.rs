@@ -97,7 +97,7 @@ impl Structure {
         let fn_new = self.build_fn_new();
         let fn_contains_field = self.build_fn_contains_field(&unhidden_fields)?;
         let fn_set_value = self.build_fn_set_value(&unhidden_fields);
-        let fn_try_build = self.build_fn_try_build(target_struct, &attr_info);
+        let fn_try_build = self.build_fn_try_build(target_struct, attr_info);
 
         let gbuilder_ident = &self.name;
         quote! {
@@ -106,6 +106,12 @@ impl Structure {
                 #fn_contains_field
                 #fn_set_value
                 #fn_try_build
+            }
+
+            impl Default for #gbuilder_ident {
+                fn default() -> Self {
+                    Self::new()
+                }
             }
         }
         .to_tokens(tokens);

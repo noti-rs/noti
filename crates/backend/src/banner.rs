@@ -98,7 +98,7 @@ impl BannerRect {
             config::Layout::FromPath { path_buf } => cached_layouts
                 .get(path_buf)
                 .and_then(CachedLayout::layout)
-                .map(Clone::clone)
+                .cloned()
                 .unwrap_or_else(|| Self::default_layout(display)),
         };
 

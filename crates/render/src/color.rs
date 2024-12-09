@@ -195,6 +195,12 @@ impl Rgba {
     }
 }
 
+impl Default for Rgba {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl From<&[u8; 3]> for Rgba {
     fn from(value: &[u8; 3]) -> Self {
         Self {
