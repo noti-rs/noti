@@ -222,6 +222,10 @@ impl FlexContainer {
         self.children.retain(|child| !child.is_unknown());
 
         if self.children.is_empty() {
+            warn!(
+                "The flex container is empty! Did you add the widgets? \
+                Or check them, maybe they doesn't fit available space."
+            );
             CompileState::Failure
         } else {
             CompileState::Success
@@ -254,6 +258,7 @@ impl FlexContainer {
         }
     }
 
+    #[allow(unused)]
     fn max_main_len(&self) -> usize {
         match &self.direction {
             Direction::Horizontal => self.max_width(),
@@ -609,6 +614,16 @@ impl WImage {
             .map(|height| height + self.property.margin.vertical() as usize)
             .unwrap_or(0);
 
+        if self.width > rect_size.width || self.height > rect_size.height {
+            warn!(
+                "The image doesn't fit to available space.\
+                \nThe image size: width={}, height={}.\
+                \nAvailable space: width={}, height={}.",
+                self.width, self.height, rect_size.width, rect_size.height
+            );
+            return CompileState::Failure;
+        }
+
         if self.content.is_exists() {
             CompileState::Success
         } else {
@@ -669,9 +684,11 @@ impl Clone for WText {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, derive_more::Display)]
 pub enum WTextKind {
+    #[display("title")]
     Title,
+    #[display("body")]
     Body,
 }
 
@@ -752,8 +769,13 @@ impl WText {
         Self::apply_properties(&mut content, &self.property);
         Self::apply_color(&mut content, foreground);
 
-        content.compile(rect_size);
+        content.compile(rect_size.clone());
         if content.is_empty() {
+            warn!(
+                "The text with kind {} doesn't fit to available space. \
+                Available space: width={}, height={}.",
+                self.kind, rect_size.width, rect_size.height
+            );
             CompileState::Failure
         } else {
             self.content = Some(content);
