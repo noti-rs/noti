@@ -333,7 +333,7 @@ impl Draw for FlexContainer {
                 if self.children.len() <= 1 {
                     0
                 } else {
-                    (plane.main_len - self.max_main_len()) / self.children.len().saturating_sub(1)
+                    (plane.main_len - self.main_len()) / self.children.len().saturating_sub(1)
                 }
             }
         };
