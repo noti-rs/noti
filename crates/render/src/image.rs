@@ -4,7 +4,7 @@ use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 use config::{ImageProperty, ResizingMethod};
 use dbus::image::ImageData;
 
-use crate::types::RectSize;
+use crate::{drawer::Drawer, types::RectSize};
 
 use super::{
     border::{Border, BorderBuilder},
@@ -341,11 +341,7 @@ impl Image {
 }
 
 impl Draw for Image {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let Image::Exists { data, border } = self else {
             return;
         };
@@ -365,7 +361,7 @@ impl Draw for Image {
                     };
 
                 let color = unsafe { chunks.next().unwrap_unchecked() }.into_bgra();
-                output(
+                drawer.draw_color(
                     x + offset.x,
                     y + offset.y,
                     if border_coverage == 1.0 {

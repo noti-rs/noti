@@ -12,6 +12,8 @@ use std::{
 use config::text::TextStyle;
 use dbus::text::EntityKind;
 
+use crate::drawer::Drawer;
+
 use super::{
     color::Bgra,
     image::Image,
@@ -217,14 +219,10 @@ impl Glyph {
 }
 
 impl Draw for Glyph {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &super::types::Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &super::types::Offset, drawer: &mut Drawer) {
         match self {
             Glyph::Image(img) => {
-                img.draw_with_offset(offset, output);
+                img.draw_with_offset(offset, drawer);
             }
             Glyph::Outline {
                 color,
@@ -233,7 +231,7 @@ impl Draw for Glyph {
             } => {
                 let bounds = outlined_glyph.px_bounds();
                 outlined_glyph.draw(|x, y, coverage| {
-                    output(
+                    drawer.draw_color(
                         (bounds.min.x.round() as i32 + x as i32).clamp(0, i32::MAX) as usize
                             + offset.x,
                         (bounds.min.y.round() as i32 + y as i32).clamp(0, i32::MAX) as usize

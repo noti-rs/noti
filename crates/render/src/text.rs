@@ -9,11 +9,13 @@ use config::{
 };
 use dbus::text::Text;
 
+use crate::drawer::Drawer;
+
 use super::{
     color::Bgra,
     font::{FontCollection, FontStyle, Glyph},
     types::{Offset, RectSize},
-    widget::{Draw, DrawColor},
+    widget::Draw,
 };
 
 #[derive(Default)]
@@ -266,16 +268,12 @@ impl TextRect {
 }
 
 impl Draw for TextRect {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let offset = Offset::from(&self.margin) + offset.clone();
 
         self.lines
             .iter()
-            .for_each(|line| line.draw_with_offset(&offset, output))
+            .for_each(|line| line.draw_with_offset(&offset, drawer))
     }
 }
 
@@ -440,11 +438,7 @@ impl LineRect {
 }
 
 impl Draw for LineRect {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let (x, x_incrementor) = match &self.justification {
             TextJustification::Center => (self.available_space() / 2, self.spacebar_width),
             TextJustification::Left => (0, self.spacebar_width),
@@ -462,7 +456,7 @@ impl Draw for LineRect {
         let mut offset = offset.clone() + Offset::new(x, self.y_offset);
 
         self.words.iter().for_each(|word| {
-            word.draw_with_offset(&offset, output);
+            word.draw_with_offset(&offset, drawer);
             offset.x += x_incrementor + word.width();
         });
     }
@@ -537,14 +531,10 @@ impl WordRect {
 }
 
 impl Draw for WordRect {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let mut offset = offset.to_owned();
         self.glyphs.iter().for_each(|glyph| {
-            glyph.draw_with_offset(&offset, output);
+            glyph.draw_with_offset(&offset, drawer);
             offset.x += glyph.advance_width();
         })
     }

@@ -30,14 +30,10 @@ pub enum DrawColor {
 }
 
 pub trait Draw {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    );
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer);
 
-    fn draw<Output: FnMut(usize, usize, DrawColor)>(&self, output: &mut Output) {
-        self.draw_with_offset(&Default::default(), output);
+    fn draw(&self, drawer: &mut Drawer) {
+        self.draw_with_offset(&Default::default(), drawer);
     }
 }
 
@@ -107,11 +103,7 @@ impl Widget {
 }
 
 impl Draw for Widget {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, output: &mut Drawer) {
         match self {
             Widget::Image(image) => image.draw_with_offset(offset, output),
             Widget::Text(text) => text.draw_with_offset(offset, output),
@@ -317,11 +309,7 @@ impl FlexContainer {
 }
 
 impl Draw for FlexContainer {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let Some(mut rect_size) = self.rect_size.as_ref().cloned() else {
             panic!(
                 "The rectangle size must be computed by `compile()` method of parent container!"
@@ -362,17 +350,17 @@ impl Draw for FlexContainer {
                     child.len_by_direction(&self.direction.orthogonalize()),
                 );
 
-            child.draw_with_offset(&plane.as_offset(), &mut subdrawer.as_mut_output());
+            child.draw_with_offset(&plane.as_offset(), &mut subdrawer);
 
             plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
             plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset;
         });
 
         if let Some(compiled_border) = self.compiled_border.as_ref() {
-            compiled_border.draw_with_offset(&Offset::no_offset(), &mut subdrawer.as_mut_output());
+            compiled_border.draw_with_offset(&Offset::no_offset(), &mut subdrawer);
         }
 
-        subdrawer.draw_with_offset(offset, output);
+        drawer.draw_area(offset, subdrawer);
     }
 }
 
@@ -651,18 +639,14 @@ impl Default for WImage {
 }
 
 impl Draw for WImage {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         if !self.content.is_exists() {
             return;
         }
 
         // INFO: The ImageProperty initializes with Image so we can calmly unwrap
         let offset = Offset::from(&self.property.margin) + offset.clone();
-        self.content.draw_with_offset(&offset, output);
+        self.content.draw_with_offset(&offset, drawer);
     }
 }
 
@@ -815,13 +799,9 @@ impl WText {
 }
 
 impl Draw for WText {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         if let Some(content) = self.content.as_ref() {
-            content.draw_with_offset(offset, output)
+            content.draw_with_offset(offset, drawer)
         }
     }
 }

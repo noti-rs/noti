@@ -1,6 +1,6 @@
 use crate::{
     color::Bgra,
-    types::RectSize,
+    types::{Offset, RectSize},
     widget::{Coverage, DrawColor},
 };
 
@@ -17,8 +17,64 @@ impl Drawer {
         }
     }
 
-    pub fn as_mut_output(&mut self) -> impl FnMut(usize, usize, DrawColor) + use<'_> {
-        |x, y, color| self.draw_color(x, y, color)
+    pub fn draw_area(&mut self, offset: &Offset, mut subdrawer: Drawer) {
+        if let Some(untransparent_pos) = subdrawer
+            .data
+            .iter()
+            .position(|color| !color.is_transparent())
+        {
+            let start_y = untransparent_pos / subdrawer.size.width;
+            let start_x = untransparent_pos - subdrawer.size.width * start_y;
+
+            let end_x = subdrawer.size.width - start_x;
+            let end_y = subdrawer.size.height - start_y;
+
+            for y in start_y..end_y {
+                let is_corner =
+                    start_x.saturating_sub(y) > 0 || start_x.saturating_sub(end_y - y) > 0;
+                if is_corner {
+                    let start_range = subdrawer.abs_pos_at(0, y)..subdrawer.abs_pos_at(start_x, y);
+                    let end_range = subdrawer.abs_pos_at(end_x, y)
+                        ..subdrawer.abs_pos_at(subdrawer.size.width, y);
+                    subdrawer.data[start_range]
+                        .iter()
+                        .zip(0..start_x)
+                        .chain(
+                            subdrawer.data[end_range]
+                                .iter()
+                                .zip(end_x..subdrawer.size.width),
+                        )
+                        .for_each(|(color, x)| {
+                            if color.is_transparent() {
+                                self.draw_color(
+                                    offset.x + x,
+                                    offset.y + y,
+                                    DrawColor::Overlay(color.to_owned()),
+                                )
+                            } else {
+                                self.draw_color(
+                                    offset.x + x,
+                                    offset.y + y,
+                                    DrawColor::Replace(color.to_owned()),
+                                );
+                            }
+                        });
+
+                    let line_in_parent = self.abs_pos_at(offset.x + start_x, offset.y + y)
+                        ..self.abs_pos_at(offset.x + end_x, offset.y + y);
+                    let line_in_child =
+                        subdrawer.abs_pos_at(start_x, y)..subdrawer.abs_pos_at(end_x, y);
+                    self.data[line_in_parent].swap_with_slice(&mut subdrawer.data[line_in_child]);
+                } else {
+                    let line_in_parent = self.abs_pos_at(offset.x, offset.y + y)
+                        ..self.abs_pos_at(offset.x + subdrawer.size.width, offset.y + y);
+                    let line_in_child =
+                        subdrawer.abs_pos_at(0, y)..subdrawer.abs_pos_at(subdrawer.size.width, y);
+
+                    self.data[line_in_parent].swap_with_slice(&mut subdrawer.data[line_in_child]);
+                }
+            }
+        }
     }
 
     pub fn draw_color(&mut self, x: usize, y: usize, color: DrawColor) {
@@ -37,33 +93,17 @@ impl Drawer {
     }
 
     fn get_color_at(&self, x: usize, y: usize) -> &Bgra {
-        &self.data[self.size.width * y + x]
+        &self.data[self.abs_pos_at(x, y)]
     }
 
     fn put_color_at(&mut self, x: usize, y: usize, color: Bgra) {
-        self.data[self.size.width * y + x] = color;
+        let pos = self.abs_pos_at(x, y);
+        self.data[pos] = color;
     }
 
-    pub fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        self,
-        offset: &crate::types::Offset,
-        output: &mut Output,
-    ) {
-        let mut x = 0;
-        let mut y = 0;
-        for cell in self.data {
-            if cell.is_transparent() {
-                output(offset.x + x, offset.y + y, DrawColor::Overlay(cell));
-            } else {
-                output(offset.x + x, offset.y + y, DrawColor::Replace(cell));
-            }
-
-            x += 1;
-            if x == self.size.width {
-                x = 0;
-                y += 1;
-            }
-        }
+    #[inline(always = true)]
+    fn abs_pos_at(&self, x: usize, y: usize) -> usize {
+        self.size.width * y + x
     }
 }
 

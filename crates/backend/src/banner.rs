@@ -109,7 +109,7 @@ impl BannerRect {
             },
         );
 
-        layout.draw(&mut drawer.as_mut_output());
+        layout.draw(&mut drawer);
         self.framebuffer = drawer.into();
 
         debug!("Banner (id={}): Complete draw", self.data.id);

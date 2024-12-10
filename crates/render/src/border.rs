@@ -1,6 +1,8 @@
 use derive_builder::Builder;
 use log::warn;
 
+use crate::drawer::Drawer;
+
 use super::{
     color::Bgra,
     types::Offset,
@@ -202,11 +204,11 @@ impl Border {
     }
 
     #[inline]
-    fn draw_corner<Output: FnMut(usize, usize, DrawColor)>(
+    fn draw_corner(
         offset: Offset,
         corner: &Matrix<MaybeColor>,
         corner_type: Corner,
-        output: &mut Output,
+        drawer: &mut Drawer,
     ) {
         let corner_size = corner.len();
         let mut x_range = offset.x..offset.x + corner_size;
@@ -225,7 +227,7 @@ impl Border {
 
             for (y, corner_cell) in y_range.zip(corner_row) {
                 if let Some(color) = corner_cell {
-                    output(x, y, color.clone());
+                    drawer.draw_color(x, y, color.clone());
                 } else {
                     break;
                 }
@@ -234,27 +236,17 @@ impl Border {
     }
 
     #[inline]
-    fn draw_rectangle<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: Offset,
-        width: usize,
-        height: usize,
-        output: &mut Output,
-    ) {
+    fn draw_rectangle(&self, offset: Offset, width: usize, height: usize, drawer: &mut Drawer) {
         for x in offset.x..width + offset.x {
             for y in offset.y..height + offset.y {
-                output(x, y, DrawColor::Replace(self.color.clone()))
+                drawer.draw_color(x, y, DrawColor::Replace(self.color.clone()))
             }
         }
     }
 }
 
 impl Draw for Border {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let Some(corner) = self.corner_coverage.as_ref() else {
             if !self.compiled {
                 warn!("Border: Not compiled, refused to draw itself");
@@ -263,12 +255,12 @@ impl Draw for Border {
         };
 
         let corner_size = corner.len();
-        Self::draw_corner(offset.clone(), corner, Corner::TopLeft, output);
+        Self::draw_corner(offset.clone(), corner, Corner::TopLeft, drawer);
         Self::draw_corner(
             offset.clone() + Offset::new_x(self.frame_width - corner_size),
             corner,
             Corner::TopRight,
-            output,
+            drawer,
         );
         Self::draw_corner(
             offset.clone()
@@ -278,13 +270,13 @@ impl Draw for Border {
                 ),
             corner,
             Corner::BottomRight,
-            output,
+            drawer,
         );
         Self::draw_corner(
             offset.clone() + Offset::new_y(self.frame_height - corner_size),
             corner,
             Corner::BottomLeft,
-            output,
+            drawer,
         );
 
         if self.size != 0 {
@@ -293,7 +285,7 @@ impl Draw for Border {
                 offset.clone() + Offset::new_x(corner_size),
                 self.frame_width - corner_size * 2,
                 self.size,
-                output,
+                drawer,
             );
 
             // Bottom
@@ -301,7 +293,7 @@ impl Draw for Border {
                 offset.clone() + Offset::new(corner_size, self.frame_height - self.size),
                 self.frame_width - corner_size * 2,
                 self.size,
-                output,
+                drawer,
             );
 
             // Left
@@ -309,7 +301,7 @@ impl Draw for Border {
                 offset.clone() + Offset::new_y(corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
-                output,
+                drawer,
             );
 
             // Right
@@ -317,7 +309,7 @@ impl Draw for Border {
                 offset.clone() + Offset::new(self.frame_width - self.size, corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
-                output,
+                drawer,
             );
         }
     }
