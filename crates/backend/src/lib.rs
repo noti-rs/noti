@@ -3,12 +3,14 @@ use std::thread;
 use anyhow::Context;
 use config::Config;
 use log::{debug, info, warn};
+use scheduler::Scheduler;
 use tokio::sync::mpsc::unbounded_channel;
 
 mod banner;
 mod cache;
 mod internal_messages;
 mod render;
+mod scheduler;
 mod window;
 mod window_manager;
 
@@ -27,6 +29,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 
     let backend_thread = thread::spawn(move || renderer.run());
 
+    let mut scheduler = Scheduler::new();
+
     loop {
         while let Ok(action) = receiver.try_recv() {
             match action {
@@ -42,6 +46,13 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
                     )?;
                     debug!("Backend: Sended notification with id {id} to render to close it");
                 }
+                Action::Schedule(notification) => {
+                    debug!(
+                        "Backend: Scheduled notification with id {} to {}",
+                        &notification.id, &notification.time
+                    );
+                    scheduler.add(notification);
+                }
                 Action::Close(None) => {
                     warn!("Backend: Unsupported method 'Close'. Ignored");
                 }
@@ -53,6 +64,14 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
                     warn!("Backend: Unsupported method 'CloseAll'. Ignored");
                 }
             }
+        }
+
+        let due_notifications = scheduler.pop_due_notifications();
+
+        for scheduled_notification in due_notifications {
+            server_internal_channel.send_to_renderer(
+                internal_messages::ServerMessage::ShowNotification(scheduled_notification.data),
+            )?;
         }
 
         while let Ok(message) = server_internal_channel.try_recv_from_renderer() {

@@ -17,6 +17,33 @@ pub struct Notification {
     pub created_at: u64,
 }
 
+#[derive(Debug)]
+pub struct ScheduledNotification {
+    pub id: u32,
+    pub time: String,
+    pub data: Box<Notification>,
+}
+
+impl Ord for ScheduledNotification {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.time.cmp(&other.time)
+    }
+}
+
+impl PartialOrd for ScheduledNotification {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.time.cmp(&other.time))
+    }
+}
+
+impl PartialEq for ScheduledNotification {
+    fn eq(&self, other: &Self) -> bool {
+        self.time == other.time
+    }
+}
+
+impl Eq for ScheduledNotification {}
+
 #[derive(Debug, Clone)]
 pub struct Hints {
     /// The urgency level.
@@ -63,6 +90,7 @@ pub struct Hints {
     /// The localized display name will be used to annotate the icon for accessibility purposes.
     /// The icon name should be compliant with the Freedesktop.org Icon Naming Specification.
     pub action_icons: Option<bool>,
+    pub schedule: Option<String>,
 }
 
 impl Hints {
@@ -99,6 +127,7 @@ impl From<HashMap<&str, Value<'_>>> for Hints {
         let suppress_sound = Self::get_hint_value(&hints, "suppress-sound");
         let transient = Self::get_hint_value(&hints, "transient");
         let action_icons = Self::get_hint_value(&hints, "action_icons");
+        let schedule = Self::get_hint_value(&hints, "schedule");
         let coordinates = Coordinates::from_hints(&hints);
 
         Hints {
@@ -114,6 +143,7 @@ impl From<HashMap<&str, Value<'_>>> for Hints {
             transient,
             coordinates,
             action_icons,
+            schedule,
         }
     }
 }
