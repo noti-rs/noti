@@ -337,8 +337,7 @@ impl Draw for FlexContainer {
             self.spacing.left() as usize + self.border.size as usize,
             self.spacing.top() as usize + self.border.size as usize,
         );
-        let initial_plane =
-            FlexContainerPlane::new_only_offset(initial_offset, &self.direction);
+        let initial_plane = FlexContainerPlane::new_only_offset(initial_offset, &self.direction);
         plane.relocate(&initial_plane.as_offset());
 
         plane.main_axis_offset += self

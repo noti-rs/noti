@@ -336,9 +336,9 @@ impl From<String> for Layout {
 
         Layout::FromPath {
             path_buf: PathBuf::from(
-                shellexpand::env(&value)
+                shellexpand::full(&value)
                     .map(|value| value.into_owned())
-                    .unwrap_or(shellexpand::tilde(&value).into_owned()),
+                    .unwrap_or(value),
             ),
         }
     }
