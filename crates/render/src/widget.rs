@@ -322,24 +322,28 @@ impl Draw for FlexContainer {
         offset: &Offset,
         output: &mut Output,
     ) {
-        let Some(rect_size) = self.rect_size.as_ref().cloned() else {
+        let Some(mut rect_size) = self.rect_size.as_ref().cloned() else {
             panic!(
                 "The rectangle size must be computed by `compile()` method of parent container!"
             );
         };
 
         let mut subdrawer = Drawer::new(self.background_color.clone(), rect_size.clone());
+
+        rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
         let mut plane = FlexContainerPlane::new(rect_size, &self.direction);
 
+        let initial_offset = Offset::new(
+            self.spacing.left() as usize + self.border.size as usize,
+            self.spacing.top() as usize + self.border.size as usize,
+        );
         let initial_plane =
-            FlexContainerPlane::new_only_offset(Offset::from(&self.spacing), &self.direction);
+            FlexContainerPlane::new_only_offset(initial_offset, &self.direction);
         plane.relocate(&initial_plane.as_offset());
 
         plane.main_axis_offset += self
             .main_axis_alignment()
             .compute_initial_pos(plane.main_len, self.main_len());
-
-        plane.shrink_rect_size_by(&self.spacing);
 
         let incrementor = match self.main_axis_alignment() {
             Position::Start | Position::Center | Position::End => 0,
@@ -526,16 +530,6 @@ impl<'a> FlexContainerPlane<'a> {
 
         self.main_axis_offset = x;
         self.auxiliary_axis_offset = y;
-    }
-
-    fn shrink_rect_size_by(&mut self, spacing: &Spacing) {
-        let (mut width, mut height) = (&mut self.main_len, &mut self.auxiliary_len);
-
-        if let Direction::Vertical = self.direction {
-            (width, height) = (height, width);
-        }
-
-        spacing.shrink(width, height);
     }
 
     fn as_rect_size(&self) -> RectSize {
