@@ -28,9 +28,9 @@ impl Drawer {
     fn convert_color(color: DrawColor, background: &Bgra) -> Bgra {
         match color {
             DrawColor::Replace(color) => color,
-            DrawColor::Overlay(foreground) => foreground.overlay_on(&background),
+            DrawColor::Overlay(foreground) => foreground.overlay_on(background),
             DrawColor::OverlayWithCoverage(foreground, Coverage(factor)) => {
-                foreground.linearly_interpolate(&background, factor)
+                foreground.linearly_interpolate(background, factor)
             }
             DrawColor::Transparent(Coverage(factor)) => background.clone() * factor,
         }
