@@ -42,6 +42,10 @@ impl Bgra {
         }
     }
 
+    pub fn is_transparent(&self) -> bool {
+        self.alpha == 0.0
+    }
+
     pub fn into_rgba(self) -> Rgba {
         self.into()
     }

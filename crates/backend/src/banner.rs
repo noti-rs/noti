@@ -6,11 +6,12 @@ use log::{debug, trace};
 
 use render::{
     color::Bgra,
+    drawer::Drawer,
     font::FontCollection,
     types::RectSize,
     widget::{
-        self, Alignment, Coverage, Draw, DrawColor, FlexContainerBuilder, Position, WImage, WText,
-        WTextKind, Widget, WidgetConfiguration,
+        self, Alignment, Draw, FlexContainerBuilder, Position, WImage, WText, WTextKind, Widget,
+        WidgetConfiguration,
     },
 };
 
@@ -20,7 +21,6 @@ pub struct BannerRect {
     data: Notification,
     created_at: time::Instant,
 
-    stride: usize,
     framebuffer: Vec<u8>,
 }
 
@@ -32,7 +32,6 @@ impl BannerRect {
             data: notification,
             created_at: time::Instant::now(),
 
-            stride: 0,
             framebuffer: vec![],
         }
     }
@@ -86,12 +85,7 @@ impl BannerRect {
         );
 
         let display = config.display_by_app(&self.data.app_name);
-        let colors = display.colors.by_urgency(&self.data.hints.urgency);
-
-        let background: Bgra = Bgra::from(&colors.background);
-
-        self.init_framebuffer(&rect_size, &background);
-        self.stride = rect_size.width * 4;
+        let mut drawer = Drawer::new(Bgra::new(), rect_size.clone());
 
         let mut layout = match &display.layout {
             config::Layout::Default => Self::default_layout(display),
@@ -115,48 +109,10 @@ impl BannerRect {
             },
         );
 
-        layout.draw(&mut |x, y, color| {
-            self.put_color_at(x, y, Self::convert_color(color, self.get_color_at(x, y)))
-        });
+        layout.draw(&mut drawer.as_mut_output());
+        self.framebuffer = drawer.into();
 
         debug!("Banner (id={}): Complete draw", self.data.id);
-    }
-
-    fn init_framebuffer(&mut self, rect_size: &RectSize, background: &Bgra) {
-        self.framebuffer = vec![background.clone(); rect_size.area()]
-            .into_iter()
-            .flat_map(|bgra| bgra.into_slice())
-            .collect();
-
-        debug!("Banner (id={}): Initialized framebuffer", self.data.id);
-    }
-
-    fn convert_color(color: DrawColor, background: Bgra) -> Bgra {
-        match color {
-            DrawColor::Replace(color) => color,
-            DrawColor::Overlay(foreground) => foreground.overlay_on(&background),
-            DrawColor::OverlayWithCoverage(foreground, Coverage(factor)) => {
-                foreground.linearly_interpolate(&background, factor)
-            }
-            DrawColor::Transparent(Coverage(factor)) => background * factor,
-        }
-    }
-
-    fn get_color_at(&self, x: usize, y: usize) -> Bgra {
-        let position = y * self.stride + x * 4;
-        unsafe {
-            TryInto::<&[u8; 4]>::try_into(&self.framebuffer[position..position + 4])
-                .unwrap_unchecked()
-                .into()
-        }
-    }
-
-    fn put_color_at(&mut self, x: usize, y: usize, color: Bgra) {
-        let position = y * self.stride + x * 4;
-        unsafe {
-            *TryInto::<&mut [u8; 4]>::try_into(&mut self.framebuffer[position..position + 4])
-                .unwrap_unchecked() = color.into_slice()
-        }
     }
 
     fn default_layout(display_config: &DisplayConfig) -> Widget {

@@ -5,3 +5,4 @@ pub mod image;
 pub mod text;
 pub mod types;
 pub mod widget;
+pub mod drawer;

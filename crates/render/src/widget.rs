@@ -8,7 +8,7 @@ use shared::{
     value::{TryDowncast, Value},
 };
 
-use crate::border::BorderBuilder;
+use crate::{border::BorderBuilder, drawer::Drawer};
 
 use super::{
     border::Border as RenderableBorder,
@@ -160,6 +160,10 @@ pub struct FlexContainer {
     #[gbuilder(hidden, default(None))]
     rect_size: Option<RectSize>,
 
+    #[builder(private, setter(skip))]
+    #[gbuilder(hidden, default(Bgra::new()))]
+    background_color: Bgra,
+
     #[builder(default = "usize::MAX")]
     #[gbuilder(default(usize::MAX))]
     max_width: usize,
@@ -197,6 +201,14 @@ impl FlexContainer {
             height: self.max_height,
         };
         self.rect_size = Some(rect_size.clone());
+
+        self.background_color = Bgra::from(
+            &configuration
+                .display_config
+                .colors
+                .by_urgency(&configuration.notification.hints.urgency)
+                .background,
+        );
 
         self.compiled_border = Some(
             BorderBuilder::default()
@@ -310,20 +322,17 @@ impl Draw for FlexContainer {
         offset: &Offset,
         output: &mut Output,
     ) {
-        assert!(
-            self.rect_size.is_some(),
-            "The rectangle size must be computed by `compile()` methot of parent container."
-        );
+        let Some(rect_size) = self.rect_size.as_ref().cloned() else {
+            panic!(
+                "The rectangle size must be computed by `compile()` method of parent container!"
+            );
+        };
 
-        let mut plane = FlexContainerPlane::new(
-            unsafe { self.rect_size.as_ref().cloned().unwrap_unchecked() },
-            &self.direction,
-        );
+        let mut subdrawer = Drawer::new(self.background_color.clone(), rect_size.clone());
+        let mut plane = FlexContainerPlane::new(rect_size, &self.direction);
 
-        let initial_plane = FlexContainerPlane::new_only_offset(
-            Offset::from(&self.spacing) + offset.clone(),
-            &self.direction,
-        );
+        let initial_plane =
+            FlexContainerPlane::new_only_offset(Offset::from(&self.spacing), &self.direction);
         plane.relocate(&initial_plane.as_offset());
 
         plane.main_axis_offset += self
@@ -350,15 +359,17 @@ impl Draw for FlexContainer {
                     child.len_by_direction(&self.direction.orthogonalize()),
                 );
 
-            child.draw_with_offset(&plane.as_offset(), output);
+            child.draw_with_offset(&plane.as_offset(), &mut subdrawer.as_mut_output());
 
             plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
             plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset;
         });
 
         if let Some(compiled_border) = self.compiled_border.as_ref() {
-            compiled_border.draw_with_offset(offset, output);
+            compiled_border.draw_with_offset(&Offset::no_offset(), &mut subdrawer.as_mut_output());
         }
+
+        subdrawer.draw_with_offset(offset, output);
     }
 }
 
