@@ -128,6 +128,7 @@ The currently possible properties of `display` table:
 
 | Property name                  | Type                                                                    | Default value |
 | :----------------------------- | :---------------------------------------------------------------------- | :-----------: |
+| [layout](./Filetype.md)        | `String`                                                                |   "default"   |
 | [image](#image)                | `Image`                                                                 |       -       |
 | [padding](#padding-and-margin) | `u8` or `[u8, u8]` or `[u8, u8, u8]` or `[u8, u8, u8, u8]` or `Spacing` |       0       |
 | [border](#border)              | `Border`                                                                |       -       |
@@ -137,6 +138,10 @@ The currently possible properties of `display` table:
 | [body](#text)                  | `Text`                                                                  |       -       |
 | [markup](#markup)              | `bool`                                                                  |     true      |
 | [timeout](#timeout)            | `u16`                                                                   |       0       |
+
+The [layout](./Filetype.md) property should have or `"default"` value or path to file in which
+describes layout for banner. You can pass path with environment variables like 
+`"$XDG_CONFIG_HOME/noti/File.noti"` or use tilde - `"~/.config/noti/File.noti`.
 
 The `Spacing` table:
 
