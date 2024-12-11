@@ -12,22 +12,24 @@ use std::{
 use config::text::TextStyle;
 use dbus::text::EntityKind;
 
+use crate::drawer::Drawer;
+
 use super::{
     color::Bgra,
     image::Image,
     widget::{Coverage, Draw, DrawColor},
 };
 
-pub(crate) struct FontCollection {
+pub struct FontCollection {
     map: HashMap<FontStyle, Font>,
-    pub(crate) emoji: Option<OwnedFace>,
+    pub emoji: Option<OwnedFace>,
 }
 
 impl FontCollection {
     const ELLIPSIS: char = '…';
     const ACCEPTED_STYLES: [&'static str; 3] = ["Regular", "Bold", "Italic"];
 
-    pub(crate) fn load_by_font_name(font_name: &str) -> anyhow::Result<Self> {
+    pub fn load_by_font_name(font_name: &str) -> anyhow::Result<Self> {
         debug!("Font: Trying load font by name {font_name}");
 
         let process_result = Command::new("fc-list")
@@ -84,12 +86,7 @@ impl FontCollection {
         Ok(Self { map, emoji })
     }
 
-    pub(crate) fn load_glyph_by_style(
-        &self,
-        font_style: &FontStyle,
-        ch: char,
-        px_size: f32,
-    ) -> Glyph {
+    pub fn load_glyph_by_style(&self, font_style: &FontStyle, ch: char, px_size: f32) -> Glyph {
         let font = self.map.get(font_style).unwrap_or(self.default_font());
         let glyph = font.load_glyph(ch, px_size);
 
@@ -102,13 +99,13 @@ impl FontCollection {
         }
     }
 
-    pub(crate) fn emoji_image(&self, ch: char, size: u16) -> Option<Image> {
+    pub fn emoji_image(&self, ch: char, size: u16) -> Option<Image> {
         let face = self.emoji.as_ref()?.as_face_ref();
         let glyph_id = face.glyph_index(ch)?;
         Image::from_raster_glyph_image(face.glyph_raster_image(glyph_id, size)?, size as u32)
     }
 
-    pub(crate) fn max_height(&self, px_size: f32) -> usize {
+    pub fn max_height(&self, px_size: f32) -> usize {
         self.map
             .values()
             .map(|font| font.get_height(px_size).round() as usize)
@@ -116,11 +113,11 @@ impl FontCollection {
             .unwrap_or_default()
     }
 
-    pub(crate) fn get_spacebar_width(&self, px_size: f32) -> f32 {
+    pub fn get_spacebar_width(&self, px_size: f32) -> f32 {
         self.default_font().get_glyph_width(' ', px_size)
     }
 
-    pub(crate) fn get_ellipsis(&self, px_size: f32) -> Glyph {
+    pub fn get_ellipsis(&self, px_size: f32) -> Glyph {
         self.load_glyph_by_style(&FontStyle::Regular, Self::ELLIPSIS, px_size)
     }
 
@@ -132,7 +129,7 @@ impl FontCollection {
 }
 
 #[derive(Debug)]
-pub(crate) struct Font {
+pub struct Font {
     style: FontStyle,
     data: ab_glyph::FontVec,
 }
@@ -152,18 +149,18 @@ impl Font {
         Ok(Self { style, data })
     }
 
-    pub(crate) fn get_height(&self, px_size: f32) -> f32 {
+    pub fn get_height(&self, px_size: f32) -> f32 {
         self.data.as_scaled(px_size).height()
     }
 
-    pub(crate) fn get_glyph_width(&self, ch: char, px_size: f32) -> f32 {
+    pub fn get_glyph_width(&self, ch: char, px_size: f32) -> f32 {
         let scaled_font = self.data.as_scaled(px_size);
 
         let glyph_id = scaled_font.glyph_id(ch);
         scaled_font.h_advance(glyph_id)
     }
 
-    pub(crate) fn load_glyph(&self, ch: char, px_size: f32) -> Glyph {
+    pub fn load_glyph(&self, ch: char, px_size: f32) -> Glyph {
         if ch.is_whitespace() {
             return Glyph::Empty;
         }
@@ -190,7 +187,7 @@ impl Font {
 }
 
 #[derive(Default, Clone)]
-pub(crate) enum Glyph {
+pub enum Glyph {
     Image(Image),
     Outline {
         color: Bgra,
@@ -202,17 +199,17 @@ pub(crate) enum Glyph {
 }
 
 impl Glyph {
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         matches!(self, Glyph::Empty)
     }
 
-    pub(crate) fn set_color(&mut self, new_color: Bgra) {
+    pub fn set_color(&mut self, new_color: Bgra) {
         if let Glyph::Outline { color, .. } = self {
             *color = new_color;
         }
     }
 
-    pub(crate) fn advance_width(&self) -> usize {
+    pub fn advance_width(&self) -> usize {
         match self {
             Glyph::Image(img) => img.width().unwrap_or_default(),
             Glyph::Outline { advance_width, .. } => advance_width.round() as usize,
@@ -222,14 +219,10 @@ impl Glyph {
 }
 
 impl Draw for Glyph {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &super::types::Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &super::types::Offset, drawer: &mut Drawer) {
         match self {
             Glyph::Image(img) => {
-                img.draw_with_offset(offset, output);
+                img.draw_with_offset(offset, drawer);
             }
             Glyph::Outline {
                 color,
@@ -238,7 +231,7 @@ impl Draw for Glyph {
             } => {
                 let bounds = outlined_glyph.px_bounds();
                 outlined_glyph.draw(|x, y, coverage| {
-                    output(
+                    drawer.draw_color(
                         (bounds.min.x.round() as i32 + x as i32).clamp(0, i32::MAX) as usize
                             + offset.x,
                         (bounds.min.y.round() as i32 + y as i32).clamp(0, i32::MAX) as usize
@@ -253,7 +246,7 @@ impl Draw for Glyph {
 }
 
 #[derive(Debug, Display, Hash, PartialEq, Eq, Clone)]
-pub(crate) enum FontStyle {
+pub enum FontStyle {
     #[display("Regular")]
     Regular,
     #[display("Bold")]

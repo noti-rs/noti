@@ -1,6 +1,8 @@
 use derive_builder::Builder;
 use log::warn;
 
+use crate::drawer::Drawer;
+
 use super::{
     color::Bgra,
     types::Offset,
@@ -11,7 +13,7 @@ type Matrix<T> = Vec<Vec<T>>;
 type MaybeColor = Option<DrawColor>;
 
 #[derive(Default, Builder, Clone)]
-pub(crate) struct Border {
+pub struct Border {
     color: Bgra,
     frame_width: usize,
     frame_height: usize,
@@ -23,10 +25,13 @@ pub(crate) struct Border {
 
     #[builder(setter(skip))]
     corner_coverage: Option<Matrix<MaybeColor>>,
+
+    #[builder(setter(skip), default = "false")]
+    compiled: bool,
 }
 
 impl BorderBuilder {
-    pub(super) fn compile(&self) -> anyhow::Result<Border> {
+    pub fn compile(&self) -> anyhow::Result<Border> {
         let mut border = self.build()?;
         border.compile();
         Ok(border)
@@ -41,7 +46,9 @@ enum Corner {
 }
 
 impl Border {
-    pub(super) fn compile(&mut self) {
+    pub fn compile(&mut self) {
+        self.compiled = true;
+
         self.corner_coverage = Some(match (self.size, self.radius) {
             (0, 0) => return,
             (size, 0) => self.get_bordered_coverage(size),
@@ -50,7 +57,7 @@ impl Border {
         });
     }
 
-    pub(super) fn get_color_at(&self, x: usize, y: usize) -> MaybeColor {
+    pub fn get_color_at(&self, x: usize, y: usize) -> MaybeColor {
         assert!(x <= self.frame_width && y <= self.frame_height);
 
         let corner = self.corner_coverage.as_ref()?;
@@ -64,7 +71,7 @@ impl Border {
 
         if (corner_size..self.frame_width - corner_size).contains(&x) {
             return if y < self.size || y > self.frame_height - self.size {
-                Some(DrawColor::Replace(self.color.clone()))
+                Some(DrawColor::Replace(self.color))
             } else {
                 None
             };
@@ -72,7 +79,7 @@ impl Border {
 
         if (corner_size..self.frame_height - corner_size).contains(&y) {
             return if x < self.size || x > self.frame_width - self.size {
-                Some(DrawColor::Replace(self.color.clone()))
+                Some(DrawColor::Replace(self.color))
             } else {
                 None
             };
@@ -95,7 +102,7 @@ impl Border {
 
     #[inline]
     fn get_bordered_coverage(&self, width: usize) -> Matrix<MaybeColor> {
-        vec![vec![Some(DrawColor::Replace(self.color.clone())); width]; width]
+        vec![vec![Some(DrawColor::Replace(self.color)); width]; width]
     }
 
     fn get_corner_coverage(&self, radius: usize) -> Matrix<MaybeColor> {
@@ -127,8 +134,7 @@ impl Border {
         self.traverse_circle_with(radius, |inner_x, inner_y, rev_x, rev_y| {
             let (x_f32, y_f32) = (rev_x as f32, rev_y as f32);
 
-            let border_color =
-                self.color.clone() * Self::get_coverage_by(radius as f32, x_f32, y_f32);
+            let border_color = self.color * Self::get_coverage_by(radius as f32, x_f32, y_f32);
 
             let mut to_continue = true;
 
@@ -197,11 +203,11 @@ impl Border {
     }
 
     #[inline]
-    fn draw_corner<Output: FnMut(usize, usize, DrawColor)>(
+    fn draw_corner(
         offset: Offset,
         corner: &Matrix<MaybeColor>,
         corner_type: Corner,
-        output: &mut Output,
+        drawer: &mut Drawer,
     ) {
         let corner_size = corner.len();
         let mut x_range = offset.x..offset.x + corner_size;
@@ -220,7 +226,7 @@ impl Border {
 
             for (y, corner_cell) in y_range.zip(corner_row) {
                 if let Some(color) = corner_cell {
-                    output(x, y, color.clone());
+                    drawer.draw_color(x, y, color.clone());
                 } else {
                     break;
                 }
@@ -229,87 +235,80 @@ impl Border {
     }
 
     #[inline]
-    fn draw_rectangle<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: Offset,
-        width: usize,
-        height: usize,
-        output: &mut Output,
-    ) {
+    fn draw_rectangle(&self, offset: Offset, width: usize, height: usize, drawer: &mut Drawer) {
         for x in offset.x..width + offset.x {
             for y in offset.y..height + offset.y {
-                output(x, y, DrawColor::Replace(self.color.clone()))
+                drawer.draw_color(x, y, DrawColor::Replace(self.color))
             }
         }
     }
 }
 
 impl Draw for Border {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        _: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let Some(corner) = self.corner_coverage.as_ref() else {
-            warn!("Border: Not compiled, refused to draw itself");
+            if !self.compiled {
+                warn!("Border: Not compiled, refused to draw itself");
+            }
             return;
         };
 
         let corner_size = corner.len();
-        Self::draw_corner(Offset::no_offset(), corner, Corner::TopLeft, output);
+        Self::draw_corner(offset.clone(), corner, Corner::TopLeft, drawer);
         Self::draw_corner(
-            Offset::new_x(self.frame_width - corner_size),
+            offset.clone() + Offset::new_x(self.frame_width - corner_size),
             corner,
             Corner::TopRight,
-            output,
+            drawer,
         );
         Self::draw_corner(
-            Offset::new(
-                self.frame_width - corner_size,
-                self.frame_height - corner_size,
-            ),
+            offset.clone()
+                + Offset::new(
+                    self.frame_width - corner_size,
+                    self.frame_height - corner_size,
+                ),
             corner,
             Corner::BottomRight,
-            output,
+            drawer,
         );
         Self::draw_corner(
-            Offset::new_y(self.frame_height - corner_size),
+            offset.clone() + Offset::new_y(self.frame_height - corner_size),
             corner,
             Corner::BottomLeft,
-            output,
+            drawer,
         );
 
         if self.size != 0 {
             // Top
             self.draw_rectangle(
-                Offset::new_x(corner_size),
+                offset.clone() + Offset::new_x(corner_size),
                 self.frame_width - corner_size * 2,
                 self.size,
-                output,
+                drawer,
             );
 
             // Bottom
             self.draw_rectangle(
-                Offset::new(corner_size, self.frame_height - self.size),
+                offset.clone() + Offset::new(corner_size, self.frame_height - self.size),
                 self.frame_width - corner_size * 2,
                 self.size,
-                output,
+                drawer,
             );
 
             // Left
             self.draw_rectangle(
-                Offset::new_y(corner_size),
+                offset.clone() + Offset::new_y(corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
-                output,
+                drawer,
             );
 
             // Right
             self.draw_rectangle(
-                Offset::new(self.frame_width - self.size, corner_size),
+                offset.clone() + Offset::new(self.frame_width - self.size, corner_size),
                 self.size,
                 self.frame_height - corner_size * 2,
-                output,
+                drawer,
             );
         }
     }

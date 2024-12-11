@@ -3,27 +3,27 @@ use std::ops::{Add, AddAssign};
 use config::spacing::Spacing;
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct RectSize {
-    pub(crate) width: usize,
-    pub(crate) height: usize,
+pub struct RectSize {
+    pub width: usize,
+    pub height: usize,
 }
 
 impl RectSize {
-    pub(crate) fn new(width: usize, height: usize) -> Self {
+    pub fn new(width: usize, height: usize) -> Self {
         Self { width, height }
     }
 
     #[allow(dead_code)]
-    pub(crate) fn new_width(width: usize) -> Self {
+    pub fn new_width(width: usize) -> Self {
         Self { width, height: 0 }
     }
 
     #[allow(dead_code)]
-    pub(crate) fn new_height(height: usize) -> Self {
+    pub fn new_height(height: usize) -> Self {
         Self { width: 0, height }
     }
 
-    pub(crate) fn shrink_by(&mut self, spacing: &Spacing) {
+    pub fn shrink_by(&mut self, spacing: &Spacing) {
         self.width = self
             .width
             .saturating_sub(spacing.left() as usize + spacing.right() as usize);
@@ -32,7 +32,7 @@ impl RectSize {
             .saturating_sub(spacing.top() as usize + spacing.bottom() as usize);
     }
 
-    pub(crate) fn area(&self) -> usize {
+    pub fn area(&self) -> usize {
         self.width * self.height
     }
 }
@@ -56,25 +56,25 @@ impl AddAssign<RectSize> for RectSize {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(super) struct Offset {
-    pub(super) x: usize,
-    pub(super) y: usize,
+pub struct Offset {
+    pub x: usize,
+    pub y: usize,
 }
 
 impl Offset {
-    pub(super) fn new(x: usize, y: usize) -> Self {
+    pub fn new(x: usize, y: usize) -> Self {
         Offset { x, y }
     }
 
-    pub(super) fn new_x(x: usize) -> Self {
+    pub fn new_x(x: usize) -> Self {
         Offset { x, y: 0 }
     }
 
-    pub(super) fn new_y(y: usize) -> Self {
+    pub fn new_y(y: usize) -> Self {
         Offset { x: 0, y }
     }
 
-    pub(super) fn no_offset() -> Self {
+    pub fn no_offset() -> Self {
         Self { x: 0, y: 0 }
     }
 }

@@ -5,6 +5,8 @@ use config::Config;
 use log::{debug, info, warn};
 use tokio::sync::mpsc::unbounded_channel;
 
+mod banner;
+mod cache;
 mod internal_messages;
 mod render;
 mod window;

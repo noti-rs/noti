@@ -4,14 +4,35 @@ use std::{
     ops::{Add, AddAssign},
 };
 
+use macros::GenericBuilder;
 use serde::{de::Visitor, Deserialize};
+use shared::value::TryDowncast;
 
-#[derive(Debug, Default, Clone)]
+#[derive(GenericBuilder, Debug, Default, Clone)]
+#[gbuilder(name(GBuilderSpacing))]
 pub struct Spacing {
+    #[gbuilder(default(0))]
     top: u8,
+
+    #[gbuilder(default(0))]
     right: u8,
+
+    #[gbuilder(default(0))]
     bottom: u8,
+
+    #[gbuilder(default(0))]
     left: u8,
+}
+
+impl TryFrom<shared::value::Value> for Spacing {
+    type Error = shared::error::ConversionError;
+
+    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(shared::error::ConversionError::CannotConvert),
+        }
+    }
 }
 
 impl Spacing {
@@ -66,6 +87,14 @@ impl Spacing {
 
     pub fn set_left(&mut self, left: u8) {
         self.left = left;
+    }
+
+    pub fn horizontal(&self) -> u16 {
+        self.left as u16 + self.right as u16
+    }
+
+    pub fn vertical(&self) -> u16 {
+        self.top as u16 + self.bottom as u16
     }
 
     pub fn shrink(&self, width: &mut usize, height: &mut usize) {

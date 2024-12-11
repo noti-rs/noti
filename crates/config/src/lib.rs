@@ -1,23 +1,35 @@
 use log::debug;
-use macros::ConfigProperty;
+use macros::{ConfigProperty, GenericBuilder};
 use serde::Deserialize;
-use std::{collections::HashMap, fs, path::Path};
+use shared::{
+    error::ConversionError,
+    file_watcher::{FileState, FilesWatcher},
+    value::TryDowncast,
+};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub mod colors;
 pub mod sorting;
 pub mod spacing;
 pub mod text;
-pub mod watcher;
 
 use colors::{Color, TomlUrgencyColors, UrgencyColors};
 use sorting::Sorting;
 use spacing::Spacing;
 use text::{TextProperty, TomlTextProperty};
-use watcher::{ConfigState, ConfigWatcher};
+
+const XDG_CONFIG_HOME: &str = "XDG_CONFIG_HOME";
+const HOME: &str = "HOME";
+const APP_NAME: &str = env!("APP_NAME");
+const CONFIG_FILE: &str = "config.toml";
 
 #[derive(Debug)]
 pub struct Config {
-    watcher: ConfigWatcher,
+    watcher: FilesWatcher,
     general: GeneralConfig,
     display: DisplayConfig,
 
@@ -26,11 +38,33 @@ pub struct Config {
 
 impl Config {
     pub fn init(user_config: Option<&str>) -> Self {
+        fn to_config_file(prefix: String) -> PathBuf {
+            let mut path_buf: PathBuf = prefix.into();
+            path_buf.push(APP_NAME);
+            path_buf.push(CONFIG_FILE);
+            path_buf
+        }
+
+        let config_paths = [
+            user_config.map(PathBuf::from),
+            std::env::var(XDG_CONFIG_HOME).map(to_config_file).ok(),
+            std::env::var(HOME)
+                .map(|mut path| {
+                    path.push_str("/.config");
+                    path
+                })
+                .map(to_config_file)
+                .ok(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
         debug!("Config: Initializing");
         let watcher =
-            ConfigWatcher::init(user_config).expect("The config watcher must be initialized");
+            FilesWatcher::init(config_paths).expect("The config watcher must be initialized");
 
-        let (general, display, app_configs) = Self::parse(watcher.get_config_path());
+        let (general, display, app_configs) = Self::parse(watcher.get_watching_path());
         debug!("Config: Initialized");
 
         Self {
@@ -54,12 +88,18 @@ impl Config {
         self.app_configs.get(name).unwrap_or(&self.display)
     }
 
-    pub fn check_updates(&mut self) -> ConfigState {
+    pub fn displays(&self) -> impl Iterator<Item = &DisplayConfig> {
+        vec![&self.display]
+            .into_iter()
+            .chain(self.app_configs.values())
+    }
+
+    pub fn check_updates(&mut self) -> FileState {
         self.watcher.check_updates()
     }
 
     pub fn update(&mut self) {
-        let (general, display, app_configs) = Self::parse(self.watcher.get_config_path());
+        let (general, display, app_configs) = Self::parse(self.watcher.get_watching_path());
 
         self.general = general;
         self.display = display;
@@ -243,6 +283,8 @@ public! {
     #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
     #[cfg_prop(name(DisplayConfig), derive(Debug))]
     struct TomlDisplayConfig {
+        layout: Option<Layout>,
+
         #[cfg_prop(use_type(ImageProperty), mergeable)]
         image: Option<TomlImageProperty>,
 
@@ -270,16 +312,80 @@ public! {
     }
 }
 
+#[derive(Deserialize, Debug, Default, Clone)]
+#[serde(from = "String")]
+pub enum Layout {
+    #[default]
+    Default,
+    FromPath {
+        path_buf: PathBuf,
+    },
+}
+
+impl Layout {
+    pub fn is_default(&self) -> bool {
+        matches!(self, Layout::Default)
+    }
+}
+
+impl From<String> for Layout {
+    fn from(value: String) -> Self {
+        if value == "default" {
+            return Layout::Default;
+        }
+
+        Layout::FromPath {
+            path_buf: PathBuf::from(
+                shellexpand::full(&value)
+                    .map(|value| value.into_owned())
+                    .unwrap_or(value),
+            ),
+        }
+    }
+}
+
 public! {
     #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(name(ImageProperty), derive(Debug, Clone))]
+    #[cfg_prop(
+        name(ImageProperty),
+        derive(GenericBuilder, Debug, Clone),
+        attributes(#[gbuilder(name(GBuilderImageProperty))])
+    )]
     struct TomlImageProperty {
-        #[cfg_prop(default(64))]
+        #[cfg_prop(
+            default(64),
+            attributes(#[gbuilder(default(64))])
+        )]
         max_size: Option<u16>,
-        #[cfg_prop(default(0))]
+
+        #[cfg_prop(
+            default(0),
+            attributes(#[gbuilder(default(0))])
+        )]
         rounding: Option<u16>,
+
+        #[cfg_prop(attributes(#[gbuilder(default)]))]
         margin: Option<Spacing>,
+
+        #[cfg_prop(attributes(#[gbuilder(default)]))]
         resizing_method: Option<ResizingMethod>,
+    }
+}
+
+impl Default for ImageProperty {
+    fn default() -> Self {
+        TomlImageProperty::default().into()
+    }
+}
+
+impl TryFrom<shared::value::Value> for ImageProperty {
+    type Error = shared::error::ConversionError;
+
+    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(shared::error::ConversionError::CannotConvert),
+        }
     }
 }
 
@@ -298,16 +404,64 @@ pub enum ResizingMethod {
     Lanczos3,
 }
 
+impl TryFrom<shared::value::Value> for ResizingMethod {
+    type Error = shared::error::ConversionError;
+
+    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            shared::value::Value::String(str) => Ok(match str.to_lowercase().as_str() {
+                "nearest" => ResizingMethod::Nearest,
+                "triangle" => ResizingMethod::Triangle,
+                "catmull-rom" | "catmull_rom" => ResizingMethod::CatmullRom,
+                "gaussian" => ResizingMethod::Gaussian,
+                "lanczos3" => ResizingMethod::Lanczos3,
+                _ => Err(shared::error::ConversionError::InvalidValue {
+                    expected: "nearest, triangle, gaussian, lanczos3, catmull-rom or catmull_rom",
+                    actual: str,
+                })?,
+            }),
+            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(shared::error::ConversionError::CannotConvert),
+        }
+    }
+}
+
 public! {
     #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(name(Border), derive(Debug))]
+    #[cfg_prop(
+        name(Border),
+        derive(GenericBuilder, Debug, Clone, Default),
+        attributes(#[gbuilder(name(GBuilderBorder))])
+    )]
     struct TomlBorder {
-        #[cfg_prop(default(0))]
+        #[cfg_prop(
+            default(0),
+            attributes(#[gbuilder(default(0))])
+        )]
         size: Option<u8>,
-        #[cfg_prop(default(0))]
+
+        #[cfg_prop(
+            default(0),
+            attributes(#[gbuilder(default(0))])
+        )]
         radius: Option<u8>,
-        #[cfg_prop(default(Color::new_black()))]
+
+        #[cfg_prop(
+            default(Color::new_black()),
+            attributes(#[gbuilder(default(path = Color::new_black))])
+        )]
         color: Option<Color>,
+    }
+}
+
+impl TryFrom<shared::value::Value> for Border {
+    type Error = ConversionError;
+
+    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
+            _ => Err(ConversionError::CannotConvert),
+        }
     }
 }
 

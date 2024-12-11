@@ -15,6 +15,9 @@ members = [
   "crates/client",
   "crates/dbus",
   "crates/macros",
+  "crates/render",
+  "crates/filetype",
+  "crates/shared"
 ]
 
 [workspace.package]
@@ -26,12 +29,18 @@ edition = "2021"
 anyhow = "1.0.86"
 tokio = { version = "1.38.0", features = ["full"] }
 log = "0.4.22"
+zbus = "4.4.0"
+derive_more = { version = "1.0.0", features = ["display"] }
+config = { path = "crates/config" }
+render = { path = "crates/render" }
+dbus = { path = "crates/dbus" }
+shared = { path = "crates/shared" }
 
 [dependencies]
 anyhow = { workspace = true }
 tokio = { workspace = true }
 backend = { path = "crates/backend" }
 client = { path = "crates/client" }
-config = { path = "crates/config" }
+config = { workspace = true }
 clap = { version = "4.5.7", features = ["derive"] }
 env_logger = "0.11.5"

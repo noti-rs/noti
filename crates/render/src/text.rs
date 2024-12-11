@@ -9,15 +9,17 @@ use config::{
 };
 use dbus::text::Text;
 
+use crate::drawer::Drawer;
+
 use super::{
     color::Bgra,
     font::{FontCollection, FontStyle, Glyph},
     types::{Offset, RectSize},
-    widget::{Draw, DrawColor},
+    widget::Draw,
 };
 
 #[derive(Default)]
-pub(crate) struct TextRect {
+pub struct TextRect {
     words: VecDeque<WordRect>,
     lines: Vec<LineRect>,
     wrap: bool,
@@ -38,7 +40,7 @@ pub(crate) struct TextRect {
 }
 
 impl TextRect {
-    pub(crate) fn from_str<Style: Into<FontStyle> + Clone>(
+    pub fn from_str<Style: Into<FontStyle> + Clone>(
         string: &str,
         px_size: f32,
         base_style: Style,
@@ -61,7 +63,7 @@ impl TextRect {
         }
     }
 
-    pub(crate) fn from_text<Style: Into<FontStyle>>(
+    pub fn from_text<Style: Into<FontStyle>>(
         text: &Text,
         px_size: f32,
         base_style: Style,
@@ -136,31 +138,31 @@ impl TextRect {
         font_collection.get_spacebar_width(px_size).round() as usize
     }
 
-    pub(crate) fn set_wrap(&mut self, wrap: bool) {
+    pub fn set_wrap(&mut self, wrap: bool) {
         self.wrap = wrap;
     }
 
-    pub(crate) fn set_line_spacing(&mut self, line_spacing: usize) {
+    pub fn set_line_spacing(&mut self, line_spacing: usize) {
         self.line_spacing = line_spacing;
     }
 
-    pub(crate) fn set_margin(&mut self, margin: &Spacing) {
+    pub fn set_margin(&mut self, margin: &Spacing) {
         self.margin = margin.clone();
     }
 
-    pub(crate) fn set_foreground(&mut self, color: Bgra) {
+    pub fn set_foreground(&mut self, color: Bgra) {
         self.foreground = color;
     }
 
-    pub(crate) fn set_ellipsize_at(&mut self, ellipsize_at: &EllipsizeAt) {
+    pub fn set_ellipsize_at(&mut self, ellipsize_at: &EllipsizeAt) {
         self.ellipsize_at = ellipsize_at.clone();
     }
 
-    pub(crate) fn set_justification(&mut self, justification: &TextJustification) {
+    pub fn set_justification(&mut self, justification: &TextJustification) {
         self.justification = justification.to_owned();
     }
 
-    pub(crate) fn compile(&mut self, mut rect_size: RectSize) {
+    pub fn compile(&mut self, mut rect_size: RectSize) {
         self.rect_size.width = rect_size.width;
         rect_size.shrink_by(&self.margin);
 
@@ -244,7 +246,7 @@ impl TextRect {
     fn apply_color(&mut self) {
         self.lines
             .iter_mut()
-            .for_each(|line| line.set_color(self.foreground.clone()));
+            .for_each(|line| line.set_color(self.foreground));
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -252,11 +254,11 @@ impl TextRect {
     }
 
     #[allow(unused)]
-    pub(crate) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.rect_size.width
     }
 
-    pub(crate) fn height(&self) -> usize {
+    pub fn height(&self) -> usize {
         let total_lines = self.lines.len();
         total_lines * self.line_height
             + total_lines.saturating_sub(1) * self.line_spacing
@@ -266,16 +268,12 @@ impl TextRect {
 }
 
 impl Draw for TextRect {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let offset = Offset::from(&self.margin) + offset.clone();
 
         self.lines
             .iter()
-            .for_each(|line| line.draw_with_offset(&offset, output))
+            .for_each(|line| line.draw_with_offset(&offset, drawer))
     }
 }
 
@@ -433,18 +431,12 @@ impl LineRect {
     }
 
     fn set_color(&mut self, color: Bgra) {
-        self.words
-            .iter_mut()
-            .for_each(|word| word.set_color(color.clone()));
+        self.words.iter_mut().for_each(|word| word.set_color(color));
     }
 }
 
 impl Draw for LineRect {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let (x, x_incrementor) = match &self.justification {
             TextJustification::Center => (self.available_space() / 2, self.spacebar_width),
             TextJustification::Left => (0, self.spacebar_width),
@@ -462,7 +454,7 @@ impl Draw for LineRect {
         let mut offset = offset.clone() + Offset::new(x, self.y_offset);
 
         self.words.iter().for_each(|word| {
-            word.draw_with_offset(&offset, output);
+            word.draw_with_offset(&offset, drawer);
             offset.x += x_incrementor + word.width();
         });
     }
@@ -475,7 +467,7 @@ enum EllipsizationState {
     Complete,
 }
 
-pub(crate) struct WordRect {
+pub struct WordRect {
     advance_width: usize,
     glyphs: Vec<Glyph>,
 }
@@ -504,7 +496,7 @@ impl WordRect {
     fn set_color(&mut self, color: Bgra) {
         self.glyphs
             .iter_mut()
-            .for_each(|glyph| glyph.set_color(color.clone()));
+            .for_each(|glyph| glyph.set_color(color));
     }
 
     #[inline(always = true)]
@@ -537,14 +529,10 @@ impl WordRect {
 }
 
 impl Draw for WordRect {
-    fn draw_with_offset<Output: FnMut(usize, usize, DrawColor)>(
-        &self,
-        offset: &Offset,
-        output: &mut Output,
-    ) {
+    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
         let mut offset = offset.to_owned();
         self.glyphs.iter().for_each(|glyph| {
-            glyph.draw_with_offset(&offset, output);
+            glyph.draw_with_offset(&offset, drawer);
             offset.x += glyph.advance_width();
         })
     }

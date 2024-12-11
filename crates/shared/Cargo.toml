@@ -1,0 +1,12 @@
+[package]
+name = "shared"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+log = { workspace = true }
+anyhow = { workspace = true }
+derive_more = { workspace = true }
+
+inotify = "0.11.0"
