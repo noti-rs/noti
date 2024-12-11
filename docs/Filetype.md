@@ -126,7 +126,7 @@ there is no default value.
 | direction     | Sets the direction of container to arrange elements in row or column. Possible values: `horizontal` or `vertical` | `Literal`   | -                                                  |
 | max_width     | Sets the max width of container                                                                                   | `UInt`      | MAX                                                |
 | max_height    | Sets the max height of container                                                                                  | `UInt`      | MAX                                                |
-| border        | Make a border around container                                                                                    | `Border`    | Default [border](./ConfigProperties#border) values |
+| border        | Make a border around container                                                                                    | `Border`    | Default [border](./ConfigProperties.md#border) values |
 | spacing       | Treat is `padding` from `display.padding`                                                                         | `Spacing`   | Spacing's default values                           |
 | alignment     | Align the container's content by horizontal and vertical                                                          | `Alignment` | -                                                  |
 
