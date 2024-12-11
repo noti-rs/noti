@@ -85,7 +85,8 @@ be omitted to use default values:
 Image()
 ```
 
-The parentheses is important for declaring widgets and type values!
+The parentheses is important for declaring widgets and type values, and you
+cannot omit him!
 
 The `FlexContainer` widget is very different because it have `children` in which
 you can declare inner widgets. Syntax:
@@ -131,9 +132,12 @@ there is no default value.
 
 ### Text properties
 
-| Property name | Description                                                    | Type      | Default value |
-| ------------- | -------------------------------------------------------------- | --------- | ------------- |
-| kind          | The kind of text. Possible values: title (or summary) or body. | `Literal` | -             |
+There are two text kinds in banner - for title and body. And need to define it to get correct
+result.
+
+| Property name | Description                                                          | Type      | Default value |
+| ------------- | -------------------------------------------------------------------- | --------- | ------------- |
+| kind          | The kind of text. Possible values: `title` (or `summary`) or `body`. | `Literal` | -             |
 
 ### Spacing
 
