@@ -21,7 +21,8 @@ use render::Renderer;
 
 pub async fn run(config: Config) -> anyhow::Result<()> {
     let (sender, mut receiver) = unbounded_channel();
-    let server = Server::init(sender).await?;
+
+    let server = Server::init(sender.clone()).await?;
     info!("Backend: Server initialized");
 
     let (server_internal_channel, mut renderer) = Renderer::init(config)?;
@@ -56,23 +57,18 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
                 Action::Close(None) => {
                     warn!("Backend: Unsupported method 'Close'. Ignored");
                 }
-                Action::ShowLast => {
-                    //TODO: make decision about this action. It may be very useless
-                    warn!("Backend: Unsupported method 'ShowLast'. Ignored");
-                }
                 Action::CloseAll => {
                     warn!("Backend: Unsupported method 'CloseAll'. Ignored");
                 }
             }
         }
 
-        let due_notifications = scheduler.pop_due_notifications();
-
-        for scheduled_notification in due_notifications {
-            server_internal_channel.send_to_renderer(
-                internal_messages::ServerMessage::ShowNotification(scheduled_notification.data),
-            )?;
-        }
+        scheduler
+            .pop_due_notifications()
+            .into_iter()
+            .for_each(|notification| {
+                sender.send(Action::Show(notification.data)).unwrap();
+            });
 
         while let Ok(message) = server_internal_channel.try_recv_from_renderer() {
             match message {

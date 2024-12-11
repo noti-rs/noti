@@ -7,7 +7,6 @@ use super::notification::Notification;
 pub enum Action {
     Show(Box<Notification>),
     Schedule(ScheduledNotification),
-    ShowLast, // NOTE: consider removing this
     Close(Option<u32>),
     CloseAll,
 }
