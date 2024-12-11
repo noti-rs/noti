@@ -90,6 +90,8 @@ pub struct Hints {
     /// The localized display name will be used to annotate the icon for accessibility purposes.
     /// The icon name should be compliant with the Freedesktop.org Icon Naming Specification.
     pub action_icons: Option<bool>,
+
+    /// Specifies the time to schedule the notification to be shown.
     pub schedule: Option<String>,
 }
 

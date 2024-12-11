@@ -166,7 +166,7 @@ pub struct SendCommand {
         short = 's',
         long,
         help = "Schedule",
-        long_help = "Schedule notification"
+        long_help = "Specifies the time to schedule the notification to be shown."
     )]
     schedule: String,
 }
