@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use dbus::notification::ScheduledNotification;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
