@@ -246,7 +246,7 @@ impl TextRect {
     fn apply_color(&mut self) {
         self.lines
             .iter_mut()
-            .for_each(|line| line.set_color(self.foreground.clone()));
+            .for_each(|line| line.set_color(self.foreground));
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -431,9 +431,7 @@ impl LineRect {
     }
 
     fn set_color(&mut self, color: Bgra) {
-        self.words
-            .iter_mut()
-            .for_each(|word| word.set_color(color.clone()));
+        self.words.iter_mut().for_each(|word| word.set_color(color));
     }
 }
 
@@ -498,7 +496,7 @@ impl WordRect {
     fn set_color(&mut self, color: Bgra) {
         self.glyphs
             .iter_mut()
-            .for_each(|glyph| glyph.set_color(color.clone()));
+            .for_each(|glyph| glyph.set_color(color));
     }
 
     #[inline(always = true)]

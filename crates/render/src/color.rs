@@ -4,7 +4,7 @@ use config::colors::Color;
 
 use super::widget::Coverage;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct Bgra {
     pub blue: f32,
     pub green: f32,

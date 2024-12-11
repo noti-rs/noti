@@ -316,7 +316,7 @@ impl Draw for FlexContainer {
             );
         };
 
-        let mut subdrawer = Drawer::new(self.background_color.clone(), rect_size.clone());
+        let mut subdrawer = Drawer::new(self.background_color, rect_size.clone());
 
         rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
         let mut plane = FlexContainerPlane::new(rect_size, &self.direction);

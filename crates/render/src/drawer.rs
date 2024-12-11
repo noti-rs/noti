@@ -88,7 +88,7 @@ impl Drawer {
             DrawColor::OverlayWithCoverage(foreground, Coverage(factor)) => {
                 foreground.linearly_interpolate(background, factor)
             }
-            DrawColor::Transparent(Coverage(factor)) => background.clone() * factor,
+            DrawColor::Transparent(Coverage(factor)) => *background * factor,
         }
     }
 

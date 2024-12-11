@@ -71,7 +71,7 @@ impl Border {
 
         if (corner_size..self.frame_width - corner_size).contains(&x) {
             return if y < self.size || y > self.frame_height - self.size {
-                Some(DrawColor::Replace(self.color.clone()))
+                Some(DrawColor::Replace(self.color))
             } else {
                 None
             };
@@ -79,7 +79,7 @@ impl Border {
 
         if (corner_size..self.frame_height - corner_size).contains(&y) {
             return if x < self.size || x > self.frame_width - self.size {
-                Some(DrawColor::Replace(self.color.clone()))
+                Some(DrawColor::Replace(self.color))
             } else {
                 None
             };
@@ -102,7 +102,7 @@ impl Border {
 
     #[inline]
     fn get_bordered_coverage(&self, width: usize) -> Matrix<MaybeColor> {
-        vec![vec![Some(DrawColor::Replace(self.color.clone())); width]; width]
+        vec![vec![Some(DrawColor::Replace(self.color)); width]; width]
     }
 
     fn get_corner_coverage(&self, radius: usize) -> Matrix<MaybeColor> {
@@ -135,7 +135,7 @@ impl Border {
             let (x_f32, y_f32) = (rev_x as f32, rev_y as f32);
 
             let border_color =
-                self.color.clone() * Self::get_coverage_by(radius as f32, x_f32, y_f32);
+                self.color * Self::get_coverage_by(radius as f32, x_f32, y_f32);
 
             let mut to_continue = true;
 
@@ -239,7 +239,7 @@ impl Border {
     fn draw_rectangle(&self, offset: Offset, width: usize, height: usize, drawer: &mut Drawer) {
         for x in offset.x..width + offset.x {
             for y in offset.y..height + offset.y {
-                drawer.draw_color(x, y, DrawColor::Replace(self.color.clone()))
+                drawer.draw_color(x, y, DrawColor::Replace(self.color))
             }
         }
     }
