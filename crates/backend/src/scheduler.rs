@@ -72,7 +72,7 @@ impl Scheduler {
             }
         }
 
-        Ok(time_str.parse::<DateTime<Utc>>()?)
+        time_str.parse::<DateTime<Utc>>()
     }
 
     pub fn pop_due_notifications(&mut self) -> Vec<ScheduledNotification> {
