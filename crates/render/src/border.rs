@@ -134,8 +134,7 @@ impl Border {
         self.traverse_circle_with(radius, |inner_x, inner_y, rev_x, rev_y| {
             let (x_f32, y_f32) = (rev_x as f32, rev_y as f32);
 
-            let border_color =
-                self.color * Self::get_coverage_by(radius as f32, x_f32, y_f32);
+            let border_color = self.color * Self::get_coverage_by(radius as f32, x_f32, y_f32);
 
             let mut to_continue = true;
 
