@@ -145,7 +145,11 @@ FlexContainer(
     alignment = Alignment(
         horizontal = center,
         vertical = center,
-    )
+    ),
+    border = Border(
+        size = 5,
+        radius = 10,
+    ),
 ) {
     Text(
         kind = title,
