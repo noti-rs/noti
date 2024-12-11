@@ -76,16 +76,16 @@ WidgetName(
 )
 ```
 
-In the parenthesis declares properties for widgets and fields for type values.
+In the parentheses declares properties for widgets and fields for type values.
 They're always separated by comma and here is allowed to use trailing comma.
-For some widgets or type value the declaration if properties (or fields) can
+For some widgets or type value the declaration of properties (or fields) can
 be omitted to use default values:
 
 ```noti
 Image()
 ```
 
-The parenthesis is important for declaring widgets and type values!
+The parentheses is important for declaring widgets and type values!
 
 The `FlexContainer` widget is very different because it have `children` in which
 you can declare inner widgets. Syntax:
@@ -97,9 +97,8 @@ FlexContainer() {
 }
 ```
 
-Also the `children` can be named **block** in this context and the widgets always
-surrounded by curly braces. There is no specific separators between widgets except
-whitespace.
+The widgets always surrounded by curly braces. There is no specific separators
+between widgets except whitespace.
 
 ## Widget properties
 
@@ -112,6 +111,9 @@ So, the `Text` widget inherits the [text](./ConfigProperties.md#text) properties
 the `Image` widget inherits the [image](./ConfigProperties.md#image) properties,
 the `Border` type value inherits the [border](./ConfigProperties.md#border) properties.
 
+Need to mention that for the `String` type use `Literal` (without double quotes!), for the
+`u8`, `u16`, `u32` use `UInt`.
+
 Here we'll describe only few properties that only specific widgets and type values have.
 The `-` sign in **Default value** means that it is needed to set your own value because
 there is no default value.
@@ -123,7 +125,7 @@ there is no default value.
 | direction     | Sets the direction of container to arrange elements in row or column. Possible values: `horizontal` or `vertical` | `Literal`   | -                                                  |
 | max_width     | Sets the max width of container                                                                                   | `UInt`      | MAX                                                |
 | max_height    | Sets the max height of container                                                                                  | `UInt`      | MAX                                                |
-| border        | Make a border around container                                                                                    | `Border`    | Default [border](./ConfigProperties#bordre) values |
+| border        | Make a border around container                                                                                    | `Border`    | Default [border](./ConfigProperties#border) values |
 | spacing       | Treat is `padding` from `display.padding`                                                                         | `Spacing`   | Spacing's default values                           |
 | alignment     | Align the container's content by horizontal and vertical                                                          | `Alignment` | -                                                  |
 
@@ -148,7 +150,7 @@ Unfortunately, currently unsupported the way to declare values as in CSS.
 
 For all fields possible values: `start`, `end`, `center`, `space-between`.
 
-| Property name | Description                      | Type      | Default value |
-| ------------- | -------------------------------- | --------- | ------------- |
-| horizontal    | Sets the alignment by horizontal | `Literal` | -             |
-| vertical      | Sets the alignment by vertical   | `Literal` | -             |
+| Property name | Description                           | Type      | Default value |
+| ------------- | ------------------------------------- | --------- | ------------- |
+| horizontal    | Sets the alignment by horizontal axis | `Literal` | -             |
+| vertical      | Sets the alignment by vertical axis   | `Literal` | -             |
