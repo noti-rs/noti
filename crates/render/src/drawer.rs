@@ -18,6 +18,29 @@ impl Drawer {
     }
 
     pub fn draw_area(&mut self, offset: &Offset, mut subdrawer: Drawer) {
+        // INFO: this is specific code and it may be hard to read because the main goal is
+        // drawing optimization. Previously just single loop was used but after optimization
+        // we reachd x3 drawing speed. So I've [jarkz] decided to only make it more readable
+        // and leave it with descriptoin.
+        //
+        // WARNING: this code may work not correct in custom border drawing!
+        //
+        // Let's pick this table:
+        // +-+-+-+-+-+-+-+-+-+
+        // |T|S|U|U|U|U|U|S|T|
+        // +-+-+-+-+-+-+-+-+-+
+        // |S|U|U|U|U|U|U|U|S|
+        // +-+-+-+-+-+-+-+-+-+
+        // |S|U|U|U|U|U|U|U|S|
+        // +-+-+-+-+-+-+-+-+-+
+        // |T|S|U|U|U|U|U|S|T|
+        // +-+-+-+-+-+-+-+-+-+
+        //
+        // Where T - transparent, S - Semi-transparent, U - untransparent.
+        // The triangles at corner with S and T cells we should draw cell by cell, but for
+        // U cells pick by slices from left to right and PUT them into other table. Sure, we
+        // can't put owned value from slice to slice, so we use `swap_with_slice()` method
+        // from Vec<T>.
         if let Some(untransparent_pos) = subdrawer
             .data
             .iter()
