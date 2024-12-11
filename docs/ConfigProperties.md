@@ -164,6 +164,7 @@ The currently possible properties of `display` table:
 
 | Property name                  | Description                                         | Type                                                                    | Default value |
 | :----------------------------- | :-------------------------------------------------- | :---------------------------------------------------------------------- | :-----------: |
+| [layout](./Filetype.md)        | Use the custom layout by providen path              | `String`                                                                |   "default"   |
 | [theme](#themes)               | Use the [theme](#themes) by name                    | `String`                                                                |       -       |
 | [image](#image)                | Image properties                                    | `Image`                                                                 |       -       |
 | [padding](#padding-and-margin) | The spacing from the banner's edge to inner content | `u8` or `[u8, u8]` or `[u8, u8, u8]` or `[u8, u8, u8, u8]` or `Spacing` |       0       |
@@ -173,6 +174,10 @@ The currently possible properties of `display` table:
 | [body](#text)                  | Body text properties                                | `Text`                                                                  |       -       |
 | [markup](#markup)              | Enables HTML style markup                           | `bool`                                                                  |     true      |
 | [timeout](#timeout)            | Sets the timeout of banner                          | `u16`                                                                   |       0       |
+
+The [layout](./Filetype.md) property should have or `"default"` value or path to file in which
+describes layout for banner. You can pass path with environment variables like
+`"$XDG_CONFIG_HOME/noti/File.noti"` or use tilde - `"~/.config/noti/File.noti`.
 
 The `Spacing` table:
 
@@ -264,7 +269,7 @@ margin = 5
 ### Image
 
 Usually the notification can contain the image or icon and it draws at the right of
-banner. More about it in [banner layout](BannerLayout.md#image). The `Noti` application 
+banner. More about it in [banner layout](BannerLayout.md#image). The `Noti` application
 can perform some actions which in result the image will look very pleasant for most users.
 
 Here's a table of `Image` properties:

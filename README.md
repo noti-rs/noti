@@ -126,6 +126,51 @@ line_spacing = 5
 > [!TIP]
 > Check [ConfigProperties.md](docs/ConfigProperties.md) for comprehensive configuration options!
 
+### :wrench: Custom layout
+
+Want to change the banner layout? The `Noti` application provide **custom** layout by
+our new brand file type `noti` with extension `.noti`!
+
+**Sample of layout configuration**:
+
+```noti
+FlexContainer(
+    direction = vertical,
+    spacing = Spacing(
+        top = 10,
+        right = 15,
+        bottom = 10,
+        left = 15,
+    ),
+    alignment = Alignment(
+        horizontal = center,
+        vertical = center,
+    )
+) {
+    Text(
+        kind = title,
+        wrap = false,
+        ellipsize_at = end,
+        justification = center,
+    )
+    Text(
+        kind = body,
+        style = bold-italic,
+        margin = Spacing(top = 12),
+        justification = center,
+    )
+}
+```
+
+To enable this feature, write your own layout in file and in main config file
+write:
+
+```toml
+display.layout = "path/to/your/File.noti"
+```
+
+Read more about it [here](./docs/Filetype.md)!
+
 ## :bug: Troubleshooting
 
 Having issues?
