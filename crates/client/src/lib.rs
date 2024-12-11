@@ -39,10 +39,13 @@ impl<'a> NotiClient<'a> {
         timeout: i32,
         actions: Vec<String>,
         hints: Vec<String>,
+        schedule: String,
         hints_data: HintsData,
     ) -> anyhow::Result<()> {
         debug!("Client: Building hints and actions from user prompt");
-        let new_hints = build_hints(&hints, hints_data)?;
+        let mut new_hints = build_hints(&hints, hints_data)?;
+        new_hints.insert("schedule", Value::new(schedule));
+
         let actions = build_actions(&actions)?;
 
         debug!(

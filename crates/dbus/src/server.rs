@@ -105,14 +105,29 @@ impl Handler {
             app_icon,
             summary,
             body,
-            hints,
+            hints: hints.clone(),
             actions,
             expire_timeout,
             created_at,
             is_read: false,
         };
 
-        self.sender.send(Action::Show(notification.into())).unwrap();
+        if let Some(schedule) = &hints.schedule {
+            let scheduled_notification = crate::notification::ScheduledNotification {
+                id: notification.id,
+                time: schedule.to_owned(),
+                data: notification.into(),
+            };
+
+            dbg!(&scheduled_notification);
+
+            self.sender
+                .send(Action::Schedule(scheduled_notification))
+                .unwrap();
+        } else {
+            self.sender.send(Action::Show(notification.into())).unwrap();
+        }
+
         Ok(id)
     }
 
