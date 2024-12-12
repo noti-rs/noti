@@ -1,60 +1,49 @@
-use log::debug;
-use macros::{ConfigProperty, GenericBuilder};
+use display::{DisplayConfig, TomlDisplayConfig};
+use general::{GeneralConfig, TomlGeneralConfig};
+use log::{debug, error};
 use serde::Deserialize;
 use shared::{
-    error::ConversionError,
+    cached_data::{CacheUpdate, CachedData, CachedValueError},
     file_watcher::{FileState, FilesWatcher},
-    value::TryDowncast,
 };
 use std::{
     collections::HashMap,
-    fs,
     path::{Path, PathBuf},
 };
+use theme::{Theme, TomlTheme};
 
-pub mod colors;
+pub mod color;
+pub mod display;
+pub mod general;
 pub mod sorting;
 pub mod spacing;
 pub mod text;
+pub mod theme;
 
-use colors::{Color, TomlUrgencyColors, UrgencyColors};
-use sorting::Sorting;
 use spacing::Spacing;
-use text::{TextProperty, TomlTextProperty};
 
 const XDG_CONFIG_HOME: &str = "XDG_CONFIG_HOME";
 const HOME: &str = "HOME";
 const APP_NAME: &str = env!("APP_NAME");
 const CONFIG_FILE: &str = "config.toml";
 
-#[derive(Debug)]
 pub struct Config {
     watcher: FilesWatcher,
     general: GeneralConfig,
     display: DisplayConfig,
 
     app_configs: HashMap<String, DisplayConfig>,
+
+    default_theme: Theme,
+    cached_themes: CachedData<String, CachedTheme>,
 }
 
 impl Config {
     pub fn init(user_config: Option<&str>) -> Self {
-        fn to_config_file(prefix: String) -> PathBuf {
-            let mut path_buf: PathBuf = prefix.into();
-            path_buf.push(APP_NAME);
-            path_buf.push(CONFIG_FILE);
-            path_buf
-        }
-
         let config_paths = [
             user_config.map(PathBuf::from),
-            std::env::var(XDG_CONFIG_HOME).map(to_config_file).ok(),
-            std::env::var(HOME)
-                .map(|mut path| {
-                    path.push_str("/.config");
-                    path
-                })
-                .map(to_config_file)
-                .ok(),
+            xdg_config_dir(CONFIG_FILE),
+            home_config_dir(CONFIG_FILE),
         ]
         .into_iter()
         .flatten()
@@ -67,12 +56,24 @@ impl Config {
         let (general, display, app_configs) = Self::parse(watcher.get_watching_path());
         debug!("Config: Initialized");
 
-        Self {
+        let mut config = Self {
             watcher,
             general,
             display,
             app_configs,
-        }
+
+            default_theme: Theme::default(),
+            cached_themes: CachedData::default(),
+        };
+
+        config.cached_themes.extend_by_keys(
+            config
+                .displays()
+                .map(|display| display.theme.to_owned())
+                .collect(),
+        );
+
+        config
     }
 
     pub fn general(&self) -> &GeneralConfig {
@@ -94,8 +95,19 @@ impl Config {
             .chain(self.app_configs.values())
     }
 
-    pub fn check_updates(&mut self) -> FileState {
+    pub fn theme_by_app(&self, name: &str) -> &Theme {
+        self.cached_themes
+            .get(&self.display_by_app(name).theme)
+            .and_then(|cached_theme| cached_theme.theme.as_ref())
+            .unwrap_or(&self.default_theme)
+    }
+
+    pub fn check_display_updates(&mut self) -> FileState {
         self.watcher.check_updates()
+    }
+
+    pub fn update_themes(&mut self) -> bool {
+        self.cached_themes.update()
     }
 
     pub fn update(&mut self) {
@@ -104,6 +116,12 @@ impl Config {
         self.general = general;
         self.display = display;
         self.app_configs = app_configs;
+
+        self.cached_themes.extend_by_keys(
+            self.displays()
+                .map(|display| display.theme.to_owned())
+                .collect(),
+        );
 
         debug!("Config: Updated");
     }
@@ -161,307 +179,15 @@ pub struct TomlConfig {
 
 impl TomlConfig {
     fn parse(path: Option<&Path>) -> Self {
-        path.map(|config_path| fs::read_to_string(config_path).unwrap())
+        path.map(|config_path| std::fs::read_to_string(config_path).unwrap())
             .and_then(|content| match toml::from_str(&content) {
                 Ok(content) => Some(content),
                 Err(error) => {
-                    eprintln!("{error}");
+                    error!("{error}");
                     None
                 }
             })
             .unwrap_or_default()
-    }
-}
-
-public! {
-    #[derive(ConfigProperty, Default, Debug, Deserialize, Clone)]
-    #[cfg_prop(name(GeneralConfig), derive(Debug))]
-    struct TomlGeneralConfig {
-        font: Option<Font>,
-
-        #[cfg_prop(default(300))]
-        width: Option<u16>,
-        #[cfg_prop(default(150))]
-        height: Option<u16>,
-
-        anchor: Option<Anchor>,
-        offset: Option<(u8, u8)>,
-        #[cfg_prop(default(10))]
-        gap: Option<u8>,
-
-        sorting: Option<Sorting>,
-    }
-}
-
-public! {
-    #[derive(Debug, Deserialize, Clone)]
-    #[serde(from = "(String, u8)")]
-    struct Font {
-        name: String,
-        size: u8,
-    }
-}
-
-impl From<(String, u8)> for Font {
-    fn from((name, size): (String, u8)) -> Self {
-        Font { name, size }
-    }
-}
-
-impl Default for Font {
-    fn default() -> Self {
-        Font {
-            name: "Noto Sans".to_string(),
-            size: 12,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Default, Clone)]
-#[serde(from = "String")]
-pub enum Anchor {
-    Top,
-    TopLeft,
-    #[default]
-    TopRight,
-    Bottom,
-    BottomLeft,
-    BottomRight,
-    Left,
-    Right,
-}
-
-impl Anchor {
-    pub fn is_top(&self) -> bool {
-        matches!(self, Anchor::Top | Anchor::TopLeft | Anchor::TopRight)
-    }
-
-    pub fn is_right(&self) -> bool {
-        matches!(self, Anchor::TopRight | Anchor::BottomRight | Anchor::Right)
-    }
-
-    pub fn is_bottom(&self) -> bool {
-        matches!(
-            self,
-            Anchor::Bottom | Anchor::BottomLeft | Anchor::BottomRight
-        )
-    }
-
-    pub fn is_left(&self) -> bool {
-        matches!(self, Anchor::TopLeft | Anchor::BottomLeft | Anchor::Left)
-    }
-}
-
-impl From<String> for Anchor {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "top" => Anchor::Top,
-            "top-left" | "top left" => Anchor::TopLeft,
-            "top-right" | "top right" => Anchor::TopRight,
-            "bottom" => Anchor::Bottom,
-            "bottom-left" | "bottom left" => Anchor::BottomLeft,
-            "bottom-right" | "bottom right" => Anchor::BottomRight,
-            "left" => Anchor::Left,
-            "right" => Anchor::Right,
-            other => panic!(
-                "Invalid anchor option! There are possible values:\n\
-                - \"top\"\n\
-                - \"top-right\" or \"top right\"\n\
-                - \"top-left\" or \"top left\"\n\
-                - bottom\n\
-                - \"bottom-right\" or \"bottom right\"\n\
-                - \"bottom-left\" or \"bottom left\"\n\
-                - left\n\
-                - right\n\
-                Used: {other}"
-            ),
-        }
-    }
-}
-
-public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(name(DisplayConfig), derive(Debug))]
-    struct TomlDisplayConfig {
-        layout: Option<Layout>,
-
-        #[cfg_prop(use_type(ImageProperty), mergeable)]
-        image: Option<TomlImageProperty>,
-
-        padding: Option<Spacing>,
-        #[cfg_prop(use_type(Border), mergeable)]
-        border: Option<TomlBorder>,
-
-        #[cfg_prop(use_type(UrgencyColors), mergeable)]
-        colors: Option<TomlUrgencyColors>,
-
-        #[cfg_prop(temporary)]
-        text: Option<TomlTextProperty>,
-
-        #[cfg_prop(inherits(field = text), use_type(TextProperty), default(TomlTextProperty::default_title()), mergeable)]
-        title: Option<TomlTextProperty>,
-
-        #[cfg_prop(inherits(field = text), use_type(TextProperty), mergeable)]
-        body: Option<TomlTextProperty>,
-
-        #[cfg_prop(default(true))]
-        markup: Option<bool>,
-
-        #[cfg_prop(default(0))]
-        timeout: Option<u16>,
-    }
-}
-
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(from = "String")]
-pub enum Layout {
-    #[default]
-    Default,
-    FromPath {
-        path_buf: PathBuf,
-    },
-}
-
-impl Layout {
-    pub fn is_default(&self) -> bool {
-        matches!(self, Layout::Default)
-    }
-}
-
-impl From<String> for Layout {
-    fn from(value: String) -> Self {
-        if value == "default" {
-            return Layout::Default;
-        }
-
-        Layout::FromPath {
-            path_buf: PathBuf::from(
-                shellexpand::full(&value)
-                    .map(|value| value.into_owned())
-                    .unwrap_or(value),
-            ),
-        }
-    }
-}
-
-public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(
-        name(ImageProperty),
-        derive(GenericBuilder, Debug, Clone),
-        attributes(#[gbuilder(name(GBuilderImageProperty))])
-    )]
-    struct TomlImageProperty {
-        #[cfg_prop(
-            default(64),
-            attributes(#[gbuilder(default(64))])
-        )]
-        max_size: Option<u16>,
-
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        rounding: Option<u16>,
-
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        margin: Option<Spacing>,
-
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        resizing_method: Option<ResizingMethod>,
-    }
-}
-
-impl Default for ImageProperty {
-    fn default() -> Self {
-        TomlImageProperty::default().into()
-    }
-}
-
-impl TryFrom<shared::value::Value> for ImageProperty {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Default, Clone)]
-pub enum ResizingMethod {
-    #[serde(rename = "nearest")]
-    Nearest,
-    #[serde(rename = "triangle")]
-    Triangle,
-    #[serde(rename = "catmull-rom")]
-    CatmullRom,
-    #[default]
-    #[serde(rename = "gaussian")]
-    Gaussian,
-    #[serde(rename = "lanczos3")]
-    Lanczos3,
-}
-
-impl TryFrom<shared::value::Value> for ResizingMethod {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::String(str) => Ok(match str.to_lowercase().as_str() {
-                "nearest" => ResizingMethod::Nearest,
-                "triangle" => ResizingMethod::Triangle,
-                "catmull-rom" | "catmull_rom" => ResizingMethod::CatmullRom,
-                "gaussian" => ResizingMethod::Gaussian,
-                "lanczos3" => ResizingMethod::Lanczos3,
-                _ => Err(shared::error::ConversionError::InvalidValue {
-                    expected: "nearest, triangle, gaussian, lanczos3, catmull-rom or catmull_rom",
-                    actual: str,
-                })?,
-            }),
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
-    }
-}
-
-public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(
-        name(Border),
-        derive(GenericBuilder, Debug, Clone, Default),
-        attributes(#[gbuilder(name(GBuilderBorder))])
-    )]
-    struct TomlBorder {
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        size: Option<u8>,
-
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        radius: Option<u8>,
-
-        #[cfg_prop(
-            default(Color::new_black()),
-            attributes(#[gbuilder(default(path = Color::new_black))])
-        )]
-        color: Option<Color>,
-    }
-}
-
-impl TryFrom<shared::value::Value> for Border {
-    type Error = ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(ConversionError::CannotConvert),
-        }
     }
 }
 
@@ -479,4 +205,99 @@ impl AppConfig {
             .or(other.cloned());
         self
     }
+}
+
+struct CachedTheme {
+    watcher: FilesWatcher,
+    theme: Option<Theme>,
+}
+
+impl CachedTheme {
+    fn load_theme(path: &Path) -> Option<Theme> {
+        let file_content = match std::fs::read_to_string(path) {
+            Ok(data) => data,
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => {
+                    error!("The theme file at {path:?} is not existing!");
+                    return None;
+                }
+                std::io::ErrorKind::PermissionDenied => {
+                    error!("The theme file at {path:?} is restricted to read!");
+                    return None;
+                }
+                other_fs_err => {
+                    error!("Cannot read the theme file due unknown error. Error: {other_fs_err}");
+                    return None;
+                }
+            },
+        };
+
+        match toml::from_str::<TomlTheme>(&file_content) {
+            Ok(theme) => Some(theme.unwrap_or_default()),
+            Err(err) => {
+                error!("Failed to parse theme file at {path:?}. Reason: {err}");
+
+                None
+            }
+        }
+    }
+}
+
+impl CacheUpdate for CachedTheme {
+    fn check_updates(&mut self) -> FileState {
+        self.watcher.check_updates()
+    }
+
+    fn update(&mut self) {
+        self.theme = self.watcher.get_watching_path().and_then(Self::load_theme)
+    }
+}
+
+impl TryFrom<&String> for CachedTheme {
+    type Error = CachedValueError;
+
+    fn try_from(theme_name: &String) -> Result<Self, Self::Error> {
+        let suffix = "/themes/".to_owned() + theme_name + ".toml";
+        let possible_paths = vec![xdg_config_dir(&suffix), home_config_dir(&suffix)]
+            .into_iter()
+            .flatten()
+            .collect();
+
+        let watcher = match FilesWatcher::init(possible_paths) {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                return Err(CachedValueError::FailedInitWatcher { source: err });
+            }
+        };
+
+        let theme = watcher.get_watching_path().and_then(Self::load_theme);
+
+        Ok(Self { watcher, theme })
+    }
+}
+
+fn xdg_config_dir(suffix: &str) -> Option<PathBuf> {
+    std::env::var(XDG_CONFIG_HOME)
+        .map(|mut path| {
+            path.push('/');
+            path.push_str(APP_NAME);
+            path.push('/');
+            path.push_str(suffix);
+            path
+        })
+        .map(PathBuf::from)
+        .ok()
+}
+
+fn home_config_dir(suffix: &str) -> Option<PathBuf> {
+    std::env::var(HOME)
+        .map(|mut path| {
+            path.push_str("/.config/");
+            path.push_str(APP_NAME);
+            path.push('/');
+            path.push_str(suffix);
+            path
+        })
+        .map(PathBuf::from)
+        .ok()
 }

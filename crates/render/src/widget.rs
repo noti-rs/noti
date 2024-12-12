@@ -1,6 +1,11 @@
 use derive_builder::Builder;
 
-use config::{spacing::Spacing, text::TextProperty, Border, DisplayConfig, ImageProperty};
+use config::{
+    display::{Border, DisplayConfig, ImageProperty},
+    spacing::Spacing,
+    text::TextProperty,
+    theme::Theme,
+};
 use dbus::{notification::Notification, text::Text};
 use log::warn;
 use shared::{
@@ -121,6 +126,7 @@ pub enum CompileState {
 pub struct WidgetConfiguration<'a> {
     pub notification: &'a Notification,
     pub font_collection: &'a FontCollection,
+    pub theme: &'a Theme,
     pub font_size: f32,
     pub display_config: &'a DisplayConfig,
     pub override_properties: bool,
@@ -194,17 +200,14 @@ impl FlexContainer {
         };
         self.rect_size = Some(rect_size.clone());
 
-        self.background_color = Bgra::from(
-            &configuration
-                .display_config
-                .colors
-                .by_urgency(&configuration.notification.hints.urgency)
-                .background,
-        );
+        let colors = &configuration
+            .theme
+            .by_urgency(&configuration.notification.hints.urgency);
+        self.background_color = Bgra::from(&colors.background);
 
         self.compiled_border = Some(
             BorderBuilder::default()
-                .color((&self.border.color).into())
+                .color((&colors.border).into())
                 .frame_width(rect_size.width)
                 .frame_height(rect_size.height)
                 .size(self.border.size)
@@ -717,6 +720,7 @@ impl WText {
             font_size,
             font_collection,
             override_properties,
+            theme,
         }: &WidgetConfiguration,
     ) -> CompileState {
         let mut override_if = |r#override: bool, property: &TextProperty| {
@@ -725,9 +729,7 @@ impl WText {
             }
         };
 
-        let colors = display_config
-            .colors
-            .by_urgency(&notification.hints.urgency);
+        let colors = theme.by_urgency(&notification.hints.urgency);
         let foreground = Bgra::from(&colors.foreground);
 
         let notification_content: NotificationContent = match self.kind {

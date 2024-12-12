@@ -156,20 +156,20 @@ impl Window {
         debug!("Window: Reconfigured by updated config");
     }
 
-    fn relocate(&mut self, (x, y): (u8, u8), anchor_cfg: &config::Anchor) {
+    fn relocate(&mut self, (x, y): (u8, u8), anchor_cfg: &config::general::Anchor) {
         if let Some(layer_surface) = self.layer_surface.as_ref() {
             debug!("Window: Relocate to anchor {anchor_cfg:?} with offsets x - {x} and y - {y}");
             self.margin = Margin::from_anchor(x as i32, y as i32, anchor_cfg);
 
             let anchor = match anchor_cfg {
-                config::Anchor::Top => Anchor::Top,
-                config::Anchor::TopLeft => Anchor::Top.union(Anchor::Left),
-                config::Anchor::TopRight => Anchor::Top.union(Anchor::Right),
-                config::Anchor::Bottom => Anchor::Bottom,
-                config::Anchor::BottomLeft => Anchor::Bottom.union(Anchor::Left),
-                config::Anchor::BottomRight => Anchor::Bottom.union(Anchor::Right),
-                config::Anchor::Left => Anchor::Left,
-                config::Anchor::Right => Anchor::Right,
+                config::general::Anchor::Top => Anchor::Top,
+                config::general::Anchor::TopLeft => Anchor::Top.union(Anchor::Left),
+                config::general::Anchor::TopRight => Anchor::Top.union(Anchor::Right),
+                config::general::Anchor::Bottom => Anchor::Bottom,
+                config::general::Anchor::BottomLeft => Anchor::Bottom.union(Anchor::Left),
+                config::general::Anchor::BottomRight => Anchor::Bottom.union(Anchor::Right),
+                config::general::Anchor::Left => Anchor::Left,
+                config::general::Anchor::Right => Anchor::Right,
             };
 
             layer_surface.set_anchor(anchor);
@@ -394,7 +394,7 @@ impl Window {
         vec![0; gap_size]
     }
 
-    fn write_banners_to_buffer(&mut self, anchor: &config::Anchor, gap_buffer: &[u8]) {
+    fn write_banners_to_buffer(&mut self, anchor: &config::general::Anchor, gap_buffer: &[u8]) {
         fn write(buffer: Option<&mut Buffer>, data: &[u8]) {
             unsafe { buffer.unwrap_unchecked() }.push(data);
         }
@@ -564,7 +564,7 @@ impl Margin {
         }
     }
 
-    fn from_anchor(x: i32, y: i32, anchor: &config::Anchor) -> Self {
+    fn from_anchor(x: i32, y: i32, anchor: &config::general::Anchor) -> Self {
         let mut margin = Margin::new();
 
         if anchor.is_top() {

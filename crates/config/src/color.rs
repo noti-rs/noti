@@ -1,56 +1,9 @@
 use std::str::Chars;
 
-use dbus::notification::Urgency;
-use macros::ConfigProperty;
 use serde::Deserialize;
 use shared::value::TryDowncast;
 
 use super::public;
-
-public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(name(UrgencyColors), derive(Debug))]
-    struct TomlUrgencyColors {
-        #[cfg_prop(use_type(Colors), mergeable)]
-        low: Option<TomlColors>,
-
-        #[cfg_prop(use_type(Colors), mergeable)]
-        normal: Option<TomlColors>,
-
-        #[cfg_prop(use_type(Colors), mergeable, default(TomlColors::default_critical()))]
-        critical: Option<TomlColors>,
-    }
-}
-
-impl UrgencyColors {
-    pub fn by_urgency(&self, urgency: &Urgency) -> &Colors {
-        match urgency {
-            Urgency::Low => &self.low,
-            Urgency::Normal => &self.normal,
-            Urgency::Critical => &self.critical,
-        }
-    }
-}
-
-public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(name(Colors), derive(Debug))]
-    struct TomlColors {
-        #[cfg_prop(default(Color::new_white()))]
-        background: Option<Color>,
-        #[cfg_prop(default(Color::new_black()))]
-        foreground: Option<Color>,
-    }
-}
-
-impl TomlColors {
-    fn default_critical() -> TomlColors {
-        TomlColors {
-            background: Some(Color::new_white()),
-            foreground: Some(Color::new_red()),
-        }
-    }
-}
 
 public! {
     #[derive(Debug, Clone, Deserialize, Default)]
@@ -73,6 +26,7 @@ impl Color {
         }
     }
 
+    #[allow(unused)]
     pub(super) fn new_black() -> Self {
         Self {
             red: 0,

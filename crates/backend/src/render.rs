@@ -71,7 +71,7 @@ impl Renderer {
             self.window_manager.dispatch()?;
 
             {
-                match self.config.check_updates() {
+                match self.config.check_display_updates() {
                     FileState::NotFound | FileState::Updated => {
                         self.config.update();
                         self.window_manager.update_by_config(&self.config)?;
@@ -80,7 +80,9 @@ impl Renderer {
                     FileState::NothingChanged => (),
                 };
 
-                self.window_manager.update_cache(&self.config);
+                if self.config.update_themes() || self.window_manager.update_cache() {
+                    self.window_manager.update_by_config(&self.config)?;
+                }
             }
 
             std::thread::sleep(Duration::from_millis(50));

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
 
 use log::error;
 
@@ -14,6 +14,10 @@ where
     K: std::cmp::Eq + std::hash::Hash + ToOwned<Owned = K>,
     V: for<'a> TryFrom<&'a K, Error = CachedValueError>,
 {
+    pub fn new() -> Self {
+        CachedData(HashMap::new())
+    }
+
     pub fn get(&self, key: &K) -> Option<&V> {
         self.0.get(key)
     }
@@ -35,17 +39,17 @@ where
         updated
     }
 
-    pub fn extend_by_keys(&mut self, keys: Vec<&K>) {
-        self.0.retain(|key, _| keys.contains(&key));
+    pub fn extend_by_keys(&mut self, keys: Vec<K>) {
+        self.0.retain(|key, _| keys.contains(key));
 
         for key in keys {
-            if self.0.contains_key(key) {
+            if self.0.contains_key(&key) {
                 continue;
             }
 
-            match V::try_from(key) {
+            match V::try_from(&key) {
                 Ok(data) => {
-                    self.0.insert(key.to_owned(), data);
+                    self.0.insert(key, data);
                 }
                 Err(err) => {
                     error!("{err}")
@@ -73,6 +77,16 @@ where
     }
 }
 
+impl<K, V> Default for CachedData<K, V>
+where
+    K: std::cmp::Eq + std::hash::Hash + ToOwned<Owned = K>,
+    V: for<'a> TryFrom<&'a K, Error = CachedValueError>,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub trait CacheUpdate {
     fn check_updates(&mut self) -> FileState;
     fn update(&mut self);
@@ -80,9 +94,6 @@ pub trait CacheUpdate {
 
 #[derive(derive_more::Display)]
 pub enum CachedValueError {
-    #[display("Failed to init file watcher for file {path_buf:?}. Error: {source}")]
-    FailedInitWatcher {
-        path_buf: PathBuf,
-        source: anyhow::Error,
-    },
+    #[display("Failed to init file watcher for file. Error: {source}")]
+    FailedInitWatcher { source: anyhow::Error },
 }

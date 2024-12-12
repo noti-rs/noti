@@ -34,8 +34,8 @@ impl WindowManager {
         let cached_layouts = config
             .displays()
             .filter_map(|display| match &display.layout {
-                config::Layout::Default => None,
-                config::Layout::FromPath { path_buf } => Some(path_buf),
+                config::display::Layout::Default => None,
+                config::display::Layout::FromPath { path_buf } => Some(path_buf),
             })
             .collect();
 
@@ -54,20 +54,8 @@ impl WindowManager {
         })
     }
 
-    pub(crate) fn update_cache(&mut self, config: &Config) {
-        let updated = self.cached_layouts.update();
-        if updated {
-            if let Some(window) = self.window.as_mut() {
-                let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
-
-                window.redraw(qhandle, config, &self.cached_layouts);
-                window.frame(qhandle);
-                window.commit();
-
-            }
-
-            debug!("Window Manager: Updated the layouts")
-        }
+    pub(crate) fn update_cache(&mut self) -> bool {
+        self.cached_layouts.update()
     }
 
     pub(crate) fn update_by_config(&mut self, config: &Config) -> anyhow::Result<()> {
@@ -75,8 +63,8 @@ impl WindowManager {
             config
                 .displays()
                 .filter_map(|display| match &display.layout {
-                    config::Layout::Default => None,
-                    config::Layout::FromPath { path_buf } => Some(path_buf),
+                    config::display::Layout::Default => None,
+                    config::display::Layout::FromPath { path_buf } => Some(path_buf.to_owned()),
                 })
                 .collect(),
         );

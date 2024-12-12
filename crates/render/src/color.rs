@@ -1,6 +1,6 @@
 use std::ops::{Mul, MulAssign};
 
-use config::colors::Color;
+use config::color::Color;
 
 use super::widget::Coverage;
 

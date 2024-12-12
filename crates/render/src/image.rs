@@ -1,7 +1,7 @@
 use log::{debug, warn};
 use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 
-use config::{ImageProperty, ResizingMethod};
+use config::display::{ImageProperty, ResizingMethod};
 use dbus::image::ImageData;
 
 use crate::{drawer::Drawer, types::RectSize};

@@ -45,10 +45,7 @@ impl<'a> TryFrom<&'a PathBuf> for CachedLayout {
         let watcher = match FilesWatcher::init(vec![path_buf]) {
             Ok(watcher) => watcher,
             Err(err) => {
-                return Err(CachedValueError::FailedInitWatcher {
-                    path_buf: path_buf.to_owned(),
-                    source: err,
-                });
+                return Err(CachedValueError::FailedInitWatcher { source: err });
             }
         };
 

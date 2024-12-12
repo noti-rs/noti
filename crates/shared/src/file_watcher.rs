@@ -21,6 +21,11 @@ impl FilesWatcher {
     /// The paths are **arranged**. It's means that first path is more prioritized than second and
     /// second is more prioritized than third and so on.
     pub fn init<T: AsRef<Path>>(paths: Vec<T>) -> anyhow::Result<Self> {
+        assert!(
+            !paths.is_empty(),
+            "At least one path should be provided to FilesWatcher"
+        );
+
         debug!("Watcher: Initializing");
         let inotify = Inotify::init()?;
 

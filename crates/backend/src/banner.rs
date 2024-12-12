@@ -1,6 +1,9 @@
 use std::{path::PathBuf, time};
 
-use config::{Border, Config, DisplayConfig};
+use config::{
+    display::{Border, DisplayConfig},
+    Config,
+};
 use dbus::notification::Notification;
 use log::{debug, trace};
 
@@ -89,8 +92,8 @@ impl BannerRect {
         let mut drawer = Drawer::new(Bgra::new(), rect_size.clone());
 
         let mut layout = match &display.layout {
-            config::Layout::Default => Self::default_layout(display),
-            config::Layout::FromPath { path_buf } => cached_layouts
+            config::display::Layout::Default => Self::default_layout(display),
+            config::display::Layout::FromPath { path_buf } => cached_layouts
                 .get(path_buf)
                 .and_then(CachedLayout::layout)
                 .cloned()
@@ -103,6 +106,7 @@ impl BannerRect {
             rect_size,
             &WidgetConfiguration {
                 display_config: display,
+                theme: config.theme_by_app(&self.data.app_name),
                 notification: &self.data,
                 font_collection,
                 font_size,
