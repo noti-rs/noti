@@ -100,8 +100,6 @@ impl BannerRect {
                 .unwrap_or_else(|| Self::default_layout(display)),
         };
 
-        let font_size = config.general().font.size as f32;
-
         layout.compile(
             rect_size,
             &WidgetConfiguration {
@@ -109,7 +107,6 @@ impl BannerRect {
                 theme: config.theme_by_app(&self.data.app_name),
                 notification: &self.data,
                 font_collection,
-                font_size,
                 override_properties: display.layout.is_default(),
             },
         );

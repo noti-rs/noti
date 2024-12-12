@@ -29,16 +29,15 @@ public! {
 
 public! {
     #[derive(Debug, Deserialize, Clone)]
-    #[serde(from = "(String, u8)")]
+    #[serde(from = "String")]
     struct Font {
         name: String,
-        size: u8,
     }
 }
 
-impl From<(String, u8)> for Font {
-    fn from((name, size): (String, u8)) -> Self {
-        Font { name, size }
+impl From<String> for Font {
+    fn from(name: String) -> Self {
+        Font { name }
     }
 }
 
@@ -46,7 +45,6 @@ impl Default for Font {
     fn default() -> Self {
         Font {
             name: "Noto Sans".to_string(),
-            size: 12,
         }
     }
 }

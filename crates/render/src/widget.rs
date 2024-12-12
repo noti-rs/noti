@@ -127,7 +127,6 @@ pub struct WidgetConfiguration<'a> {
     pub notification: &'a Notification,
     pub font_collection: &'a FontCollection,
     pub theme: &'a Theme,
-    pub font_size: f32,
     pub display_config: &'a DisplayConfig,
     pub override_properties: bool,
 }
@@ -717,7 +716,6 @@ impl WText {
         WidgetConfiguration {
             display_config,
             notification,
-            font_size,
             font_collection,
             override_properties,
             theme,
@@ -747,12 +745,13 @@ impl WText {
             }
         };
 
+        let px_size = self.property.font_size as f32;
         let mut content = match notification_content {
             NotificationContent::Text(text) => {
-                TextRect::from_text(text, *font_size, &self.property.style, font_collection)
+                TextRect::from_text(text, px_size, &self.property.style, font_collection)
             }
             NotificationContent::String(str) => {
-                TextRect::from_str(str, *font_size, &self.property.style, font_collection)
+                TextRect::from_str(str, px_size, &self.property.style, font_collection)
             }
         };
 
