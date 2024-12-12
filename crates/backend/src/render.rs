@@ -80,7 +80,7 @@ impl Renderer {
                     FileState::NothingChanged => (),
                 };
 
-                self.window_manager.update_cache();
+                self.window_manager.update_cache(&self.config);
             }
 
             std::thread::sleep(Duration::from_millis(50));

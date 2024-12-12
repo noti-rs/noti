@@ -1,9 +1,11 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use log::debug;
+use shared::cached_data::CachedData;
 use wayland_client::{Connection, EventQueue, QueueHandle};
 
-use super::cache::CachedLayouts;
+use crate::cache::CachedLayout;
+
 use super::internal_messages::RendererMessage;
 use config::Config;
 use dbus::notification::Notification;
@@ -18,7 +20,7 @@ pub(crate) struct WindowManager {
     window: Option<Window>,
 
     font_collection: Arc<FontCollection>,
-    cached_layouts: CachedLayouts,
+    cached_layouts: CachedData<PathBuf, CachedLayout>,
 
     events: Vec<RendererMessage>,
 }
@@ -29,7 +31,7 @@ impl WindowManager {
         let font_collection = Arc::new(FontCollection::load_by_font_name(
             &config.general().font.name,
         )?);
-        let cached_layouts: CachedLayouts = config
+        let cached_layouts = config
             .displays()
             .filter_map(|display| match &display.layout {
                 config::Layout::Default => None,
@@ -52,12 +54,24 @@ impl WindowManager {
         })
     }
 
-    pub(crate) fn update_cache(&mut self) {
-        self.cached_layouts.update();
+    pub(crate) fn update_cache(&mut self, config: &Config) {
+        let updated = self.cached_layouts.update();
+        if updated {
+            if let Some(window) = self.window.as_mut() {
+                let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
+
+                window.redraw(qhandle, config, &self.cached_layouts);
+                window.frame(qhandle);
+                window.commit();
+
+            }
+
+            debug!("Window Manager: Updated the layouts")
+        }
     }
 
     pub(crate) fn update_by_config(&mut self, config: &Config) -> anyhow::Result<()> {
-        self.cached_layouts.extend_by_paths(
+        self.cached_layouts.extend_by_keys(
             config
                 .displays()
                 .filter_map(|display| match &display.layout {

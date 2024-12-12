@@ -1,5 +1,6 @@
 use indexmap::{indexmap, IndexMap};
 use log::{debug, error, trace};
+use shared::cached_data::CachedData;
 use std::{
     cmp::Ordering,
     fs::File,
@@ -7,6 +8,7 @@ use std::{
         fd::{AsFd, BorrowedFd},
         unix::fs::FileExt,
     },
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -28,7 +30,7 @@ use super::internal_messages::RendererMessage;
 use config::{self, Config};
 use dbus::notification::{self, Notification};
 
-use crate::{banner::BannerRect, cache::CachedLayouts};
+use crate::{banner::BannerRect, cache::CachedLayout};
 use render::{font::FontCollection, types::RectSize};
 
 pub(super) struct Window {
@@ -187,7 +189,7 @@ impl Window {
         &mut self,
         mut notifications: Vec<Notification>,
         config: &Config,
-        cached_layouts: &CachedLayouts,
+        cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) {
         self.replace_by_indices(&mut notifications, config, cached_layouts);
 
@@ -209,7 +211,7 @@ impl Window {
         &mut self,
         notifications: &mut Vec<Notification>,
         config: &Config,
-        cached_layouts: &CachedLayouts,
+        cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) {
         let matching_indices: Vec<usize> = notifications
             .iter()
@@ -347,7 +349,7 @@ impl Window {
         &mut self,
         qhandle: &QueueHandle<Window>,
         config: &Config,
-        cached_layouts: &CachedLayouts,
+        cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) {
         self.banners
             .values_mut()

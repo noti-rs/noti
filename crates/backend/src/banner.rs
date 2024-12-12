@@ -1,4 +1,4 @@
-use std::time;
+use std::{path::PathBuf, time};
 
 use config::{Border, Config, DisplayConfig};
 use dbus::notification::Notification;
@@ -14,8 +14,9 @@ use render::{
         WidgetConfiguration,
     },
 };
+use shared::cached_data::CachedData;
 
-use crate::cache::{CachedLayout, CachedLayouts};
+use crate::cache::CachedLayout;
 
 pub struct BannerRect {
     data: Notification,
@@ -75,7 +76,7 @@ impl BannerRect {
         &mut self,
         font_collection: &FontCollection,
         config: &Config,
-        cached_layouts: &CachedLayouts,
+        cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) {
         debug!("Banner (id={}): Beginning of draw", self.data.id);
 
