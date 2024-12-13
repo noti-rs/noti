@@ -14,6 +14,7 @@ pub struct HintsData {
     pub suppress_sound: Option<bool>,
     pub transient: Option<bool>,
     pub action_icons: Option<bool>,
+    pub schedule: Option<String>,
 }
 
 pub struct NotiClient<'a> {
@@ -43,6 +44,7 @@ impl<'a> NotiClient<'a> {
     ) -> anyhow::Result<()> {
         debug!("Client: Building hints and actions from user prompt");
         let new_hints = build_hints(&hints, hints_data)?;
+
         let actions = build_actions(&actions)?;
 
         debug!(
@@ -130,6 +132,7 @@ fn build_hints<'a>(
     hints_map.insert_if_empty("image-path", hints_data.image_path, Value::from);
     hints_map.insert_if_empty("sound-file", hints_data.sound_file, Value::from);
     hints_map.insert_if_empty("sound-name", hints_data.sound_name, Value::from);
+    hints_map.insert_if_empty("schedule", hints_data.schedule, Value::from);
     hints_map.insert_if_empty("resident", hints_data.resident, Value::Bool);
     hints_map.insert_if_empty("suppress-sound", hints_data.suppress_sound, Value::Bool);
     hints_map.insert_if_empty("transient", hints_data.transient, Value::Bool);

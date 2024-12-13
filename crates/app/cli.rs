@@ -124,7 +124,6 @@ pub struct SendCommand {
     resident: Option<bool>,
 
     #[arg(
-        short,
         long,
         help = "Sound file",
         long_help = "Path to a sound file to play when the notification pops up"
@@ -162,6 +161,14 @@ pub struct SendCommand {
         long_help = "Interprets action IDs as icons, annotated by display names"
     )]
     action_icons: Option<bool>,
+
+    #[arg(
+        short = 's',
+        long,
+        help = "Schedule",
+        long_help = "Specifies the time to schedule the notification to be shown."
+    )]
+    schedule: Option<String>,
 }
 
 impl Args {
@@ -199,6 +206,7 @@ async fn send(noti: client::NotiClient<'_>, args: SendCommand) -> anyhow::Result
         suppress_sound: args.suppress_sound,
         transient: args.transient,
         action_icons: args.action_icons,
+        schedule: args.schedule,
     };
 
     noti.send_notification(

@@ -3,12 +3,14 @@ use std::thread;
 use anyhow::Context;
 use config::Config;
 use log::{debug, info, warn};
+use scheduler::Scheduler;
 use tokio::sync::mpsc::unbounded_channel;
 
 mod banner;
 mod cache;
 mod internal_messages;
 mod render;
+mod scheduler;
 mod window;
 mod window_manager;
 
@@ -19,11 +21,15 @@ use render::Renderer;
 
 pub async fn run(config: Config) -> anyhow::Result<()> {
     let (sender, mut receiver) = unbounded_channel();
+
     let server = Server::init(sender).await?;
     info!("Backend: Server initialized");
 
     let (server_internal_channel, mut renderer) = Renderer::init(config)?;
     info!("Backend: Renderer initialized");
+
+    let mut scheduler = Scheduler::new();
+    info!("Backend: Scheduler initialized");
 
     let backend_thread = thread::spawn(move || renderer.run());
 
@@ -31,29 +37,52 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         while let Ok(action) = receiver.try_recv() {
             match action {
                 Action::Show(notification) => {
+                    debug!(
+                        "Backend: Sent a request to renderer to show notification with id: {}",
+                        &notification.id
+                    );
                     server_internal_channel.send_to_renderer(
                         internal_messages::ServerMessage::ShowNotification(notification),
                     )?;
-                    debug!("Backend: Sended notification to render to show");
                 }
                 Action::Close(Some(id)) => {
                     server_internal_channel.send_to_renderer(
                         internal_messages::ServerMessage::CloseNotification { id },
                     )?;
-                    debug!("Backend: Sended notification with id {id} to render to close it");
+                    debug!(
+                        "Backend: Sent a request to renderer to close notification with id: {id}"
+                    );
+                }
+                Action::Schedule(notification) => {
+                    debug!(
+                        "Backend: Scheduled notification with id {} for time {}",
+                        &notification.id, &notification.time
+                    );
+                    scheduler.add(notification);
                 }
                 Action::Close(None) => {
-                    warn!("Backend: Unsupported method 'Close'. Ignored");
-                }
-                Action::ShowLast => {
-                    //TODO: make decision about this action. It may be very useless
-                    warn!("Backend: Unsupported method 'ShowLast'. Ignored");
+                    warn!("Backend: Received 'Close' action without an id. Ignored");
                 }
                 Action::CloseAll => {
-                    warn!("Backend: Unsupported method 'CloseAll'. Ignored");
+                    warn!("Backend: Received unsupported 'CloseAll' action. Ignored");
                 }
             }
         }
+
+        scheduler
+            .pop_due_notifications()
+            .into_iter()
+            .for_each(|scheduled| {
+                server_internal_channel
+                    .send_to_renderer(internal_messages::ServerMessage::ShowNotification(
+                        scheduled.data,
+                    ))
+                    .unwrap();
+                debug!(
+                    "Backend: Notification with id {} due for delivery. Sending to renderer",
+                    &scheduled.id
+                );
+            });
 
         while let Ok(message) = server_internal_channel.try_recv_from_renderer() {
             match message {
@@ -68,7 +97,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
                         //INFO: ignore the first one because it always emits in server.
                         dbus::actions::ClosingReason::CallCloseNotification => (),
                         other_reason => {
-                            debug!("Backend: Closed notification with id {id} and reason {other_reason}");
+                            debug!("Backend: Closed notification with id {id} for reason {other_reason}");
                             server
                                 .emit_signal(dbus::actions::Signal::NotificationClosed {
                                     notification_id: id,
@@ -85,7 +114,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             return backend_thread
                 .join()
                 .expect("Join the backend thread to finish main thread")
-                .with_context(|| "The backend shutdowns due to error");
+                .with_context(|| "The backend is shutting down due to an error");
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
