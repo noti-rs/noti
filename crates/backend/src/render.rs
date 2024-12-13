@@ -32,6 +32,7 @@ impl Renderer {
     pub(crate) fn run(&mut self) -> anyhow::Result<()> {
         let mut notifications_to_create = vec![];
         let mut notifications_to_close = vec![];
+        let mut partially_default_config = false;
 
         debug!("Renderer: Running");
         loop {
@@ -72,19 +73,33 @@ impl Renderer {
 
             {
                 match self.config.check_updates() {
-                    FileState::NotFound | FileState::Updated => {
-                        self.config.update();
-                        self.window_manager.update_by_config(&self.config)?;
+                    FileState::Updated => {
+                        partially_default_config = false;
+                        self.update_config()?;
                         info!("Renderer: Detected changes of config files and updated")
                     }
-                    FileState::NothingChanged => (),
+                    FileState::NotFound if !partially_default_config => {
+                        partially_default_config = true;
+                        self.update_config()?;
+                        info!("The main or imported configuration file is not found, reverting this part to default values.");
+                    }
+                    FileState::NotFound | FileState::NothingChanged => (),
                 };
 
-                self.window_manager.update_cache();
+                // if self.config.update_themes() || self.window_manager.update_cache() {
+                if self.window_manager.update_cache() {
+                    self.window_manager.update_by_config(&self.config)?;
+                }
             }
 
             std::thread::sleep(Duration::from_millis(50));
             std::hint::spin_loop();
         }
+    }
+
+    fn update_config(&mut self) -> anyhow::Result<()> {
+        self.config.update();
+        self.window_manager.update_by_config(&self.config)?;
+        Ok(())
     }
 }

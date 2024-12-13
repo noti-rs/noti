@@ -1,8 +1,8 @@
 use anyhow::bail;
 use config::{
+    display::{Border, GBuilderBorder, GBuilderImageProperty, ImageProperty},
     spacing::{GBuilderSpacing, Spacing},
     text::{GBuilderTextProperty, TextProperty},
-    Border, GBuilderBorder, GBuilderImageProperty, ImageProperty,
 };
 use log::warn;
 use pest::iterators::{Pair, Pairs};

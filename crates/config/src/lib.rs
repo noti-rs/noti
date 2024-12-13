@@ -1,77 +1,76 @@
-use log::debug;
-use macros::{ConfigProperty, GenericBuilder};
+use display::{DisplayConfig, TomlDisplayConfig};
+use general::{GeneralConfig, TomlGeneralConfig};
+use log::{debug, error, warn};
 use serde::Deserialize;
-use shared::{
-    error::ConversionError,
-    file_watcher::{FileState, FilesWatcher},
-    value::TryDowncast,
-};
+use shared::file_watcher::{FileState, FilesWatcher};
 use std::{
     collections::HashMap,
-    fs,
+    ops::Not,
     path::{Path, PathBuf},
 };
+use theme::{Theme, TomlTheme};
 
-pub mod colors;
+pub mod color;
+pub mod display;
+pub mod general;
 pub mod sorting;
 pub mod spacing;
 pub mod text;
+pub mod theme;
 
-use colors::{Color, TomlUrgencyColors, UrgencyColors};
-use sorting::Sorting;
 use spacing::Spacing;
-use text::{TextProperty, TomlTextProperty};
 
 const XDG_CONFIG_HOME: &str = "XDG_CONFIG_HOME";
 const HOME: &str = "HOME";
 const APP_NAME: &str = env!("APP_NAME");
 const CONFIG_FILE: &str = "config.toml";
 
-#[derive(Debug)]
 pub struct Config {
-    watcher: FilesWatcher,
+    main_watcher: FilesWatcher,
+    subwatchers: Vec<FilesWatcher>,
     general: GeneralConfig,
     display: DisplayConfig,
+
+    default_theme: Theme,
+    themes: HashMap<String, Theme>,
 
     app_configs: HashMap<String, DisplayConfig>,
 }
 
 impl Config {
     pub fn init(user_config: Option<&str>) -> Self {
-        fn to_config_file(prefix: String) -> PathBuf {
-            let mut path_buf: PathBuf = prefix.into();
-            path_buf.push(APP_NAME);
-            path_buf.push(CONFIG_FILE);
-            path_buf
-        }
-
         let config_paths = [
             user_config.map(PathBuf::from),
-            std::env::var(XDG_CONFIG_HOME).map(to_config_file).ok(),
-            std::env::var(HOME)
-                .map(|mut path| {
-                    path.push_str("/.config");
-                    path
-                })
-                .map(to_config_file)
-                .ok(),
+            xdg_config_dir(CONFIG_FILE),
+            home_config_dir(CONFIG_FILE),
         ]
         .into_iter()
         .flatten()
         .collect();
 
         debug!("Config: Initializing");
-        let watcher =
+        let main_watcher =
             FilesWatcher::init(config_paths).expect("The config watcher must be initialized");
 
-        let (general, display, app_configs) = Self::parse(watcher.get_watching_path());
+        let ParsedConfig {
+            subwatchers,
+            general,
+            display,
+            themes,
+            app_configs,
+        } = Self::parse(main_watcher.get_watching_path());
+
         debug!("Config: Initialized");
 
         Self {
-            watcher,
+            main_watcher,
+            subwatchers,
             general,
             display,
             app_configs,
+
+            default_theme: Theme::default(),
+            themes,
         }
     }
 
@@ -94,47 +93,109 @@ impl Config {
             .chain(self.app_configs.values())
     }
 
+    pub fn theme_by_app(&self, name: &str) -> &Theme {
+        self.themes
+            .get(&self.display_by_app(name).theme)
+            .unwrap_or(&self.default_theme)
+    }
+
     pub fn check_updates(&mut self) -> FileState {
-        self.watcher.check_updates()
+        self.main_watcher.check_updates()
+            | self
+                .subwatchers
+                .iter_mut()
+                .map(FilesWatcher::check_updates)
+                .fold(FileState::NothingChanged, |lhs, rhs| lhs | rhs)
     }
 
     pub fn update(&mut self) {
-        let (general, display, app_configs) = Self::parse(self.watcher.get_watching_path());
+        let ParsedConfig {
+            subwatchers,
+            general,
+            display,
+            themes,
+            app_configs: apps,
+        } = Self::parse(self.main_watcher.get_watching_path());
 
+        self.subwatchers = subwatchers;
         self.general = general;
         self.display = display;
-        self.app_configs = app_configs;
+        self.app_configs = apps;
+        self.themes = themes;
 
         debug!("Config: Updated");
     }
 
-    fn parse(
-        path: Option<&Path>,
-    ) -> (GeneralConfig, DisplayConfig, HashMap<String, DisplayConfig>) {
+    fn parse(path: Option<&Path>) -> ParsedConfig {
+        let (subwatchers, toml_config) = match TomlConfig::parse_recursive(path) {
+            Some(ParsedTomlConfig {
+                subwatchers,
+                toml_config,
+            }) => (subwatchers, toml_config),
+            None => (vec![], Default::default()),
+        };
+
         let TomlConfig {
             general,
             display,
+            themes,
             apps,
-        } = TomlConfig::parse(path);
+            ..
+        } = toml_config;
 
-        let mut app_configs =
-            HashMap::with_capacity(apps.as_ref().map(|data| data.len()).unwrap_or(0));
+        let mut theme_table: HashMap<String, TomlTheme> = HashMap::new();
+        if let Some(themes) = themes {
+            for theme in themes {
+                if theme.name.as_ref().is_none_or(|name| name.is_empty()) {
+                    warn!("Config: Encountered an unnamed theme. Skipped.");
+                    continue;
+                }
 
+                let theme_name = theme.name.as_ref().cloned().unwrap();
+                let theme_to_save = match theme_table.remove(&theme_name) {
+                    Some(saved_theme) => saved_theme.merge(Some(theme)),
+                    None => theme,
+                };
+                theme_table.insert(theme_name, theme_to_save);
+            }
+        }
+
+        let mut app_configs: HashMap<String, TomlDisplayConfig> = HashMap::new();
         if let Some(apps) = apps {
-            for mut app in apps {
-                app = app.merge(display.as_ref());
-                app_configs.insert(app.name, app.display.unwrap().unwrap_or_default());
+            for app in apps {
+                let app_name = app.name.clone();
+                let app_display_config = match app_configs.remove(&app_name) {
+                    Some(saved_app_config) => saved_app_config.merge(app.display),
+                    None => app.merge(display.as_ref()).display.unwrap(),
+                };
+                app_configs.insert(app_name, app_display_config);
             }
         }
 
         debug!("Config: Parsed from files");
 
-        (
-            general.unwrap_or_default().into(),
-            display.unwrap_or_default().into(),
-            app_configs,
-        )
+        ParsedConfig {
+            subwatchers,
+            general: general.unwrap_or_default().into(),
+            display: display.unwrap_or_default().into(),
+            themes: theme_table
+                .into_iter()
+                .map(|(key, value)| (key, value.unwrap_or_default()))
+                .collect(),
+            app_configs: app_configs
+                .into_iter()
+                .map(|(key, value)| (key, value.unwrap_or_default()))
+                .collect(),
+        }
     }
+}
+
+struct ParsedConfig {
+    subwatchers: Vec<FilesWatcher>,
+    general: GeneralConfig,
+    display: DisplayConfig,
+    themes: HashMap<String, Theme>,
+    app_configs: HashMap<String, DisplayConfig>,
 }
 
 #[macro_export]
@@ -152,317 +213,111 @@ macro_rules! public {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct TomlConfig {
+    #[serde(rename(deserialize = "use"))]
+    imports: Option<Vec<String>>,
+
     general: Option<TomlGeneralConfig>,
     display: Option<TomlDisplayConfig>,
+
+    #[serde(rename(deserialize = "theme"))]
+    themes: Option<Vec<TomlTheme>>,
 
     #[serde(rename(deserialize = "app"))]
     apps: Option<Vec<AppConfig>>,
 }
 
 impl TomlConfig {
-    fn parse(path: Option<&Path>) -> Self {
-        path.map(|config_path| fs::read_to_string(config_path).unwrap())
-            .and_then(|content| match toml::from_str(&content) {
-                Ok(content) => Some(content),
-                Err(error) => {
-                    eprintln!("{error}");
-                    None
-                }
+    fn parse_recursive(path: Option<&Path>) -> Option<ParsedTomlConfig> {
+        fn expand_path(value: String) -> PathBuf {
+            shellexpand::full(&value)
+                .map(|value| value.into_owned())
+                .unwrap_or(value)
+                .into()
+        }
+
+        let mut base_toml_config = Self::parse(path)?;
+        let mut watchers: Vec<FilesWatcher> = base_toml_config
+            .imports
+            .as_ref()
+            .cloned()
+            .into_iter()
+            .flatten()
+            .map(expand_path)
+            .map(|path| {
+                FilesWatcher::init(vec![path])
+                    .expect("The subconfigs watcher should be initialized")
             })
-            .unwrap_or_default()
-    }
-}
+            .collect();
 
-public! {
-    #[derive(ConfigProperty, Default, Debug, Deserialize, Clone)]
-    #[cfg_prop(name(GeneralConfig), derive(Debug))]
-    struct TomlGeneralConfig {
-        font: Option<Font>,
+        let subconfigs: Vec<ParsedTomlConfig> = watchers
+            .iter()
+            .map(FilesWatcher::get_watching_path)
+            .filter_map(TomlConfig::parse_recursive)
+            .collect();
 
-        #[cfg_prop(default(300))]
-        width: Option<u16>,
-        #[cfg_prop(default(150))]
-        height: Option<u16>,
-
-        anchor: Option<Anchor>,
-        offset: Option<(u8, u8)>,
-        #[cfg_prop(default(10))]
-        gap: Option<u8>,
-
-        sorting: Option<Sorting>,
-    }
-}
-
-public! {
-    #[derive(Debug, Deserialize, Clone)]
-    #[serde(from = "(String, u8)")]
-    struct Font {
-        name: String,
-        size: u8,
-    }
-}
-
-impl From<(String, u8)> for Font {
-    fn from((name, size): (String, u8)) -> Self {
-        Font { name, size }
-    }
-}
-
-impl Default for Font {
-    fn default() -> Self {
-        Font {
-            name: "Noto Sans".to_string(),
-            size: 12,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Default, Clone)]
-#[serde(from = "String")]
-pub enum Anchor {
-    Top,
-    TopLeft,
-    #[default]
-    TopRight,
-    Bottom,
-    BottomLeft,
-    BottomRight,
-    Left,
-    Right,
-}
-
-impl Anchor {
-    pub fn is_top(&self) -> bool {
-        matches!(self, Anchor::Top | Anchor::TopLeft | Anchor::TopRight)
-    }
-
-    pub fn is_right(&self) -> bool {
-        matches!(self, Anchor::TopRight | Anchor::BottomRight | Anchor::Right)
-    }
-
-    pub fn is_bottom(&self) -> bool {
-        matches!(
-            self,
-            Anchor::Bottom | Anchor::BottomLeft | Anchor::BottomRight
-        )
-    }
-
-    pub fn is_left(&self) -> bool {
-        matches!(self, Anchor::TopLeft | Anchor::BottomLeft | Anchor::Left)
-    }
-}
-
-impl From<String> for Anchor {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "top" => Anchor::Top,
-            "top-left" | "top left" => Anchor::TopLeft,
-            "top-right" | "top right" => Anchor::TopRight,
-            "bottom" => Anchor::Bottom,
-            "bottom-left" | "bottom left" => Anchor::BottomLeft,
-            "bottom-right" | "bottom right" => Anchor::BottomRight,
-            "left" => Anchor::Left,
-            "right" => Anchor::Right,
-            other => panic!(
-                "Invalid anchor option! There are possible values:\n\
-                - \"top\"\n\
-                - \"top-right\" or \"top right\"\n\
-                - \"top-left\" or \"top left\"\n\
-                - bottom\n\
-                - \"bottom-right\" or \"bottom right\"\n\
-                - \"bottom-left\" or \"bottom left\"\n\
-                - left\n\
-                - right\n\
-                Used: {other}"
-            ),
-        }
-    }
-}
-
-public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(name(DisplayConfig), derive(Debug))]
-    struct TomlDisplayConfig {
-        layout: Option<Layout>,
-
-        #[cfg_prop(use_type(ImageProperty), mergeable)]
-        image: Option<TomlImageProperty>,
-
-        padding: Option<Spacing>,
-        #[cfg_prop(use_type(Border), mergeable)]
-        border: Option<TomlBorder>,
-
-        #[cfg_prop(use_type(UrgencyColors), mergeable)]
-        colors: Option<TomlUrgencyColors>,
-
-        #[cfg_prop(temporary)]
-        text: Option<TomlTextProperty>,
-
-        #[cfg_prop(inherits(field = text), use_type(TextProperty), default(TomlTextProperty::default_title()), mergeable)]
-        title: Option<TomlTextProperty>,
-
-        #[cfg_prop(inherits(field = text), use_type(TextProperty), mergeable)]
-        body: Option<TomlTextProperty>,
-
-        #[cfg_prop(default(true))]
-        markup: Option<bool>,
-
-        #[cfg_prop(default(0))]
-        timeout: Option<u16>,
-    }
-}
-
-#[derive(Deserialize, Debug, Default, Clone)]
-#[serde(from = "String")]
-pub enum Layout {
-    #[default]
-    Default,
-    FromPath {
-        path_buf: PathBuf,
-    },
-}
-
-impl Layout {
-    pub fn is_default(&self) -> bool {
-        matches!(self, Layout::Default)
-    }
-}
-
-impl From<String> for Layout {
-    fn from(value: String) -> Self {
-        if value == "default" {
-            return Layout::Default;
+        for ParsedTomlConfig {
+            subwatchers,
+            toml_config,
+        } in subconfigs
+        {
+            watchers.extend(subwatchers);
+            base_toml_config = base_toml_config.merge(toml_config);
         }
 
-        Layout::FromPath {
-            path_buf: PathBuf::from(
-                shellexpand::full(&value)
-                    .map(|value| value.into_owned())
-                    .unwrap_or(value),
-            ),
+        Some(ParsedTomlConfig {
+            subwatchers: watchers,
+            toml_config: base_toml_config,
+        })
+    }
+
+    fn parse(path: Option<&Path>) -> Option<Self> {
+        let content = std::fs::read_to_string(path?).unwrap();
+        match toml::from_str(&content) {
+            Ok(content) => Some(content),
+            Err(error) => {
+                error!("{error}");
+                None
+            }
         }
     }
-}
 
-public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(
-        name(ImageProperty),
-        derive(GenericBuilder, Debug, Clone),
-        attributes(#[gbuilder(name(GBuilderImageProperty))])
-    )]
-    struct TomlImageProperty {
-        #[cfg_prop(
-            default(64),
-            attributes(#[gbuilder(default(64))])
-        )]
-        max_size: Option<u16>,
+    fn merge(mut self, other: Self) -> Self {
+        let imports: Vec<_> = self
+            .imports
+            .into_iter()
+            .chain(other.imports)
+            .flatten()
+            .collect();
+        self.imports = imports.is_empty().not().then_some(imports);
 
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        rounding: Option<u16>,
+        self.general = self
+            .general
+            .map(|general| general.merge(other.general.clone()))
+            .or(other.general);
 
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        margin: Option<Spacing>,
+        self.display = self
+            .display
+            .map(|display| display.merge(other.display.clone()))
+            .or(other.display);
 
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        resizing_method: Option<ResizingMethod>,
+        let themes: Vec<_> = self
+            .themes
+            .into_iter()
+            .chain(other.themes)
+            .flatten()
+            .collect();
+        self.themes = themes.is_empty().not().then_some(themes);
+
+        let apps: Vec<_> = self.apps.into_iter().chain(other.apps).flatten().collect();
+        self.apps = apps.is_empty().not().then_some(apps);
+
+        self
     }
 }
 
-impl Default for ImageProperty {
-    fn default() -> Self {
-        TomlImageProperty::default().into()
-    }
-}
-
-impl TryFrom<shared::value::Value> for ImageProperty {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Default, Clone)]
-pub enum ResizingMethod {
-    #[serde(rename = "nearest")]
-    Nearest,
-    #[serde(rename = "triangle")]
-    Triangle,
-    #[serde(rename = "catmull-rom")]
-    CatmullRom,
-    #[default]
-    #[serde(rename = "gaussian")]
-    Gaussian,
-    #[serde(rename = "lanczos3")]
-    Lanczos3,
-}
-
-impl TryFrom<shared::value::Value> for ResizingMethod {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::String(str) => Ok(match str.to_lowercase().as_str() {
-                "nearest" => ResizingMethod::Nearest,
-                "triangle" => ResizingMethod::Triangle,
-                "catmull-rom" | "catmull_rom" => ResizingMethod::CatmullRom,
-                "gaussian" => ResizingMethod::Gaussian,
-                "lanczos3" => ResizingMethod::Lanczos3,
-                _ => Err(shared::error::ConversionError::InvalidValue {
-                    expected: "nearest, triangle, gaussian, lanczos3, catmull-rom or catmull_rom",
-                    actual: str,
-                })?,
-            }),
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
-    }
-}
-
-public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(
-        name(Border),
-        derive(GenericBuilder, Debug, Clone, Default),
-        attributes(#[gbuilder(name(GBuilderBorder))])
-    )]
-    struct TomlBorder {
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        size: Option<u8>,
-
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        radius: Option<u8>,
-
-        #[cfg_prop(
-            default(Color::new_black()),
-            attributes(#[gbuilder(default(path = Color::new_black))])
-        )]
-        color: Option<Color>,
-    }
-}
-
-impl TryFrom<shared::value::Value> for Border {
-    type Error = ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(ConversionError::CannotConvert),
-        }
-    }
+struct ParsedTomlConfig {
+    subwatchers: Vec<FilesWatcher>,
+    toml_config: TomlConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -479,4 +334,30 @@ impl AppConfig {
             .or(other.cloned());
         self
     }
+}
+
+fn xdg_config_dir(suffix: &str) -> Option<PathBuf> {
+    std::env::var(XDG_CONFIG_HOME)
+        .map(|mut path| {
+            path.push('/');
+            path.push_str(APP_NAME);
+            path.push('/');
+            path.push_str(suffix);
+            path
+        })
+        .map(PathBuf::from)
+        .ok()
+}
+
+fn home_config_dir(suffix: &str) -> Option<PathBuf> {
+    std::env::var(HOME)
+        .map(|mut path| {
+            path.push_str("/.config/");
+            path.push_str(APP_NAME);
+            path.push('/');
+            path.push_str(suffix);
+            path
+        })
+        .map(PathBuf::from)
+        .ok()
 }

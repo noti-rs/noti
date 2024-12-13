@@ -30,6 +30,9 @@ public! {
         #[cfg_prop(attributes(#[gbuilder(default)]))]
         justification: Option<TextJustification>,
 
+        #[cfg_prop(default(12))]
+        font_size: Option<u8>,
+
         #[cfg_prop(
             default(0),
             attributes(#[gbuilder(default(0))])

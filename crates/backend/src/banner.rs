@@ -1,6 +1,9 @@
-use std::time;
+use std::{path::PathBuf, time};
 
-use config::{Border, Config, DisplayConfig};
+use config::{
+    display::{Border, DisplayConfig},
+    Config,
+};
 use dbus::notification::Notification;
 use log::{debug, trace};
 
@@ -14,8 +17,9 @@ use render::{
         WidgetConfiguration,
     },
 };
+use shared::cached_data::CachedData;
 
-use crate::cache::{CachedLayout, CachedLayouts};
+use crate::cache::CachedLayout;
 
 pub struct BannerRect {
     data: Notification,
@@ -75,7 +79,7 @@ impl BannerRect {
         &mut self,
         font_collection: &FontCollection,
         config: &Config,
-        cached_layouts: &CachedLayouts,
+        cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) {
         debug!("Banner (id={}): Beginning of draw", self.data.id);
 
@@ -88,23 +92,21 @@ impl BannerRect {
         let mut drawer = Drawer::new(Bgra::new(), rect_size.clone());
 
         let mut layout = match &display.layout {
-            config::Layout::Default => Self::default_layout(display),
-            config::Layout::FromPath { path_buf } => cached_layouts
+            config::display::Layout::Default => Self::default_layout(display),
+            config::display::Layout::FromPath { path_buf } => cached_layouts
                 .get(path_buf)
                 .and_then(CachedLayout::layout)
                 .cloned()
                 .unwrap_or_else(|| Self::default_layout(display)),
         };
 
-        let font_size = config.general().font.size as f32;
-
         layout.compile(
             rect_size,
             &WidgetConfiguration {
                 display_config: display,
+                theme: config.theme_by_app(&self.data.app_name),
                 notification: &self.data,
                 font_collection,
-                font_size,
                 override_properties: display.layout.is_default(),
             },
         );

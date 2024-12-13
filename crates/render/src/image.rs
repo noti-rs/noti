@@ -1,7 +1,7 @@
 use log::{debug, warn};
 use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 
-use config::{ImageProperty, ResizingMethod};
+use config::display::{ImageProperty, ResizingMethod};
 use dbus::image::ImageData;
 
 use crate::{drawer::Drawer, types::RectSize};
@@ -151,6 +151,10 @@ impl Image {
     }
 
     pub fn from_svg(image_path: &str, image_property: &ImageProperty, max_size: &RectSize) -> Self {
+        if image_path.is_empty() {
+            return Image::Unknown;
+        }
+
         let data = match std::fs::read(image_path) {
             Ok(data) => data,
             Err(err) => {

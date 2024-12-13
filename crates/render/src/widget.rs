@@ -1,6 +1,11 @@
 use derive_builder::Builder;
 
-use config::{spacing::Spacing, text::TextProperty, Border, DisplayConfig, ImageProperty};
+use config::{
+    display::{Border, DisplayConfig, ImageProperty},
+    spacing::Spacing,
+    text::TextProperty,
+    theme::Theme,
+};
 use dbus::{notification::Notification, text::Text};
 use log::warn;
 use shared::{
@@ -121,7 +126,7 @@ pub enum CompileState {
 pub struct WidgetConfiguration<'a> {
     pub notification: &'a Notification,
     pub font_collection: &'a FontCollection,
-    pub font_size: f32,
+    pub theme: &'a Theme,
     pub display_config: &'a DisplayConfig,
     pub override_properties: bool,
 }
@@ -194,17 +199,14 @@ impl FlexContainer {
         };
         self.rect_size = Some(rect_size.clone());
 
-        self.background_color = Bgra::from(
-            &configuration
-                .display_config
-                .colors
-                .by_urgency(&configuration.notification.hints.urgency)
-                .background,
-        );
+        let colors = &configuration
+            .theme
+            .by_urgency(&configuration.notification.hints.urgency);
+        self.background_color = Bgra::from(&colors.background);
 
         self.compiled_border = Some(
             BorderBuilder::default()
-                .color((&self.border.color).into())
+                .color((&colors.border).into())
                 .frame_width(rect_size.width)
                 .frame_height(rect_size.height)
                 .size(self.border.size)
@@ -714,9 +716,9 @@ impl WText {
         WidgetConfiguration {
             display_config,
             notification,
-            font_size,
             font_collection,
             override_properties,
+            theme,
         }: &WidgetConfiguration,
     ) -> CompileState {
         let mut override_if = |r#override: bool, property: &TextProperty| {
@@ -725,9 +727,7 @@ impl WText {
             }
         };
 
-        let colors = display_config
-            .colors
-            .by_urgency(&notification.hints.urgency);
+        let colors = theme.by_urgency(&notification.hints.urgency);
         let foreground = Bgra::from(&colors.foreground);
 
         let notification_content: NotificationContent = match self.kind {
@@ -745,12 +745,13 @@ impl WText {
             }
         };
 
+        let px_size = self.property.font_size as f32;
         let mut content = match notification_content {
             NotificationContent::Text(text) => {
-                TextRect::from_text(text, *font_size, &self.property.style, font_collection)
+                TextRect::from_text(text, px_size, &self.property.style, font_collection)
             }
             NotificationContent::String(str) => {
-                TextRect::from_str(str, *font_size, &self.property.style, font_collection)
+                TextRect::from_str(str, px_size, &self.property.style, font_collection)
             }
         };
 
