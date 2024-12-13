@@ -25,7 +25,7 @@ public! {
         #[cfg_prop(use_type(Border), mergeable)]
         border: Option<TomlBorder>,
 
-        #[cfg_prop(temporary)]
+        #[cfg_prop(temporary, mergeable)]
         text: Option<TomlTextProperty>,
 
         #[cfg_prop(inherits(field = text), use_type(TextProperty), default(TomlTextProperty::default_title()), mergeable)]

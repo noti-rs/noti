@@ -88,8 +88,8 @@ impl FilesWatcher {
 
 #[derive(Debug)]
 pub enum FileState {
-    NotFound,
     Updated,
+    NotFound,
     NothingChanged,
 }
 
@@ -100,15 +100,19 @@ impl FileState {
 
     fn priority(&self) -> u8 {
         match self {
-            FileState::NotFound => 2,
-            FileState::Updated => 1,
+            FileState::Updated => 2,
+            FileState::NotFound => 1,
             FileState::NothingChanged => 0,
         }
     }
+}
 
-    fn more_prioritized(self, other: Self) -> Self {
-        match self.priority().cmp(&other.priority()) {
-            std::cmp::Ordering::Less => other,
+impl std::ops::BitOr for FileState {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        match self.priority().cmp(&rhs.priority()) {
+            std::cmp::Ordering::Less => rhs,
             std::cmp::Ordering::Greater | std::cmp::Ordering::Equal => self,
         }
     }
@@ -198,7 +202,7 @@ impl InotifySpecialization for Inotify {
                         FileState::NothingChanged
                     }
                 })
-                .fold(FileState::NothingChanged, FileState::more_prioritized),
+                .fold(FileState::NothingChanged, |lhs, rhs| lhs | rhs),
             Err(_) => FileState::NothingChanged,
         }
     }

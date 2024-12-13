@@ -8,6 +8,7 @@ use shared::{
 };
 use std::{
     collections::HashMap,
+    ops::Not,
     path::{Path, PathBuf},
 };
 use theme::{Theme, TomlTheme};
@@ -28,7 +29,8 @@ const APP_NAME: &str = env!("APP_NAME");
 const CONFIG_FILE: &str = "config.toml";
 
 pub struct Config {
-    watcher: FilesWatcher,
+    main_watcher: FilesWatcher,
+    subwatchers: Vec<FilesWatcher>,
     general: GeneralConfig,
     display: DisplayConfig,
 
@@ -50,14 +52,17 @@ impl Config {
         .collect();
 
         debug!("Config: Initializing");
-        let watcher =
+        let main_watcher =
             FilesWatcher::init(config_paths).expect("The config watcher must be initialized");
 
-        let (general, display, app_configs) = Self::parse(watcher.get_watching_path());
+        let (subwatchers, general, display, app_configs) =
+            Self::parse(main_watcher.get_watching_path());
+
         debug!("Config: Initialized");
 
         let mut config = Self {
-            watcher,
+            main_watcher,
+            subwatchers,
             general,
             display,
             app_configs,
@@ -102,8 +107,13 @@ impl Config {
             .unwrap_or(&self.default_theme)
     }
 
-    pub fn check_display_updates(&mut self) -> FileState {
-        self.watcher.check_updates()
+    pub fn check_updates(&mut self) -> FileState {
+        self.main_watcher.check_updates()
+            | self
+                .subwatchers
+                .iter_mut()
+                .map(FilesWatcher::check_updates)
+                .fold(FileState::NothingChanged, |lhs, rhs| lhs | rhs)
     }
 
     pub fn update_themes(&mut self) -> bool {
@@ -111,8 +121,10 @@ impl Config {
     }
 
     pub fn update(&mut self) {
-        let (general, display, app_configs) = Self::parse(self.watcher.get_watching_path());
+        let (subwatchers, general, display, app_configs) =
+            Self::parse(self.main_watcher.get_watching_path());
 
+        self.subwatchers = subwatchers;
         self.general = general;
         self.display = display;
         self.app_configs = app_configs;
@@ -128,29 +140,50 @@ impl Config {
 
     fn parse(
         path: Option<&Path>,
-    ) -> (GeneralConfig, DisplayConfig, HashMap<String, DisplayConfig>) {
+    ) -> (
+        Vec<FilesWatcher>,
+        GeneralConfig,
+        DisplayConfig,
+        HashMap<String, DisplayConfig>,
+    ) {
+        let (subwatchers, toml_config) = match TomlConfig::parse_recursive(path) {
+            Some(ParsedTomlConfig {
+                subwatchers,
+                toml_config,
+            }) => (subwatchers, toml_config),
+            None => (vec![], Default::default()),
+        };
+
         let TomlConfig {
             general,
             display,
             apps,
-        } = TomlConfig::parse(path);
+            ..
+        } = toml_config;
 
-        let mut app_configs =
-            HashMap::with_capacity(apps.as_ref().map(|data| data.len()).unwrap_or(0));
+        let mut app_configs: HashMap<String, TomlDisplayConfig> = HashMap::new();
 
         if let Some(apps) = apps {
-            for mut app in apps {
-                app = app.merge(display.as_ref());
-                app_configs.insert(app.name, app.display.unwrap().unwrap_or_default());
+            for app in apps {
+                let app_name = app.name.clone();
+                let app_display_config = match app_configs.remove(&app_name) {
+                    Some(saved_app_config) => saved_app_config.merge(app.display),
+                    None => app.merge(display.as_ref()).display.unwrap(),
+                };
+                app_configs.insert(app_name, app_display_config);
             }
         }
 
         debug!("Config: Parsed from files");
 
         (
+            subwatchers,
             general.unwrap_or_default().into(),
             display.unwrap_or_default().into(),
-            app_configs,
+            app_configs
+                .into_iter()
+                .map(|(key, value)| (key, value.unwrap_or_default()))
+                .collect(),
         )
     }
 }
@@ -170,6 +203,9 @@ macro_rules! public {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct TomlConfig {
+    #[serde(rename(deserialize = "use"))]
+    imports: Option<Vec<String>>,
+
     general: Option<TomlGeneralConfig>,
     display: Option<TomlDisplayConfig>,
 
@@ -178,17 +214,89 @@ pub struct TomlConfig {
 }
 
 impl TomlConfig {
-    fn parse(path: Option<&Path>) -> Self {
-        path.map(|config_path| std::fs::read_to_string(config_path).unwrap())
-            .and_then(|content| match toml::from_str(&content) {
-                Ok(content) => Some(content),
-                Err(error) => {
-                    error!("{error}");
-                    None
-                }
+    fn parse_recursive(path: Option<&Path>) -> Option<ParsedTomlConfig> {
+        fn expand_path(value: String) -> PathBuf {
+            shellexpand::full(&value)
+                .map(|value| value.into_owned())
+                .unwrap_or(value)
+                .into()
+        }
+
+        let mut base_toml_config = Self::parse(path)?;
+        let mut watchers: Vec<FilesWatcher> = base_toml_config
+            .imports
+            .as_ref()
+            .cloned()
+            .into_iter()
+            .flatten()
+            .map(expand_path)
+            .map(|path| {
+                FilesWatcher::init(vec![path])
+                    .expect("The subconfigs watcher should be initialized")
             })
-            .unwrap_or_default()
+            .collect();
+
+        let subconfigs: Vec<ParsedTomlConfig> = watchers
+            .iter()
+            .map(FilesWatcher::get_watching_path)
+            .filter_map(TomlConfig::parse_recursive)
+            .collect();
+
+        for ParsedTomlConfig {
+            subwatchers,
+            toml_config,
+        } in subconfigs
+        {
+            watchers.extend(subwatchers);
+            base_toml_config = base_toml_config.merge(toml_config);
+        }
+
+        Some(ParsedTomlConfig {
+            subwatchers: watchers,
+            toml_config: base_toml_config,
+        })
     }
+
+    fn parse(path: Option<&Path>) -> Option<Self> {
+        let content = std::fs::read_to_string(path?).unwrap();
+        match toml::from_str(&content) {
+            Ok(content) => Some(content),
+            Err(error) => {
+                error!("{error}");
+                None
+            }
+        }
+    }
+
+    fn merge(mut self, other: Self) -> Self {
+        let imports: Vec<_> = self
+            .imports
+            .into_iter()
+            .chain(other.imports)
+            .flatten()
+            .collect();
+        self.imports = imports.is_empty().not().then_some(imports);
+
+        self.general = self
+            .general
+            .map(|general| general.merge(other.general.clone()))
+            .or(other.general);
+
+        self.display = self
+            .display
+            .map(|display| display.merge(other.display.clone()))
+            .or(other.display);
+
+        let apps: Vec<_> = self.apps.into_iter().chain(other.apps).flatten().collect();
+        self.apps = apps.is_empty().not().then_some(apps);
+
+        self
+    }
+}
+
+struct ParsedTomlConfig {
+    subwatchers: Vec<FilesWatcher>,
+    toml_config: TomlConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
