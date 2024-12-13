@@ -1,5 +1,6 @@
 use regex::Regex;
-use std::{collections::HashMap, iter::Peekable, str::Chars};
+use std::{collections::HashMap, iter::Peekable};
+use unic_segment;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Text {
@@ -18,9 +19,10 @@ impl Text {
 struct Parser<'a> {
     body: String,
     entities: Vec<Entity>,
-    stack: Vec<(Tag, usize)>,
+    stack: Vec<ParsedTag>,
     pos: usize,
-    chars: Peekable<Chars<'a>>,
+    byte_pos: usize,
+    graphemes: Peekable<unic_segment::Graphemes<'a>>,
 }
 
 impl<'a> Parser<'a> {
@@ -30,17 +32,19 @@ impl<'a> Parser<'a> {
             entities: Vec::new(),
             stack: Vec::new(),
             pos: 0,
-            chars: input.chars().peekable(),
+            byte_pos: 0,
+            graphemes: unic_segment::Graphemes::new(input).peekable(),
         }
     }
 
     fn parse(mut self) -> Text {
-        while let Some(c) = self.chars.next() {
-            if c == '<' {
+        while let Some(c) = self.graphemes.next() {
+            if c == "<" {
                 self.handle_tag();
             } else {
-                self.body.push(c);
+                self.byte_pos += c.bytes().len();
                 self.pos += 1;
+                self.body.push_str(c);
             }
         }
 
@@ -59,12 +63,12 @@ impl<'a> Parser<'a> {
 
     fn handle_tag(&mut self) {
         let mut tag = String::new();
-        while let Some(&next_char) = self.chars.peek() {
-            if next_char == '>' {
-                self.chars.next();
+        while let Some(&next_char) = self.graphemes.peek() {
+            if next_char == ">" {
+                self.graphemes.next();
                 break;
             } else {
-                tag.push(self.chars.next().unwrap());
+                tag.push_str(self.graphemes.next().unwrap());
             }
         }
 
@@ -74,15 +78,24 @@ impl<'a> Parser<'a> {
             } else if parsed_tag.is_self_closing {
                 self.handle_self_closing_tag(parsed_tag);
             } else {
-                self.stack.push((parsed_tag, self.pos));
+                self.stack.push(ParsedTag {
+                    tag: parsed_tag,
+                    position: self.pos,
+                    byte_position: self.byte_pos,
+                });
             }
         }
     }
 
     fn handle_closing_tag(&mut self) {
-        if let Some((start_tag, start_pos)) = self.stack.pop() {
+        if let Some(ParsedTag {
+            tag: start_tag,
+            position: start_pos,
+            byte_position: start_byte_pos,
+        }) = self.stack.pop()
+        {
             let length = self.pos - start_pos;
-            if length > 0 && !self.body[start_pos..self.pos].trim().is_empty() {
+            if length > 0 && !self.body[start_byte_pos..self.byte_pos].trim().is_empty() {
                 self.entities.push(Entity {
                     offset: start_pos,
                     length,
@@ -101,10 +114,15 @@ impl<'a> Parser<'a> {
     }
 
     fn close_unmatched_tags(&mut self) {
-        while let Some((start_tag, start_pos)) = self.stack.pop() {
+        while let Some(ParsedTag {
+            tag: start_tag,
+            position: start_pos,
+            byte_position: start_byte_pos,
+        }) = self.stack.pop()
+        {
             let length = self.pos - start_pos;
 
-            if length > 0 && !self.body[start_pos..self.pos].trim().is_empty() {
+            if length > 0 && !self.body[start_byte_pos..self.byte_pos].trim().is_empty() {
                 self.entities.push(Entity {
                     offset: start_pos,
                     length,
@@ -134,6 +152,12 @@ pub enum EntityKind {
         src: Option<String>,
         alt: Option<String>,
     }, // <img src="./path/to/image.png" alt="..."/>
+}
+
+struct ParsedTag {
+    tag: Tag,
+    position: usize,
+    byte_position: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -197,6 +221,36 @@ impl Tag {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_not_tag() {
+        let input = String::from("Normal equation: 1 < 2");
+        let text = Text::parse(input.clone());
+        assert_eq!(
+            text,
+            Text {
+                body: input,
+                entities: vec![]
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_emoji() {
+        let input = String::from("<b>coffee ☕️</b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("coffee ☕️"),
+                entities: vec![Entity {
+                    offset: 0,
+                    length: 8,
+                    kind: EntityKind::Bold
+                }]
+            }
+        )
+    }
 
     #[test]
     fn text() {
