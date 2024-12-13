@@ -83,15 +83,15 @@ to go to through from the first one to the last one.
 
 The 'general' word means that it applies to application or all banners together. Here a table of possible general properties and below we'll go through all properties.
 
-| Property name       | Description                                         | Type                  | Default value |
-| :------------------ | :-------------------------------------------------- | :-------------------- | :-----------: |
-| [font](#font)       | [See desc](#font)                                   | `String`              |  "Noto Sans"  |
-| [width](#width)     | The width of banner frame.                          | `u16`                 |      300      |
-| [height](#height)   | The height of banner frame.                         | `u16`                 |      150      |
-| [anchor](#anchor)   | [See desc](#anchor)                                 | `String`              |  "top right"  |
-| [gap](#gap)         | The space size between two banners. Measures in px. | `u8`                  |      10       |
-| [offset](#offset)   | [See desc](#offset)                                 | `[u8, u8]`            |    [0, 0]     |
-| [sorting](#sorting) | [See desc](#sorting)                                | `String` or `Sorting` |   "default"   |
+| Property name | Description                                         | Type                  | Default value |
+| :------------ | :-------------------------------------------------- | :-------------------- | :-----------: |
+| `font`        | [See desc](#font)                                   | `String`              |  "Noto Sans"  |
+| `width`       | The width of banner frame.                          | `u16`                 |      300      |
+| `height`      | The height of banner frame.                         | `u16`                 |      150      |
+| `anchor`      | [See desc](#anchor)                                 | `String`              |  "top right"  |
+| `gap`         | The space size between two banners. Measures in px. | `u8`                  |      10       |
+| `offset`      | [See desc](#offset)                                 | `[u8, u8]`            |    [0, 0]     |
+| `sorting`     | [See desc](#sorting)                                | `String` or `Sorting` |   "default"   |
 
 ### Font
 
@@ -264,12 +264,10 @@ margin = 5
 ### Image
 
 Usually the notification can contain the image or icon and it draws at the right of
-banner. More about it in [banner layout](BannerLayout.md#image)
+banner. More about it in [banner layout](BannerLayout.md#image). Our application can
+perform some actions which in result the image will look very pleasant for most users.
 
-Our application can perform some actions which in result the image will look very
-pleasant for most users.
-
-Here a table of `Image` properties:
+Here's a table of `Image` properties:
 
 | Property name   | Description                                                                                                                                            | Type                                                                    | Default value |
 | :-------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------- | :-----------: |
