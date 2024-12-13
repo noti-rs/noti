@@ -6,13 +6,17 @@ Backend:
   - changed-files:
     - any-glob-to-any-file: 'crates/backend/**'
 
+Render:
+  - changed-files:
+    - any-glob-to-any-file: 'crates/render/**'
+
 Config:
   - changed-files:
     - any-glob-to-any-file: 'crates/config/**'
 
-Macro:
+Macros:
   - changed-files:
-    - any-glob-to-any-file: 'crates/macro/**'
+    - any-glob-to-any-file: 'crates/macros/**'
 
 DBus:
   - changed-files:
@@ -21,6 +25,14 @@ DBus:
 Client:
   - changed-files:
     - any-glob-to-any-file: 'crates/client/**'
+
+Filetype:
+  - changed-files:
+    - any-glob-to-any-file: 'crates/filetype/**'
+
+Shared:
+  - changed-files:
+    - any-glob-to-any-file: 'crates/shared/**'
 
 Documentation:
   - changed-files:
