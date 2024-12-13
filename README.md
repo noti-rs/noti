@@ -61,7 +61,7 @@ Noti uses a TOML configuration file located at:
 
 ```toml
 [general]
-font = [ "JetBrainsMono Nerd Font", 16 ]
+font = "JetBrainsMono Nerd Font"
 anchor = "top-right"
 offset = [15, 15]
 gap = 10
@@ -92,10 +92,12 @@ ellipsize_at = "middle"
 [display.title]
 style = "bold italic"
 margin = { top = 5 }
+font_size = 18
 
 [display.body]
 justification = "left"
 margin = { top = 12 }
+font_size = 16
 
 [[theme]]
 name = "pastel"

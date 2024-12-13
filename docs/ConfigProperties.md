@@ -321,6 +321,7 @@ The `Text` table:
 | margin        | The text spacing from edges of remaining area                                                                                                                                               | `Spacing` |       0       |
 | justification | The text justification. Possible values: "left", "right", "center", "space-between"                                                                                                         | `String`  |    "left"     |
 | line_spacing  | The gap between wrapped text lines. Measures in px                                                                                                                                          | `u8`      |       0       |
+| font_size     | The size of font. Measures in px                                                                                                                                                            | `u8`      |      12       |
 
 For more explanation how the text draws, please visit [the other documentation about text](BannerLayout.md#text).
 
