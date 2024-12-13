@@ -63,9 +63,16 @@ impl Scheduler {
         }
 
         const DATETIME_FORMATS: &[&str] = &[
-            "%d.%m.%Y %H:%M",    // 01.01.2025 00:00
-            "%Y-%m-%d %H:%M",    // 2025-01-01 00:00
+            "%Y.%m.%d %H:%M", // 2025.01.01 00:00
+            "%Y-%m-%d %H:%M", // 2025-01-01 00:00
+            //
+            "%d.%m.%Y %H:%M", // 01.01.2025 00:00
+            "%d-%m-%Y %H:%M", // 01-01-2025 00:00
+            //
             "%d.%m.%Y %I:%M %p", // 01.01.2025 12:00 AM
+            "%d-%m-%Y %I:%M %p", // 01-01-2025 12:00 AM
+            //
+            "%Y.%m.%d %I:%M %p", // 2025.01.01 12:00 AM
             "%Y-%m-%d %I:%M %p", // 2025-01-01 12:00 AM
         ];
 
@@ -74,30 +81,22 @@ impl Scheduler {
             "%I:%M %p", // 06:45 PM
         ];
 
-        if let Some(datetime) = DATETIME_FORMATS
-            .iter()
-            .filter_map(|&format| {
-                NaiveDateTime::parse_from_str(time_str, format)
-                    .ok()
-                    .map(|parsed| Self::from_local_to_utc(&parsed))
-            })
-            .next()
-        {
+        if let Some(datetime) = DATETIME_FORMATS.iter().find_map(|&format| {
+            NaiveDateTime::parse_from_str(time_str, format)
+                .ok()
+                .map(|parsed| Self::from_local_to_utc(&parsed))
+        }) {
             return Ok(datetime);
         }
 
-        if let Some(datetime) = TIME_FORMATS
-            .iter()
-            .filter_map(|&format| {
-                NaiveTime::parse_from_str(time_str, format)
-                    .ok()
-                    .map(|parsed| {
-                        let today = Local::now().date_naive();
-                        Self::from_local_to_utc(&today.and_time(parsed))
-                    })
-            })
-            .next()
-        {
+        if let Some(datetime) = TIME_FORMATS.iter().find_map(|&format| {
+            NaiveTime::parse_from_str(time_str, format)
+                .ok()
+                .map(|parsed| {
+                    let today = Local::now().date_naive();
+                    Self::from_local_to_utc(&today.and_time(parsed))
+                })
+        }) {
             return Ok(datetime);
         }
 
