@@ -86,7 +86,8 @@ impl Renderer {
                     FileState::NotFound | FileState::NothingChanged => (),
                 };
 
-                if self.config.update_themes() || self.window_manager.update_cache() {
+                // if self.config.update_themes() || self.window_manager.update_cache() {
+                if self.window_manager.update_cache() {
                     self.window_manager.update_by_config(&self.config)?;
                 }
             }

@@ -1,11 +1,8 @@
 use display::{DisplayConfig, TomlDisplayConfig};
 use general::{GeneralConfig, TomlGeneralConfig};
-use log::{debug, error};
+use log::{debug, error, warn};
 use serde::Deserialize;
-use shared::{
-    cached_data::{CacheUpdate, CachedData, CachedValueError},
-    file_watcher::{FileState, FilesWatcher},
-};
+use shared::file_watcher::{FileState, FilesWatcher};
 use std::{
     collections::HashMap,
     ops::Not,
@@ -34,10 +31,10 @@ pub struct Config {
     general: GeneralConfig,
     display: DisplayConfig,
 
-    app_configs: HashMap<String, DisplayConfig>,
-
     default_theme: Theme,
-    cached_themes: CachedData<String, CachedTheme>,
+    themes: HashMap<String, Theme>,
+
+    app_configs: HashMap<String, DisplayConfig>,
 }
 
 impl Config {
@@ -55,12 +52,17 @@ impl Config {
         let main_watcher =
             FilesWatcher::init(config_paths).expect("The config watcher must be initialized");
 
-        let (subwatchers, general, display, app_configs) =
-            Self::parse(main_watcher.get_watching_path());
+        let ParsedConfig {
+            subwatchers,
+            general,
+            display,
+            themes,
+            app_configs,
+        } = Self::parse(main_watcher.get_watching_path());
 
         debug!("Config: Initialized");
 
-        let mut config = Self {
+        Self {
             main_watcher,
             subwatchers,
             general,
@@ -68,17 +70,8 @@ impl Config {
             app_configs,
 
             default_theme: Theme::default(),
-            cached_themes: CachedData::default(),
-        };
-
-        config.cached_themes.extend_by_keys(
-            config
-                .displays()
-                .map(|display| display.theme.to_owned())
-                .collect(),
-        );
-
-        config
+            themes,
+        }
     }
 
     pub fn general(&self) -> &GeneralConfig {
@@ -101,9 +94,8 @@ impl Config {
     }
 
     pub fn theme_by_app(&self, name: &str) -> &Theme {
-        self.cached_themes
+        self.themes
             .get(&self.display_by_app(name).theme)
-            .and_then(|cached_theme| cached_theme.theme.as_ref())
             .unwrap_or(&self.default_theme)
     }
 
@@ -116,36 +108,25 @@ impl Config {
                 .fold(FileState::NothingChanged, |lhs, rhs| lhs | rhs)
     }
 
-    pub fn update_themes(&mut self) -> bool {
-        self.cached_themes.update()
-    }
-
     pub fn update(&mut self) {
-        let (subwatchers, general, display, app_configs) =
-            Self::parse(self.main_watcher.get_watching_path());
+        let ParsedConfig {
+            subwatchers,
+            general,
+            display,
+            themes,
+            app_configs: apps,
+        } = Self::parse(self.main_watcher.get_watching_path());
 
         self.subwatchers = subwatchers;
         self.general = general;
         self.display = display;
-        self.app_configs = app_configs;
-
-        self.cached_themes.extend_by_keys(
-            self.displays()
-                .map(|display| display.theme.to_owned())
-                .collect(),
-        );
+        self.app_configs = apps;
+        self.themes = themes;
 
         debug!("Config: Updated");
     }
 
-    fn parse(
-        path: Option<&Path>,
-    ) -> (
-        Vec<FilesWatcher>,
-        GeneralConfig,
-        DisplayConfig,
-        HashMap<String, DisplayConfig>,
-    ) {
+    fn parse(path: Option<&Path>) -> ParsedConfig {
         let (subwatchers, toml_config) = match TomlConfig::parse_recursive(path) {
             Some(ParsedTomlConfig {
                 subwatchers,
@@ -157,12 +138,29 @@ impl Config {
         let TomlConfig {
             general,
             display,
+            themes,
             apps,
             ..
         } = toml_config;
 
-        let mut app_configs: HashMap<String, TomlDisplayConfig> = HashMap::new();
+        let mut theme_table: HashMap<String, TomlTheme> = HashMap::new();
+        if let Some(themes) = themes {
+            for theme in themes {
+                if theme.name.as_ref().is_none_or(|name| name.is_empty()) {
+                    warn!("Config: Encountered an unnamed theme. Skipped.");
+                    continue;
+                }
 
+                let theme_name = theme.name.as_ref().cloned().unwrap();
+                let theme_to_save = match theme_table.remove(&theme_name) {
+                    Some(saved_theme) => saved_theme.merge(Some(theme)),
+                    None => theme,
+                };
+                theme_table.insert(theme_name, theme_to_save);
+            }
+        }
+
+        let mut app_configs: HashMap<String, TomlDisplayConfig> = HashMap::new();
         if let Some(apps) = apps {
             for app in apps {
                 let app_name = app.name.clone();
@@ -176,16 +174,28 @@ impl Config {
 
         debug!("Config: Parsed from files");
 
-        (
+        ParsedConfig {
             subwatchers,
-            general.unwrap_or_default().into(),
-            display.unwrap_or_default().into(),
-            app_configs
+            general: general.unwrap_or_default().into(),
+            display: display.unwrap_or_default().into(),
+            themes: theme_table
                 .into_iter()
                 .map(|(key, value)| (key, value.unwrap_or_default()))
                 .collect(),
-        )
+            app_configs: app_configs
+                .into_iter()
+                .map(|(key, value)| (key, value.unwrap_or_default()))
+                .collect(),
+        }
     }
+}
+
+struct ParsedConfig {
+    subwatchers: Vec<FilesWatcher>,
+    general: GeneralConfig,
+    display: DisplayConfig,
+    themes: HashMap<String, Theme>,
+    app_configs: HashMap<String, DisplayConfig>,
 }
 
 #[macro_export]
@@ -208,6 +218,9 @@ pub struct TomlConfig {
 
     general: Option<TomlGeneralConfig>,
     display: Option<TomlDisplayConfig>,
+
+    #[serde(rename(deserialize = "theme"))]
+    themes: Option<Vec<TomlTheme>>,
 
     #[serde(rename(deserialize = "app"))]
     apps: Option<Vec<AppConfig>>,
@@ -287,6 +300,14 @@ impl TomlConfig {
             .map(|display| display.merge(other.display.clone()))
             .or(other.display);
 
+        let themes: Vec<_> = self
+            .themes
+            .into_iter()
+            .chain(other.themes)
+            .flatten()
+            .collect();
+        self.themes = themes.is_empty().not().then_some(themes);
+
         let apps: Vec<_> = self.apps.into_iter().chain(other.apps).flatten().collect();
         self.apps = apps.is_empty().not().then_some(apps);
 
@@ -312,75 +333,6 @@ impl AppConfig {
             .map(|display| display.merge(other.cloned()))
             .or(other.cloned());
         self
-    }
-}
-
-struct CachedTheme {
-    watcher: FilesWatcher,
-    theme: Option<Theme>,
-}
-
-impl CachedTheme {
-    fn load_theme(path: &Path) -> Option<Theme> {
-        let file_content = match std::fs::read_to_string(path) {
-            Ok(data) => data,
-            Err(err) => match err.kind() {
-                std::io::ErrorKind::NotFound => {
-                    error!("The theme file at {path:?} is not existing!");
-                    return None;
-                }
-                std::io::ErrorKind::PermissionDenied => {
-                    error!("The theme file at {path:?} is restricted to read!");
-                    return None;
-                }
-                other_fs_err => {
-                    error!("Cannot read the theme file due unknown error. Error: {other_fs_err}");
-                    return None;
-                }
-            },
-        };
-
-        match toml::from_str::<TomlTheme>(&file_content) {
-            Ok(theme) => Some(theme.unwrap_or_default()),
-            Err(err) => {
-                error!("Failed to parse theme file at {path:?}. Reason: {err}");
-
-                None
-            }
-        }
-    }
-}
-
-impl CacheUpdate for CachedTheme {
-    fn check_updates(&mut self) -> FileState {
-        self.watcher.check_updates()
-    }
-
-    fn update(&mut self) {
-        self.theme = self.watcher.get_watching_path().and_then(Self::load_theme)
-    }
-}
-
-impl TryFrom<&String> for CachedTheme {
-    type Error = CachedValueError;
-
-    fn try_from(theme_name: &String) -> Result<Self, Self::Error> {
-        let suffix = "/themes/".to_owned() + theme_name + ".toml";
-        let possible_paths = vec![xdg_config_dir(&suffix), home_config_dir(&suffix)]
-            .into_iter()
-            .flatten()
-            .collect();
-
-        let watcher = match FilesWatcher::init(possible_paths) {
-            Ok(watcher) => watcher,
-            Err(err) => {
-                return Err(CachedValueError::FailedInitWatcher { source: err });
-            }
-        };
-
-        let theme = watcher.get_watching_path().and_then(Self::load_theme);
-
-        Ok(Self { watcher, theme })
     }
 }
 

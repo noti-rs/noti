@@ -5,9 +5,11 @@ use serde::Deserialize;
 use crate::{color::Color, public};
 
 public! {
-    #[derive(ConfigProperty, Deserialize, Default)]
-    #[cfg_prop(name(Theme))]
+    #[derive(ConfigProperty, Deserialize, Default, Debug)]
+    #[cfg_prop(name(Theme), derive(Debug))]
     struct TomlTheme {
+        name: Option<String>,
+
         #[cfg_prop(use_type(Colors))]
         low: Option<TomlColors>,
 
@@ -36,12 +38,15 @@ impl Default for Theme {
 }
 
 public! {
-    #[derive(ConfigProperty, Clone, Default, Deserialize)]
-    #[cfg_prop(name(Colors))]
+    #[derive(ConfigProperty, Clone, Default, Deserialize, Debug)]
+    #[cfg_prop(name(Colors), derive(Debug))]
     struct TomlColors {
+        #[cfg_prop(default(path = Color::new_black))]
         foreground: Option<Color>,
+        #[cfg_prop(default(path = Color::new_white))]
         background: Option<Color>,
 
+        #[cfg_prop(default(path = Color::new_black))]
         border: Option<Color>,
     }
 }
