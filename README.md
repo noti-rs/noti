@@ -124,7 +124,7 @@ line_spacing = 5
 ```
 
 > [!TIP]
-> Check ![ConfigProperties.md](docs/ConfigProperties.md) for comprehensive configuration options!
+> Check [ConfigProperties.md](docs/ConfigProperties.md) for comprehensive configuration options!
 
 ## :bug: Troubleshooting
 
