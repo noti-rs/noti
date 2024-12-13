@@ -168,7 +168,7 @@ pub struct SendCommand {
         help = "Schedule",
         long_help = "Specifies the time to schedule the notification to be shown."
     )]
-    schedule: String,
+    schedule: Option<String>,
 }
 
 impl Args {
@@ -206,6 +206,7 @@ async fn send(noti: client::NotiClient<'_>, args: SendCommand) -> anyhow::Result
         suppress_sound: args.suppress_sound,
         transient: args.transient,
         action_icons: args.action_icons,
+        schedule: args.schedule,
     };
 
     noti.send_notification(
@@ -217,7 +218,6 @@ async fn send(noti: client::NotiClient<'_>, args: SendCommand) -> anyhow::Result
         args.timeout,
         args.actions,
         args.hints,
-        args.schedule,
         hints_data,
     )
     .await

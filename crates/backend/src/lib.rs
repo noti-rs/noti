@@ -22,16 +22,16 @@ use render::Renderer;
 pub async fn run(config: Config) -> anyhow::Result<()> {
     let (sender, mut receiver) = unbounded_channel();
 
-    let server = Server::init(sender.clone()).await?;
+    let server = Server::init(sender).await?;
     info!("Backend: Server initialized");
 
     let (server_internal_channel, mut renderer) = Renderer::init(config)?;
     info!("Backend: Renderer initialized");
 
-    let backend_thread = thread::spawn(move || renderer.run());
-
     let mut scheduler = Scheduler::new();
     info!("Backend: Scheduler initialized");
+
+    let backend_thread = thread::spawn(move || renderer.run());
 
     loop {
         while let Ok(action) = receiver.try_recv() {
@@ -72,12 +72,16 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         scheduler
             .pop_due_notifications()
             .into_iter()
-            .for_each(|notification| {
+            .for_each(|scheduled| {
+                server_internal_channel
+                    .send_to_renderer(internal_messages::ServerMessage::ShowNotification(
+                        scheduled.data,
+                    ))
+                    .unwrap();
                 debug!(
                     "Backend: Notification with id {} due for delivery. Sending to renderer",
-                    &notification.id
+                    &scheduled.id
                 );
-                sender.send(Action::Show(notification.data)).unwrap();
             });
 
         while let Ok(message) = server_internal_channel.try_recv_from_renderer() {
