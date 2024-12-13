@@ -393,7 +393,7 @@ border = "#0F0" # green border for normal urgency
 border = "#F0F" # pink border for critical urgency
 ```
 
----;
+---
 
 ## Apps
 
