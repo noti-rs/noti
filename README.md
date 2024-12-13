@@ -71,21 +71,13 @@ width = 300
 height = 150
 
 [display]
+theme = "pastel"
 padding = 8
 timeout = 2000
-
-[display.colors.normal]
-background = "#1e1e2e"
-foreground = "#99AEB3"
-
-[display.colors.critical]
-background = "#EBA0AC"
-foreground = "#1E1E2E"
 
 [display.border]
 size = 4
 radius = 10
-color = "#000"
 
 [display.image]
 max_size = 64
@@ -104,6 +96,19 @@ margin = { top = 5 }
 [display.body]
 justification = "left"
 margin = { top = 12 }
+
+[[theme]]
+name = "pastel"
+
+[theme.normal]
+background = "#1e1e2e"
+foreground = "#99AEB3"
+border = "#000"
+
+[theme.critical]
+background = "#EBA0AC"
+foreground = "#1E1E2E"
+border = "#000"
 
 [[app]]
 name = "Telegram Desktop"
