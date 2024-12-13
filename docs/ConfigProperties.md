@@ -264,8 +264,8 @@ margin = 5
 ### Image
 
 Usually the notification can contain the image or icon and it draws at the right of
-banner. More about it in [banner layout](BannerLayout.md#image). Our application can
-perform some actions which in result the image will look very pleasant for most users.
+banner. More about it in [banner layout](BannerLayout.md#image). The `Noti` application 
+can perform some actions which in result the image will look very pleasant for most users.
 
 Here's a table of `Image` properties:
 
