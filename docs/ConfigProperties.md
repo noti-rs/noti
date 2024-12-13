@@ -24,11 +24,12 @@ Before of all properties, need to understand a few primitive type. The complex t
 | `String` | A string. Usually it used as enumeration                                                                                                                                                                             |
 | `[..]`   | Array containing various type. Used as tuple                                                                                                                                                                         |
 | `Color`  | The hex value which is started by hashtag (#) and wrapped by doubled quotes (defines as string). It can have three, six or eight symbols which represent RGB (including alpha-channel in 8-symboled hex as opacity). |
+| `Path`   | The path to particular file or directory, represented as string (surrounded by double quotes). Currently supported expansion by environment variable and tilde. The relative paths are not yet supported.            |
 
 ## Importing
 
 You can move part of configuration values into other files and import them in
-main configuration files by keyword `use` and accepts array of strings. Accepts
+main configuration files by keyword `use` and accepts array of `Path`s. Accepts
 any valid path except relative, including path that contains environment
 variables, starting with tilde.
 
@@ -164,7 +165,7 @@ The currently possible properties of `display` table:
 
 | Property name                  | Description                                         | Type                                                                    | Default value |
 | :----------------------------- | :-------------------------------------------------- | :---------------------------------------------------------------------- | :-----------: |
-| [layout](./Filetype.md)        | Use the custom layout by providen path              | `String`                                                                |   "default"   |
+| [layout](./Filetype.md)        | Use the custom layout by providen path              | `Path`                                                                  |   "default"   |
 | [theme](#themes)               | Use the [theme](#themes) by name                    | `String`                                                                |       -       |
 | [image](#image)                | Image properties                                    | `Image`                                                                 |       -       |
 | [padding](#padding-and-margin) | The spacing from the banner's edge to inner content | `u8` or `[u8, u8]` or `[u8, u8, u8]` or `[u8, u8, u8, u8]` or `Spacing` |       0       |
