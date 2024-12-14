@@ -174,7 +174,7 @@ The currently possible properties of `display` table:
 | [title](#text)                 | Title text properties                               | `Text`                                                                  |       -       |
 | [body](#text)                  | Body text properties                                | `Text`                                                                  |       -       |
 | [markup](#markup)              | Enables HTML style markup                           | `bool`                                                                  |     true      |
-| [timeout](#timeout)            | Sets the timeout of banner                          | `u16`                                                                   |       0       |
+| [timeout](#timeout)            | Sets the timeout of banner                          | `u16` or `Timeout`                                                      |       0       |
 
 The [layout](./Filetype.md) property should have or `"default"` value or path to file in which
 describes layout for banner. You can pass path with environment variables like
@@ -347,7 +347,19 @@ You can turn off the `markup` property by setting `false` value.
 The time in milliseconds when the notification banner should be closed by expiration
 since creation.
 
-The value `0` means will never expired.
+There is also extended timeout configuration - per urgency of banners by `Timeout` table.
+
+The `Timeout` table:
+
+| Key      | Short description                                     | Type  |
+| :------- | :---------------------------------------------------- | :---- |
+| default  | Set default timeout for all urgency                   | `u16` |
+| low      | Override timeout value for 'low' urgency banners      | `u16` |
+| normal   | Override timeout value for 'normal' urgency banners   | `u16` |
+| critical | Override timeout value for 'critical' urgency banners | `u16` |
+
+> [!NOTE]
+> The value `0` means will never expired.
 
 ---
 

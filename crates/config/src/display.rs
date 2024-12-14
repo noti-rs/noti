@@ -1,7 +1,8 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, marker::PhantomData, path::PathBuf};
 
+use dbus::notification::Urgency;
 use macros::{ConfigProperty, GenericBuilder};
-use serde::Deserialize;
+use serde::{de::Visitor, Deserialize};
 use shared::{error::ConversionError, value::TryDowncast};
 
 use crate::{
@@ -37,8 +38,8 @@ public! {
         #[cfg_prop(default(true))]
         markup: Option<bool>,
 
-        #[cfg_prop(default(0))]
-        timeout: Option<u16>,
+        #[cfg_prop(default(Timeout::new(0)))]
+        timeout: Option<Timeout>,
     }
 }
 
@@ -186,5 +187,125 @@ impl TryFrom<shared::value::Value> for Border {
             shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
             _ => Err(ConversionError::CannotConvert),
         }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct Timeout {
+    default: Option<u16>,
+    low: Option<u16>,
+    normal: Option<u16>,
+    critical: Option<u16>,
+}
+
+impl Timeout {
+    const DEFAULT: u16 = 0;
+
+    fn new(default_value: u16) -> Self {
+        Self {
+            default: default_value.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn by_urgency(&self, urgency: &Urgency) -> u16 {
+        match urgency {
+            Urgency::Low => self.low,
+            Urgency::Normal => self.normal,
+            Urgency::Critical => self.critical,
+        }
+        .or(self.default)
+        .unwrap_or(Self::DEFAULT)
+    }
+}
+
+impl From<u16> for Timeout {
+    fn from(value: u16) -> Self {
+        Timeout::new(value)
+    }
+}
+
+impl From<HashMap<String, u16>> for Timeout {
+    fn from(value: HashMap<String, u16>) -> Self {
+        Timeout {
+            default: value.get("default").copied(),
+            low: value.get("low").copied(),
+            normal: value.get("normal").copied(),
+            critical: value.get("critical").copied(),
+        }
+    }
+}
+
+struct TimeoutVisitor<T>(PhantomData<fn() -> T>);
+
+impl<'de> Deserialize<'de> for Timeout {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(TimeoutVisitor(PhantomData))
+    }
+}
+
+impl<'de, T> Visitor<'de> for TimeoutVisitor<T>
+where
+    T: Deserialize<'de> + From<u16> + From<HashMap<String, u16>>,
+{
+    type Value = T;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            formatter,
+            r#"Either u16 or Table value.
+
+Example:
+
+# In milliseconds
+display.timeout = 2000 
+
+# or
+
+[display.timeout]
+low = 2000
+normal = 4000
+critical = 5000
+
+# or
+
+[display.timeout]
+default = 3000 # for low and normal this value will be set
+critical = 0 # but for critical the default value will be overriden
+"#
+        )
+    }
+
+    fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(v.into())
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut local_map = HashMap::new();
+
+        while let Some((key, value)) = map.next_entry::<String, u16>()? {
+            match key.as_str() {
+                "default" | "low" | "normal" | "critical" => {
+                    local_map.insert(key, value);
+                }
+                _ => {
+                    return Err(serde::de::Error::unknown_variant(
+                        &key,
+                        &["default", "low", "normal", "critical"],
+                    ))
+                }
+            }
+        }
+
+        Ok(local_map.into())
     }
 }
