@@ -228,10 +228,10 @@ impl From<u16> for Timeout {
 impl From<HashMap<String, u16>> for Timeout {
     fn from(value: HashMap<String, u16>) -> Self {
         Timeout {
-            default: value.get("default").map(|default| *default),
-            low: value.get("low").map(|low| *low),
-            normal: value.get("normal").map(|normal| *normal),
-            critical: value.get("critical").map(|critical| *critical),
+            default: value.get("default").copied(),
+            low: value.get("low").copied(),
+            normal: value.get("normal").copied(),
+            critical: value.get("critical").copied(),
         }
     }
 }
