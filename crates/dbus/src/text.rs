@@ -343,15 +343,6 @@ impl Tag {
     ) -> Option<usize> {
         cursor.set_cursor(start_byte_pos);
 
-        // INFO:
-        // Loop until meet '>' or "/>"
-        //   find any word
-        //   save as attribute
-        //   find eq_token
-        //   find start_quote
-        //   find end_quote
-        //   save a value between double quotes as attribute value
-
         cursor.skip_whitespaces(input);
         let mut begin = cursor.cur_cursor();
 

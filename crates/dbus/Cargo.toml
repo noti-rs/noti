@@ -12,5 +12,4 @@ zbus = { workspace = true }
 
 derive_more = { version = "1.0.0", features = ["display"] }
 html-escape = "0.2.13"
-regex = "1.10.6"
 unic-segment = "0.9.0"

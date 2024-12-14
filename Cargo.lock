@@ -710,7 +710,6 @@ dependencies = [
  "derive_more",
  "html-escape",
  "log",
- "regex",
  "tokio",
  "unic-segment",
  "zbus",
