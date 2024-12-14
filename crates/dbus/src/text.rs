@@ -22,7 +22,6 @@ struct Parser<'a> {
     entities: Vec<Entity>,
     stack: Vec<ParsedTag>,
     pos: usize,
-    byte_pos: usize,
     cursor: unic_segment::GraphemeCursor,
 }
 
@@ -34,20 +33,19 @@ impl<'a> Parser<'a> {
             entities: Vec::new(),
             stack: Vec::new(),
             pos: 0,
-            byte_pos: 0,
             cursor: unic_segment::GraphemeCursor::new(0, input.len()),
         }
     }
 
     fn parse(mut self) -> Text {
-        self.byte_pos = self.cursor.cur_cursor();
+        let mut byte_pos = self.cursor.cur_cursor();
         while let Some(grapheme) = self.cursor.next_grapheme(self.input) {
             if grapheme == "<" {
                 let prev_pos = self.cursor.cur_cursor();
-                if let Some(end_tag_position) = self.try_handle_tag(self.byte_pos) {
+                if let Some(end_tag_position) = self.try_handle_tag(byte_pos) {
                     self.cursor.set_cursor(end_tag_position);
 
-                    self.byte_pos = self.cursor.cur_cursor();
+                    byte_pos = self.cursor.cur_cursor();
                     continue;
                 } else {
                     self.cursor.set_cursor(prev_pos);
@@ -57,7 +55,7 @@ impl<'a> Parser<'a> {
             self.pos += 1;
             self.body.push_str(grapheme);
 
-            self.byte_pos = self.cursor.cur_cursor();
+            byte_pos = self.cursor.cur_cursor();
         }
 
         self.close_unmatched_tags();
