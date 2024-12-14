@@ -263,7 +263,11 @@ impl Window {
                 }
                 notification::Timeout::Never => None,
                 notification::Timeout::Configurable => {
-                    let timeout = config.display_by_app(&rect.notification().app_name).timeout;
+                    let notification = rect.notification();
+                    let timeout = config
+                        .display_by_app(&notification.app_name)
+                        .timeout
+                        .by_urgency(&notification.hints.urgency);
                     if timeout != 0 && rect.created_at().elapsed().as_millis() > timeout as u128 {
                         Some(rect.notification().id)
                     } else {
