@@ -161,6 +161,8 @@ impl WindowManager {
 
                 self.update_window(config)?;
                 self.roundtrip_event_queue()?;
+
+                self.process_notification_queue(config)?;
             }
         }
 
@@ -208,6 +210,8 @@ impl WindowManager {
 
             self.update_window(config)?;
             self.roundtrip_event_queue()?;
+
+            self.process_notification_queue(config)?;
         }
 
         Ok(())
