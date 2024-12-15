@@ -163,9 +163,6 @@ impl WindowManager {
                     })
                 });
 
-            self.update_window(config)?;
-            self.roundtrip_event_queue()?;
-
             self.process_notification_queue(config)?;
         }
 
@@ -186,9 +183,6 @@ impl WindowManager {
                     reason: dbus::actions::ClosingReason::Expired,
                 })
             });
-
-            self.update_window(config)?;
-            self.roundtrip_event_queue()?;
 
             self.process_notification_queue(config)?;
         }
@@ -212,9 +206,6 @@ impl WindowManager {
             }
 
             self.events.extend(messages);
-
-            self.update_window(config)?;
-            self.roundtrip_event_queue()?;
 
             self.process_notification_queue(config)?;
         }
