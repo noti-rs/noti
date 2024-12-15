@@ -30,7 +30,10 @@ fn build_struct() -> Result<(), Box<dyn std::error::Error>> {
     assert!(failure_assignment.is_err());
     assert_eq!(
         failure_assignment.err().unwrap().to_string(),
-        shared::error::ConversionError::CannotConvert.to_string()
+        shared::error::ConversionError::UnknownField {
+            field_name: "field3".to_string()
+        }
+        .to_string()
     );
 
     let result = gbuilder.try_build()?;

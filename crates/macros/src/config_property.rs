@@ -1,49 +1,41 @@
-use std::collections::HashMap;
-
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::{quote, ToTokens};
 use syn::{
-    braced, ext::IdentExt, parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated,
+    ext::IdentExt, parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated,
     spanned::Spanned, Token,
 };
 
 use crate::{
-    general::{field_name, DefaultAssignment},
+    general::{field_name, AttributeInfo, DefaultAssignment, Structure},
     propagate_err,
 };
 
 pub(super) fn make_derive(item: TokenStream) -> TokenStream {
-    let mut cfg_struct = parse_macro_input!(item as ConfigStructure);
-    let attr_info = propagate_err!(AttrInfo::parse_removal(&mut cfg_struct));
+    let mut cfg_struct = parse_macro_input!(item as Structure);
+    let attribute_info = propagate_err!(AttributeInfo::parse_removal(&mut cfg_struct, "cfg_prop"));
 
-    let mut cfg_property_struct = propagate_err!(cfg_struct.create_property_struct(&attr_info));
+    let mut cfg_property_struct =
+        propagate_err!(cfg_struct.create_property_struct(&attribute_info));
     propagate_err!(cfg_property_struct.unwrap_option_types());
-    cfg_property_struct.update_field_types(&attr_info);
+    cfg_property_struct.update_field_types(&attribute_info);
 
     let mut tokens = proc_macro2::TokenStream::new();
-    cfg_property_struct.build_struct(&mut tokens, &attr_info);
+    cfg_property_struct.build_struct(&mut tokens, &attribute_info);
 
-    propagate_err!(cfg_struct.build_impl(&mut tokens, &cfg_property_struct.name, &attr_info));
-    cfg_struct.build_impl_traits(&mut tokens, &cfg_property_struct.name, &attr_info);
+    propagate_err!(cfg_struct.build_impl(&mut tokens, &cfg_property_struct.name, &attribute_info));
+    cfg_struct.build_impl_traits(&mut tokens, &cfg_property_struct.name);
 
     tokens.into()
 }
 
-#[derive(Clone)]
-struct ConfigStructure {
-    attributes: Vec<syn::Attribute>,
-    visibility: syn::Visibility,
-    struct_token: Token![struct],
-    name: syn::Ident,
-    braces: syn::token::Brace,
-    fields: Punctuated<syn::Field, Token![,]>,
-}
-
-impl ConfigStructure {
-    fn create_property_struct(&self, attr_info: &AttrInfo) -> syn::Result<Self> {
+impl Structure {
+    fn create_property_struct(
+        &self,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
+    ) -> syn::Result<Self> {
         let mut new_type = self.clone();
-        new_type.name = attr_info.struct_attr_info.name.clone();
+        new_type.name = attribute_info.struct_info.name.clone();
         Ok(new_type)
     }
 
@@ -96,9 +88,9 @@ impl ConfigStructure {
         Ok(())
     }
 
-    fn update_field_types(&mut self, attr_info: &AttrInfo) {
+    fn update_field_types(&mut self, attribute_info: &AttributeInfo<StructInfo, FieldInfo>) {
         for field in self.fields.iter_mut() {
-            let Some(field_attr_info) = attr_info.field_attr_info.get(&field_name(field)) else {
+            let Some(field_attr_info) = attribute_info.fields_info.get(&field_name(field)) else {
                 continue;
             };
 
@@ -113,14 +105,18 @@ impl ConfigStructure {
         }
     }
 
-    fn build_struct(&self, tokens: &mut proc_macro2::TokenStream, attr_info: &AttrInfo) {
+    fn build_struct(
+        &self,
+        tokens: &mut proc_macro2::TokenStream,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
+    ) {
         self.attributes
             .iter()
             .for_each(|attr| attr.to_tokens(tokens));
-        if let Some(derive_info) = &attr_info.struct_attr_info.derive_info {
+        if let Some(derive_info) = &attribute_info.struct_info.derive_info {
             derive_info.to_tokens(tokens);
         }
-        attr_info.struct_attr_info.attributes.to_tokens(tokens);
+        attribute_info.struct_info.attributes.to_tokens(tokens);
 
         self.visibility.to_tokens(tokens);
         self.struct_token.to_tokens(tokens);
@@ -128,12 +124,12 @@ impl ConfigStructure {
         self.braces.surround(tokens, |tokens| {
             self.fields
                 .iter()
-                .filter(|field| !attr_info.is_temporary_field(field))
+                .filter(|field| !attribute_info.is_temporary_field(field))
                 .map(|field| {
-                    let attribute_tokens = attr_info
-                        .field_attr_info
+                    let attribute_tokens = attribute_info
+                        .fields_info
                         .get(&field_name(field))
-                        .map(|field_attr_info| field_attr_info.attributes.clone())
+                        .map(|field_info| field_info.attributes.clone())
                         .unwrap_or_default();
                     quote! {
                         #attribute_tokens #field,
@@ -147,10 +143,10 @@ impl ConfigStructure {
         &self,
         tokens: &mut proc_macro2::TokenStream,
         target_type: &syn::Ident,
-        attr_info: &AttrInfo,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
     ) -> syn::Result<()> {
-        let fn_merge = self.build_fn_merge(attr_info)?;
-        let fn_unwrap_or_default = self.build_fn_unwrap_or_default(target_type, attr_info)?;
+        let fn_merge = self.build_fn_merge(attribute_info)?;
+        let fn_unwrap_or_default = self.build_fn_unwrap_or_default(target_type, attribute_info)?;
 
         let ident = &self.name;
         quote! {
@@ -164,7 +160,10 @@ impl ConfigStructure {
         Ok(())
     }
 
-    fn build_fn_merge(&self, _attr_info: &AttrInfo) -> syn::Result<proc_macro2::TokenStream> {
+    fn build_fn_merge(
+        &self,
+        _attr_info: &AttributeInfo<StructInfo, FieldInfo>,
+    ) -> syn::Result<proc_macro2::TokenStream> {
         let fields = self
             .fields
             .iter()
@@ -201,7 +200,7 @@ impl ConfigStructure {
     fn build_fn_unwrap_or_default(
         &self,
         target_type: &syn::Ident,
-        attr_info: &AttrInfo,
+        attr_info: &AttributeInfo<StructInfo, FieldInfo>,
     ) -> syn::Result<proc_macro2::TokenStream> {
         let fields = self
             .fields
@@ -211,7 +210,7 @@ impl ConfigStructure {
                 let ident = field.ident.as_ref().expect("Must be a named field");
                 let mut line = quote! { #ident: self.#ident.clone() };
 
-                if let Some(field_char) = attr_info.field_attr_info.get(&ident.to_string()) {
+                if let Some(field_char) = attr_info.fields_info.get(&ident.to_string()) {
                     if let Some(InheritsField(target)) = &field_char.inherits {
                         quote! {
                             .map(|val| val.merge(self.#target.clone()))
@@ -262,7 +261,6 @@ impl ConfigStructure {
         &self,
         tokens: &mut proc_macro2::TokenStream,
         target_type: &syn::Ident,
-        _attr_info: &AttrInfo,
     ) {
         let self_name = &self.name;
         quote! {
@@ -276,104 +274,29 @@ impl ConfigStructure {
     }
 }
 
-impl Parse for ConfigStructure {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let content;
-        Ok(Self {
-            attributes: input.call(syn::Attribute::parse_outer)?,
-            visibility: input.parse()?,
-            struct_token: input.parse()?,
-            name: input.parse()?,
-            braces: braced!(content in input),
-            fields: content.parse_terminated(syn::Field::parse_named, Token![,])?,
-        })
-    }
-}
-
-struct AttrInfo {
-    struct_attr_info: StructAttrInfo,
-    field_attr_info: HashMap<String, FieldAttrInfo>,
-}
-
-impl AttrInfo {
-    fn parse_removal(cfg_struct: &mut ConfigStructure) -> syn::Result<Self> {
-        fn removed_suitable_attr(attributes: &mut Vec<syn::Attribute>) -> Option<syn::Attribute> {
-            let index = attributes
-                .iter()
-                .enumerate()
-                .find_map(|(i, attr)| AttrInfo::is_cfg_prop(attr).then_some(i));
-
-            index.map(|index| attributes.remove(index))
-        }
-
-        fn attr_tokens(attr: syn::Attribute) -> syn::Result<proc_macro2::TokenStream> {
-            if let syn::Meta::List(meta_list) = attr.meta {
-                Ok(meta_list.tokens)
-            } else {
-                Err(syn::Error::new(
-                    attr.span(),
-                    "Expected attribute like #[cfg_prop()]",
-                ))
-            }
-        }
-
-        let Some(outer_attribute) = removed_suitable_attr(&mut cfg_struct.attributes) else {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "Expected #[cfg_struct(name(StructName))] as outer attribute but it isn't provided",
-            ));
-        };
-        let struct_attr_info = syn::parse2(attr_tokens(outer_attribute)?)?;
-
-        let mut field_attr_info = HashMap::new();
-
-        for field in cfg_struct.fields.iter_mut() {
-            let field_name = field_name(field);
-            let Some(field_attribute) = removed_suitable_attr(&mut field.attrs) else {
-                continue;
-            };
-
-            field_attr_info.insert(field_name, syn::parse2(attr_tokens(field_attribute)?)?);
-        }
-
-        Ok(Self {
-            struct_attr_info,
-            field_attr_info,
-        })
-    }
-
+impl AttributeInfo<StructInfo, FieldInfo> {
     fn is_temporary_field(&self, field: &syn::Field) -> bool {
-        self.field_attr_info
+        self.fields_info
             .get(&field_name(field))
             .map(|field_info| field_info.temporary)
             .unwrap_or(false)
     }
 
     fn is_mergeable_field(&self, field: &syn::Field) -> bool {
-        self.field_attr_info
+        self.fields_info
             .get(&field_name(field))
             .map(|field_info| field_info.mergeable)
             .unwrap_or(false)
     }
-
-    fn is_cfg_prop(attr: &syn::Attribute) -> bool {
-        if let syn::Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("cfg_prop") {
-                return true;
-            }
-        }
-
-        false
-    }
 }
 
-struct StructAttrInfo {
+struct StructInfo {
     name: syn::Ident,
     derive_info: Option<DeriveInfo>,
     attributes: proc_macro2::TokenStream,
 }
 
-impl Parse for StructAttrInfo {
+impl Parse for StructInfo {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let beginning_span = input.span();
         let mut name = None;
@@ -444,7 +367,7 @@ impl ToTokens for DeriveInfo {
     }
 }
 
-struct FieldAttrInfo {
+struct FieldInfo {
     temporary: bool,
     mergeable: bool,
     default: DefaultAssignment,
@@ -453,7 +376,7 @@ struct FieldAttrInfo {
     attributes: proc_macro2::TokenStream,
 }
 
-impl Parse for FieldAttrInfo {
+impl Parse for FieldInfo {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut temporary = false;
         let mut mergeable = false;
