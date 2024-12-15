@@ -24,6 +24,9 @@ public! {
         gap: Option<u8>,
 
         sorting: Option<Sorting>,
+
+        #[cfg_prop(default(0))]
+        limit: Option<u8>,
     }
 }
 

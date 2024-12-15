@@ -1,4 +1,4 @@
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
 
 use log::debug;
 use shared::cached_data::CachedData;
@@ -23,6 +23,8 @@ pub(crate) struct WindowManager {
     cached_layouts: CachedData<PathBuf, CachedLayout>,
 
     events: Vec<RendererMessage>,
+
+    notification_queue: VecDeque<Notification>,
 }
 
 impl WindowManager {
@@ -38,9 +40,7 @@ impl WindowManager {
             })
             .collect();
 
-        debug!("Window Manager: Created");
-
-        Ok(Self {
+        let wm = Self {
             connection,
             event_queue: None,
             qhandle: None,
@@ -50,7 +50,11 @@ impl WindowManager {
             cached_layouts,
 
             events: vec![],
-        })
+            notification_queue: VecDeque::new(),
+        };
+        debug!("Window Manager: Created");
+
+        Ok(wm)
     }
 
     pub(crate) fn update_cache(&mut self) -> bool {
@@ -92,12 +96,49 @@ impl WindowManager {
         config: &Config,
     ) -> anyhow::Result<()> {
         self.init_window(config)?;
+        self.notification_queue.extend(notifications);
+        self.process_notification_queue(config)
+    }
 
-        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
-        window.update_banners(notifications, config, &self.cached_layouts);
+    fn process_notification_queue(&mut self, config: &Config) -> anyhow::Result<()> {
+        if let Some(window) = self.window.as_mut() {
+            let notifications_limit = config.general().limit as usize;
 
-        self.update_window(config)?;
-        self.roundtrip_event_queue()
+            if notifications_limit == 0 {
+                return self.display_all_notifications(config);
+            }
+
+            let current_notifications_count = window.get_current_notifications_count();
+            let available_slots = notifications_limit.saturating_sub(current_notifications_count);
+
+            let notifications_to_display: Vec<Notification> = self
+                .notification_queue
+                .drain(..available_slots.min(self.notification_queue.len()))
+                .collect();
+
+            window.update_banners(notifications_to_display, config, &self.cached_layouts);
+
+            self.update_window(config)?;
+            self.roundtrip_event_queue()?;
+        }
+
+        Ok(())
+    }
+
+    fn display_all_notifications(&mut self, config: &Config) -> anyhow::Result<()> {
+        if let Some(window) = self.window.as_mut() {
+            if !self.notification_queue.is_empty() {
+                let notifications_to_display: Vec<Notification> =
+                    self.notification_queue.drain(..).collect();
+
+                window.update_banners(notifications_to_display, config, &self.cached_layouts);
+
+                self.update_window(config)?;
+                self.roundtrip_event_queue()?;
+            }
+        }
+
+        Ok(())
     }
 
     pub(crate) fn close_notifications(
@@ -122,8 +163,7 @@ impl WindowManager {
                     })
                 });
 
-            self.update_window(config)?;
-            self.roundtrip_event_queue()?;
+            self.process_notification_queue(config)?;
         }
 
         Ok(())
@@ -144,8 +184,7 @@ impl WindowManager {
                 })
             });
 
-            self.update_window(config)?;
-            self.roundtrip_event_queue()?;
+            self.process_notification_queue(config)?;
         }
 
         Ok(())
@@ -168,8 +207,7 @@ impl WindowManager {
 
             self.events.extend(messages);
 
-            self.update_window(config)?;
-            self.roundtrip_event_queue()?;
+            self.process_notification_queue(config)?;
         }
 
         Ok(())

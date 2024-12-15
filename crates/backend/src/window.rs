@@ -499,6 +499,10 @@ impl Window {
 
         debug!("Window: Commited")
     }
+
+    pub fn get_current_notifications_count(&self) -> usize {
+        self.banners.len()
+    }
 }
 
 trait SortByValues<K, V> {
