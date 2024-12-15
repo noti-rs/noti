@@ -10,9 +10,7 @@ pub struct Text {
 
 impl Text {
     pub fn parse(input: String) -> Self {
-        let escaped_string = html_escape::decode_html_entities(&input);
-        let parser = Parser::new(&escaped_string);
-        parser.parse()
+        Parser::new(&input).parse()
     }
 }
 
@@ -40,16 +38,35 @@ impl<'a> Parser<'a> {
     fn parse(mut self) -> Text {
         let mut byte_pos = self.cursor.cur_cursor();
         while let Some(grapheme) = self.cursor.next_grapheme(self.input) {
-            if grapheme == "<" {
-                let prev_pos = self.cursor.cur_cursor();
-                if let Some(end_tag_position) = self.try_handle_tag(byte_pos) {
-                    self.cursor.set_cursor(end_tag_position);
+            let prev_pos = self.cursor.cur_cursor();
+            match grapheme {
+                "<" => {
+                    if let Some(end_tag_position) = self.try_handle_tag(byte_pos) {
+                        self.cursor.set_cursor(end_tag_position);
 
-                    byte_pos = self.cursor.cur_cursor();
-                    continue;
-                } else {
-                    self.cursor.set_cursor(prev_pos);
+                        byte_pos = self.cursor.cur_cursor();
+                        continue;
+                    } else {
+                        self.cursor.set_cursor(prev_pos);
+                    }
                 }
+                "&" => {
+                    if let Some(end_html_entity_pos) = self.try_handle_html_entity(byte_pos) {
+                        let decoded_html_entity = html_escape::decode_html_entities(
+                            &self.input[byte_pos..end_html_entity_pos],
+                        );
+
+                        self.pos += unic_segment::Graphemes::new(&decoded_html_entity).count();
+                        self.body.push_str(&decoded_html_entity);
+
+                        self.cursor.set_cursor(end_html_entity_pos);
+                        byte_pos = self.cursor.cur_cursor();
+                        continue;
+                    } else {
+                        self.cursor.set_cursor(prev_pos);
+                    }
+                }
+                _ => (),
             }
 
             self.pos += 1;
@@ -69,6 +86,90 @@ impl<'a> Parser<'a> {
             body: self.body.trim().to_string(),
             entities: self.entities,
         }
+    }
+
+    fn try_handle_html_entity(&mut self, start_byte_pos: usize) -> Option<usize> {
+        // The pattern of html entities used here:
+        // https://stackoverflow.com/questions/26127775/remove-html-entities-and-extract-text-content-using-regex
+        //
+        // And it converted into brute parsing code.
+        fn is_alphanumeric(slice: &str) -> bool {
+            slice.len() == 1 && slice.as_bytes()[0].is_ascii_alphanumeric()
+        }
+
+        fn is_number(slice: &str) -> bool {
+            slice.len() == 1 && slice.as_bytes()[0].is_ascii_digit()
+        }
+
+        fn is_ascii_char(slice: &str, char: u8) -> bool {
+            slice.len() == 1 && slice.as_bytes()[0] == char
+        }
+
+        self.cursor.set_cursor(start_byte_pos);
+
+        let amp = self.cursor.next_grapheme(self.input)?;
+        if amp != "&" {
+            return None;
+        }
+
+        let mut begin = self.cursor.cur_cursor();
+        let first_grapheme = self.cursor.next_grapheme(self.input)?;
+
+        match first_grapheme {
+            x if is_alphanumeric(x) => {
+                self.cursor
+                    .skip_until(self.input, |grapheme| grapheme == ";");
+
+                if !self.input[begin..self.cursor.cur_cursor()]
+                    .as_bytes()
+                    .iter()
+                    .all(|byte| byte.is_ascii_alphanumeric())
+                {
+                    return None;
+                }
+            }
+            x if is_ascii_char(x, b'#') => {
+                begin = self.cursor.cur_cursor();
+                let second_grapheme = self.cursor.next_grapheme(self.input)?;
+
+                match second_grapheme {
+                    x if is_number(x) => {
+                        self.cursor
+                            .skip_until(self.input, |grapheme| grapheme == ";");
+
+                        if !self.input[begin..self.cursor.cur_cursor()]
+                            .as_bytes()
+                            .iter()
+                            .all(|byte| byte.is_ascii_digit())
+                        {
+                            return None;
+                        }
+                    }
+                    x if is_ascii_char(x, b'x') => {
+                        begin = self.cursor.cur_cursor();
+                        self.cursor
+                            .skip_until(self.input, |grapheme| grapheme == ";");
+
+                        if !self.input[begin..self.cursor.cur_cursor()]
+                            .as_bytes()
+                            .iter()
+                            .all(|byte| byte.is_ascii_hexdigit())
+                        {
+                            return None;
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        }
+
+        let semi_colon = self.cursor.next_grapheme(self.input)?;
+        if semi_colon != ";" {
+            return None;
+        }
+
+        Some(self.cursor.cur_cursor())
     }
 
     fn try_handle_tag(&mut self, start_byte_pos: usize) -> Option<usize> {
@@ -798,6 +899,36 @@ mod tests {
                 entities: vec![Entity {
                     offset: 0,
                     length: 11,
+                    kind: EntityKind::Bold
+                }]
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_escaped_slash() {
+        let input = String::from("hello<&#47;b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("hello</b>"),
+                entities: vec![]
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_lt_and_gt_html_escapes() {
+        let input = String::from("<b>&lt;i&gt;penis&lt;/i&gt;</b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("<i>penis</i>"),
+                entities: vec![Entity {
+                    offset: 0,
+                    length: 12,
                     kind: EntityKind::Bold
                 }]
             }
