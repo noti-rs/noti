@@ -286,6 +286,20 @@ critical = 0 # but for critical the default value will be overriden
         Ok(v.into())
     }
 
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error, {
+        if v < 0 {
+            Err(serde::de::Error::invalid_type(
+                serde::de::Unexpected::Signed(v),
+                &self,
+            ))
+        } else {
+            Ok((v.clamp(0, u16::MAX as i64) as u16).into())
+        }
+        
+    }
+
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::MapAccess<'de>,
