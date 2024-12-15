@@ -127,15 +127,13 @@ impl WindowManager {
 
     fn display_all_notifications(&mut self, config: &Config) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
-            if !self.notification_queue.is_empty() {
-                let notifications_to_display: Vec<Notification> =
-                    self.notification_queue.drain(..).collect();
+            let notifications_to_display: Vec<Notification> =
+                self.notification_queue.drain(..).collect();
 
-                window.update_banners(notifications_to_display, config, &self.cached_layouts);
+            window.update_banners(notifications_to_display, config, &self.cached_layouts);
 
-                self.update_window(config)?;
-                self.roundtrip_event_queue()?;
-            }
+            self.update_window(config)?;
+            self.roundtrip_event_queue()?;
         }
 
         Ok(())
