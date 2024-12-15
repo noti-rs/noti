@@ -23,7 +23,6 @@ public! {
         #[cfg_prop(default(10))]
         gap: Option<u8>,
 
-
         sorting: Option<Sorting>,
 
         #[cfg_prop(default(0))]

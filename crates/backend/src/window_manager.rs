@@ -40,9 +40,7 @@ impl WindowManager {
             })
             .collect();
 
-        debug!("Window Manager: Created");
-
-        Ok(Self {
+        let wm = Self {
             connection,
             event_queue: None,
             qhandle: None,
@@ -53,7 +51,10 @@ impl WindowManager {
 
             events: vec![],
             notification_queue: VecDeque::new(),
-        })
+        };
+        debug!("Window Manager: Created");
+
+        Ok(wm)
     }
 
     pub(crate) fn update_cache(&mut self) -> bool {
@@ -149,21 +150,23 @@ impl WindowManager {
             let notifications = window.remove_banners_by_id(indices);
 
             if !notifications.is_empty() {
-                notifications
-                    .into_iter()
-                    .map(|notification| notification.id)
-                    .for_each(|id| {
-                        self.events.push(RendererMessage::ClosedNotification {
-                            id,
-                            reason: dbus::actions::ClosingReason::CallCloseNotification,
-                        })
-                    });
-
-                self.update_window(config)?;
-                self.roundtrip_event_queue()?;
-
-                self.process_notification_queue(config)?;
+                return Ok(());
             }
+
+            notifications
+                .into_iter()
+                .map(|notification| notification.id)
+                .for_each(|id| {
+                    self.events.push(RendererMessage::ClosedNotification {
+                        id,
+                        reason: dbus::actions::ClosingReason::CallCloseNotification,
+                    })
+                });
+
+            self.update_window(config)?;
+            self.roundtrip_event_queue()?;
+
+            self.process_notification_queue(config)?;
         }
 
         Ok(())
@@ -173,19 +176,21 @@ impl WindowManager {
         if let Some(window) = self.window.as_mut() {
             let notifications = window.remove_expired_banners(config);
 
-            if !notifications.is_empty() {
-                notifications.into_iter().for_each(|notification| {
-                    self.events.push(RendererMessage::ClosedNotification {
-                        id: notification.id,
-                        reason: dbus::actions::ClosingReason::Expired,
-                    })
-                });
-
-                self.update_window(config)?;
-                self.roundtrip_event_queue()?;
-
-                self.process_notification_queue(config)?;
+            if notifications.is_empty() {
+                return Ok(());
             }
+
+            notifications.into_iter().for_each(|notification| {
+                self.events.push(RendererMessage::ClosedNotification {
+                    id: notification.id,
+                    reason: dbus::actions::ClosingReason::Expired,
+                })
+            });
+
+            self.update_window(config)?;
+            self.roundtrip_event_queue()?;
+
+            self.process_notification_queue(config)?;
         }
 
         Ok(())
