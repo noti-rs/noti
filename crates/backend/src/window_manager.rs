@@ -149,7 +149,7 @@ impl WindowManager {
         if let Some(window) = self.window.as_mut() {
             let notifications = window.remove_banners_by_id(indices);
 
-            if !notifications.is_empty() {
+            if notifications.is_empty() {
                 return Ok(());
             }
 
