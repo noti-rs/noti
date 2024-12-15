@@ -17,6 +17,12 @@ pub struct Notification {
     pub created_at: u64,
 }
 
+impl PartialEq for Notification {
+    fn eq(&self, other: &Self) -> bool {
+        self.created_at == other.created_at
+    }
+}
+
 #[derive(Debug)]
 pub struct ScheduledNotification {
     pub id: u32,
