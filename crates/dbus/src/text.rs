@@ -1,5 +1,6 @@
-use regex::Regex;
-use std::{collections::HashMap, iter::Peekable, str::Chars};
+use log::warn;
+use std::collections::HashMap;
+use unic_segment;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Text {
@@ -9,39 +10,69 @@ pub struct Text {
 
 impl Text {
     pub fn parse(input: String) -> Self {
-        let escaped_string = html_escape::decode_html_entities(&input);
-        let parser = Parser::new(&escaped_string);
-        parser.parse()
+        Parser::new(&input).parse()
     }
 }
 
 struct Parser<'a> {
+    input: &'a str,
     body: String,
     entities: Vec<Entity>,
-    stack: Vec<(Tag, usize)>,
+    stack: Vec<ParsedTag>,
     pos: usize,
-    chars: Peekable<Chars<'a>>,
+    cursor: unic_segment::GraphemeCursor,
 }
 
 impl<'a> Parser<'a> {
     fn new(input: &'a str) -> Self {
         Self {
+            input,
             body: String::new(),
             entities: Vec::new(),
             stack: Vec::new(),
             pos: 0,
-            chars: input.chars().peekable(),
+            cursor: unic_segment::GraphemeCursor::new(0, input.len()),
         }
     }
 
     fn parse(mut self) -> Text {
-        while let Some(c) = self.chars.next() {
-            if c == '<' {
-                self.handle_tag();
-            } else {
-                self.body.push(c);
-                self.pos += 1;
+        let mut byte_pos = self.cursor.cur_cursor();
+        while let Some(grapheme) = self.cursor.next_grapheme(self.input) {
+            let prev_pos = self.cursor.cur_cursor();
+            match grapheme {
+                "<" => {
+                    if let Some(end_tag_position) = self.try_handle_tag(byte_pos) {
+                        self.cursor.set_cursor(end_tag_position);
+
+                        byte_pos = self.cursor.cur_cursor();
+                        continue;
+                    } else {
+                        self.cursor.set_cursor(prev_pos);
+                    }
+                }
+                "&" => {
+                    if let Some(end_html_entity_pos) = self.try_handle_html_entity(byte_pos) {
+                        let decoded_html_entity = html_escape::decode_html_entities(
+                            &self.input[byte_pos..end_html_entity_pos],
+                        );
+
+                        self.pos += unic_segment::Graphemes::new(&decoded_html_entity).count();
+                        self.body.push_str(&decoded_html_entity);
+
+                        self.cursor.set_cursor(end_html_entity_pos);
+                        byte_pos = self.cursor.cur_cursor();
+                        continue;
+                    } else {
+                        self.cursor.set_cursor(prev_pos);
+                    }
+                }
+                _ => (),
             }
+
+            self.pos += 1;
+            self.body.push_str(grapheme);
+
+            byte_pos = self.cursor.cur_cursor();
         }
 
         self.close_unmatched_tags();
@@ -57,38 +88,144 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn handle_tag(&mut self) {
-        let mut tag = String::new();
-        while let Some(&next_char) = self.chars.peek() {
-            if next_char == '>' {
-                self.chars.next();
-                break;
-            } else {
-                tag.push(self.chars.next().unwrap());
-            }
+    fn try_handle_html_entity(&mut self, start_byte_pos: usize) -> Option<usize> {
+        // The pattern of html entities used here:
+        // https://stackoverflow.com/questions/26127775/remove-html-entities-and-extract-text-content-using-regex
+        //
+        // And it converted into brute parsing code.
+        fn is_alphanumeric(slice: &str) -> bool {
+            slice.len() == 1 && slice.as_bytes()[0].is_ascii_alphanumeric()
         }
 
-        if let Some(parsed_tag) = Tag::parse(&tag) {
-            if parsed_tag.is_closing {
-                self.handle_closing_tag();
-            } else if parsed_tag.is_self_closing {
-                self.handle_self_closing_tag(parsed_tag);
-            } else {
-                self.stack.push((parsed_tag, self.pos));
-            }
+        fn is_number(slice: &str) -> bool {
+            slice.len() == 1 && slice.as_bytes()[0].is_ascii_digit()
         }
+
+        fn is_ascii_char(slice: &str, char: u8) -> bool {
+            slice.len() == 1 && slice.as_bytes()[0] == char
+        }
+
+        self.cursor.set_cursor(start_byte_pos);
+
+        let amp = self.cursor.next_grapheme(self.input)?;
+        if amp != "&" {
+            return None;
+        }
+
+        let mut begin = self.cursor.cur_cursor();
+        let first_grapheme = self.cursor.next_grapheme(self.input)?;
+
+        match first_grapheme {
+            x if is_alphanumeric(x) => {
+                self.cursor
+                    .skip_until(self.input, |grapheme| grapheme == ";");
+
+                if !self.input[begin..self.cursor.cur_cursor()]
+                    .as_bytes()
+                    .iter()
+                    .all(|byte| byte.is_ascii_alphanumeric())
+                {
+                    return None;
+                }
+            }
+            x if is_ascii_char(x, b'#') => {
+                begin = self.cursor.cur_cursor();
+                let second_grapheme = self.cursor.next_grapheme(self.input)?;
+
+                match second_grapheme {
+                    x if is_number(x) => {
+                        self.cursor
+                            .skip_until(self.input, |grapheme| grapheme == ";");
+
+                        if !self.input[begin..self.cursor.cur_cursor()]
+                            .as_bytes()
+                            .iter()
+                            .all(|byte| byte.is_ascii_digit())
+                        {
+                            return None;
+                        }
+                    }
+                    x if is_ascii_char(x, b'x') => {
+                        begin = self.cursor.cur_cursor();
+                        self.cursor
+                            .skip_until(self.input, |grapheme| grapheme == ";");
+
+                        if !self.input[begin..self.cursor.cur_cursor()]
+                            .as_bytes()
+                            .iter()
+                            .all(|byte| byte.is_ascii_hexdigit())
+                        {
+                            return None;
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        }
+
+        let semi_colon = self.cursor.next_grapheme(self.input)?;
+        if semi_colon != ";" {
+            return None;
+        }
+
+        Some(self.cursor.cur_cursor())
     }
 
-    fn handle_closing_tag(&mut self) {
-        if let Some((start_tag, start_pos)) = self.stack.pop() {
-            let length = self.pos - start_pos;
-            if length > 0 && !self.body[start_pos..self.pos].trim().is_empty() {
-                self.entities.push(Entity {
-                    offset: start_pos,
-                    length,
-                    kind: start_tag.kind,
+    fn try_handle_tag(&mut self, start_byte_pos: usize) -> Option<usize> {
+        let tag = Tag::try_parse(self.input, &mut self.cursor, start_byte_pos)?;
+
+        let end = tag.byte_pos_end;
+        match &tag.tag_type {
+            TagType::Opening => {
+                self.stack.push(ParsedTag {
+                    tag,
+                    begin_position: self.pos,
                 });
             }
+            TagType::Closing => {
+                self.handle_closing_tag(tag);
+            }
+            TagType::SelfClosing => {
+                self.handle_self_closing_tag(tag);
+            }
+        }
+
+        Some(end)
+    }
+
+    fn handle_closing_tag(&mut self, closing_tag: Tag) {
+        if self
+            .stack
+            .last()
+            .is_some_and(|parsed_tag| parsed_tag.tag.kind.to_id() == closing_tag.kind.to_id())
+        {
+            let ParsedTag {
+                tag,
+                begin_position,
+            } = self.stack.pop().unwrap();
+
+            let length = self.pos - begin_position;
+            let graphemes = unic_segment::Graphemes::new(&self.body);
+            if length > 0
+                && !graphemes
+                    .skip(begin_position)
+                    .all(|grapheme| grapheme.trim().is_empty())
+            {
+                self.entities.push(Entity {
+                    offset: begin_position,
+                    length,
+                    kind: tag.kind,
+                });
+            }
+        } else {
+            let range = closing_tag.byte_pos_begin..closing_tag.byte_pos_end;
+            warn!(
+                "Unexpected closing tag {} at {:?} in text: {}",
+                &self.input[range.clone()],
+                range,
+                self.input
+            );
         }
     }
 
@@ -101,14 +238,23 @@ impl<'a> Parser<'a> {
     }
 
     fn close_unmatched_tags(&mut self) {
-        while let Some((start_tag, start_pos)) = self.stack.pop() {
-            let length = self.pos - start_pos;
+        while let Some(ParsedTag {
+            tag,
+            begin_position,
+        }) = self.stack.pop()
+        {
+            let length = self.pos - begin_position;
 
-            if length > 0 && !self.body[start_pos..self.pos].trim().is_empty() {
+            let graphemes = unic_segment::Graphemes::new(&self.body);
+            if length > 0
+                && !graphemes
+                    .skip(begin_position)
+                    .all(|grapheme| grapheme.trim().is_empty())
+            {
                 self.entities.push(Entity {
-                    offset: start_pos,
+                    offset: begin_position,
                     length,
-                    kind: start_tag.kind,
+                    kind: tag.kind,
                 });
             }
         }
@@ -136,67 +282,296 @@ pub enum EntityKind {
     }, // <img src="./path/to/image.png" alt="..."/>
 }
 
+impl EntityKind {
+    fn to_id(&self) -> u8 {
+        match self {
+            EntityKind::Bold => 0,
+            EntityKind::Italic => 1,
+            EntityKind::Underline => 2,
+            EntityKind::Link { .. } => 3,
+            EntityKind::Image { .. } => 4,
+        }
+    }
+}
+
+struct ParsedTag {
+    tag: Tag,
+    begin_position: usize,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct Tag {
+    byte_pos_begin: usize,
+    byte_pos_end: usize,
     kind: EntityKind,
-    is_closing: bool,
-    is_self_closing: bool,
-    attributes: Option<HashMap<String, String>>,
+    tag_type: TagType,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TagType {
+    Opening,
+    Closing,
+    SelfClosing,
 }
 
 impl Tag {
-    fn parse(tag: &str) -> Option<Tag> {
-        let (tag, is_closing) = tag
-            .strip_prefix('/')
-            .map(|stripped| (stripped, true))
-            .unwrap_or_else(|| (tag, false));
+    /// Tries to parse the HTML tags: bold, italic, underline, link and image.
+    ///
+    /// For link supported only `href` attribute.
+    /// For image supported only `src` and `alt` attributes.
+    fn try_parse(
+        input: &str,
+        cursor: &mut unic_segment::GraphemeCursor,
+        start_byte_pos: usize,
+    ) -> Option<Self> {
+        cursor.set_cursor(start_byte_pos);
 
-        let is_self_closing = tag.ends_with('/');
-        let tag = if is_self_closing {
-            &tag[..tag.len() - 1]
-        } else {
-            tag
-        };
+        if cursor.next_grapheme(input)? != "<" {
+            return None;
+        }
 
-        let mut parts = tag.split_whitespace();
-        let tag_name = parts.next()?;
+        let mut tag_type = TagType::Opening;
+        let mut first_grapheme = cursor.next_grapheme(input)?;
 
-        let attributes = parts.collect::<Vec<&str>>().join(" ");
-        let attributes = Self::parse_attributes(&attributes);
+        if first_grapheme == "/" {
+            tag_type = TagType::Closing;
+            first_grapheme = cursor.next_grapheme(input)?;
+        }
 
-        let kind = match tag_name {
-            "b" => EntityKind::Bold,
-            "i" => EntityKind::Italic,
-            "u" => EntityKind::Underline,
-            "a" => EntityKind::Link {
-                href: attributes.get("href").cloned(),
-            },
-            "img" => EntityKind::Image {
-                src: attributes.get("src").cloned(),
-                alt: attributes.get("alt").cloned(),
-            },
+        let end_tag_byte_pos;
+        let mut attributes = HashMap::new();
+
+        let kind = match first_grapheme {
+            "b" => {
+                end_tag_byte_pos = Self::close_unattributed_tag(
+                    input,
+                    cursor,
+                    cursor.cur_cursor(),
+                    &mut tag_type,
+                )?;
+                EntityKind::Bold
+            }
+            "u" => {
+                end_tag_byte_pos = Self::close_unattributed_tag(
+                    input,
+                    cursor,
+                    cursor.cur_cursor(),
+                    &mut tag_type,
+                )?;
+                EntityKind::Underline
+            }
+            "i" => {
+                let end_tag_name = cursor.cur_cursor();
+                let second_grapheme = cursor.next_grapheme(input);
+                let third_grapheme = cursor.next_grapheme(input);
+                if second_grapheme.is_some_and(|grapheme| grapheme == "m")
+                    && third_grapheme.is_some_and(|grapheme| grapheme == "g")
+                {
+                    end_tag_byte_pos = Self::close_attributed_tag(
+                        input,
+                        cursor,
+                        cursor.cur_cursor(),
+                        &mut tag_type,
+                        &mut attributes,
+                    )?;
+                    EntityKind::Image {
+                        src: attributes.get("src").map(ToString::to_string),
+                        alt: attributes.get("alt").map(ToString::to_string),
+                    }
+                } else {
+                    end_tag_byte_pos =
+                        Self::close_unattributed_tag(input, cursor, end_tag_name, &mut tag_type)?;
+                    EntityKind::Italic
+                }
+            }
+            "a" => {
+                end_tag_byte_pos = Self::close_attributed_tag(
+                    input,
+                    cursor,
+                    cursor.cur_cursor(),
+                    &mut tag_type,
+                    &mut attributes,
+                )?;
+                EntityKind::Link {
+                    href: attributes.get("href").map(ToString::to_string),
+                }
+            }
             _ => return None,
         };
 
-        Some(Tag {
+        Some(Self {
+            byte_pos_begin: start_byte_pos,
+            byte_pos_end: end_tag_byte_pos,
             kind,
-            is_closing,
-            is_self_closing,
-            attributes: Some(attributes),
+            tag_type,
         })
     }
 
-    fn parse_attributes(attributes: &str) -> HashMap<String, String> {
-        let re = Regex::new(r#"(\w+)\s*=\s*"([^"]*)""#).unwrap(); // `key = "val"`
-        re.captures_iter(attributes)
-            .map(|cap| (cap[1].to_string(), cap[2].to_string()))
-            .collect()
+    fn close_unattributed_tag(
+        input: &str,
+        cursor: &mut unic_segment::GraphemeCursor,
+        start_byte_pos: usize,
+        tag_type: &mut TagType,
+    ) -> Option<usize> {
+        cursor.set_cursor(start_byte_pos);
+
+        cursor.skip_whitespaces(input);
+        let mut grapheme = cursor.next_grapheme(input)?;
+
+        if grapheme == "/" {
+            match tag_type {
+                TagType::Opening => *tag_type = TagType::SelfClosing,
+                TagType::SelfClosing | TagType::Closing => return None,
+            }
+            grapheme = cursor.next_grapheme(input)?;
+        }
+
+        if grapheme != ">" {
+            return None;
+        }
+
+        Some(cursor.cur_cursor())
+    }
+
+    fn close_attributed_tag<'a>(
+        input: &'a str,
+        cursor: &mut unic_segment::GraphemeCursor,
+        start_byte_pos: usize,
+        tag_type: &mut TagType,
+        attributes: &mut HashMap<&'a str, &'a str>,
+    ) -> Option<usize> {
+        cursor.set_cursor(start_byte_pos);
+
+        cursor.skip_whitespaces(input);
+        let mut begin = cursor.cur_cursor();
+
+        let mut grapheme = cursor.next_grapheme(input)?;
+        while grapheme != ">" && grapheme != "/" {
+            cursor.skip_until(input, |grapheme| grapheme == "=");
+
+            let attribute_name = &input[begin..cursor.cur_cursor()].trim();
+            if !attribute_name
+                .as_bytes()
+                .iter()
+                .all(|byte| byte.is_ascii_alphabetic())
+            {
+                return None;
+            }
+
+            let _eq_token = cursor.next_grapheme(input)?;
+
+            cursor.skip_until(input, |grapheme| grapheme == "\"");
+            let _begin_double_quote = cursor.next_grapheme(input)?;
+            let attr_value_begin = cursor.cur_cursor();
+
+            cursor.skip_until(input, |grapheme| grapheme == "\"");
+            let attribute_value = &input[attr_value_begin..cursor.cur_cursor()];
+            let _end_double_quote = cursor.next_grapheme(input);
+
+            attributes.insert(attribute_name, attribute_value);
+
+            cursor.skip_whitespaces(input);
+            begin = cursor.cur_cursor();
+            grapheme = cursor.next_grapheme(input)?;
+        }
+
+        if grapheme == "/" {
+            match tag_type {
+                TagType::Opening => *tag_type = TagType::SelfClosing,
+                TagType::SelfClosing | TagType::Closing => return None,
+            }
+            grapheme = cursor.next_grapheme(input)?;
+        }
+
+        if grapheme != ">" {
+            return None;
+        }
+
+        Some(cursor.cur_cursor())
+    }
+}
+
+trait NextGrapheme {
+    fn next_grapheme<'b>(&mut self, input: &'b str) -> Option<&'b str>;
+}
+
+impl NextGrapheme for unic_segment::GraphemeCursor {
+    fn next_grapheme<'b>(&mut self, input: &'b str) -> Option<&'b str> {
+        let start = self.cur_cursor();
+        Some(&input[start..self.next_boundary(input, 0).unwrap()?])
+    }
+}
+
+trait SkipWhitespaces {
+    fn skip_whitespaces(&mut self, input: &str);
+}
+
+impl SkipWhitespaces for unic_segment::GraphemeCursor {
+    fn skip_whitespaces(&mut self, input: &str) {
+        let mut grapheme = self.next_grapheme(input);
+        while grapheme.is_some_and(|grapheme| grapheme.trim().is_empty()) {
+            grapheme = self.next_grapheme(input);
+        }
+
+        if grapheme.is_some_and(|grapheme| !grapheme.trim().is_empty()) {
+            // INFO: backtrack to correct cursor boundary
+            let _ = self.prev_boundary(input, 0);
+        }
+    }
+}
+
+trait SkipUntil {
+    /// Skips the graphemes before it matches
+    fn skip_until<'a, 'b, F: Fn(&'b str) -> bool>(&'a mut self, input: &'b str, checker: F);
+}
+
+impl SkipUntil for unic_segment::GraphemeCursor {
+    fn skip_until<'a, 'b, F: Fn(&'b str) -> bool>(&'a mut self, input: &'b str, checker: F) {
+        let mut grapheme = self.next_grapheme(input);
+        while grapheme.is_some_and(|grapheme| !checker(grapheme)) {
+            grapheme = self.next_grapheme(input);
+        }
+
+        if grapheme.is_some_and(checker) {
+            // INFO: backtrack to correct cursor boundary
+            let _ = self.prev_boundary(input, 0);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_not_tag() {
+        let input = String::from("Normal equation: 1 < 2");
+        let text = Text::parse(input.clone());
+        assert_eq!(
+            text,
+            Text {
+                body: input,
+                entities: vec![]
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_emoji() {
+        let input = String::from("<b>coffee ☕️</b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("coffee ☕️"),
+                entities: vec![Entity {
+                    offset: 0,
+                    length: 8,
+                    kind: EntityKind::Bold
+                }]
+            }
+        )
+    }
 
     #[test]
     fn text() {
@@ -295,6 +670,19 @@ mod tests {
                     length: 5,
                     kind: EntityKind::Italic,
                 },],
+            }
+        );
+    }
+
+    #[test]
+    fn text_with_unmatched_tags2() {
+        let input = String::from("hello<i> <b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("hello"),
+                entities: vec![],
             }
         );
     }
@@ -458,6 +846,19 @@ mod tests {
     }
 
     #[test]
+    fn text_with_empty_tags2() {
+        let input = String::from("test<b>  <i> <u>      </u> </i> </b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("test"),
+                entities: vec![],
+            }
+        )
+    }
+
+    #[test]
     fn text_with_spaces() {
         let input = String::from("test       asdasd");
         let text = Text::parse(input);
@@ -498,6 +899,36 @@ mod tests {
                 entities: vec![Entity {
                     offset: 0,
                     length: 11,
+                    kind: EntityKind::Bold
+                }]
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_escaped_slash() {
+        let input = String::from("hello<&#47;b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("hello</b>"),
+                entities: vec![]
+            }
+        )
+    }
+
+    #[test]
+    fn text_with_lt_and_gt_html_escapes() {
+        let input = String::from("<b>&lt;i&gt;penis&lt;/i&gt;</b>");
+        let text = Text::parse(input);
+        assert_eq!(
+            text,
+            Text {
+                body: String::from("<i>penis</i>"),
+                entities: vec![Entity {
+                    offset: 0,
+                    length: 12,
                     kind: EntityKind::Bold
                 }]
             }
