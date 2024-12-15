@@ -2,6 +2,7 @@ use indexmap::{indexmap, IndexMap};
 use log::{debug, error, trace};
 use shared::cached_data::CachedData;
 use std::{
+    cell::RefCell,
     cmp::Ordering,
     fs::File,
     os::{
@@ -9,7 +10,7 @@ use std::{
         unix::fs::FileExt,
     },
     path::PathBuf,
-    sync::Arc,
+    rc::Rc,
 };
 
 use wayland_client::{
@@ -35,7 +36,7 @@ use render::{font::FontCollection, types::RectSize};
 
 pub(super) struct Window {
     banners: IndexMap<u32, BannerRect>,
-    font_collection: Arc<FontCollection>,
+    font_collection: Rc<RefCell<FontCollection>>,
 
     rect_size: RectSize,
     margin: Margin,
@@ -61,7 +62,7 @@ pub(super) enum ConfigurationState {
 }
 
 impl Window {
-    pub(super) fn init(font_collection: Arc<FontCollection>, config: &Config) -> Self {
+    pub(super) fn init(font_collection: Rc<RefCell<FontCollection>>, config: &Config) -> Self {
         debug!("Window: Initialized");
 
         Self {
@@ -196,7 +197,7 @@ impl Window {
         self.banners
             .extend(notifications.into_iter().map(|notification| {
                 let mut banner_rect = BannerRect::init(notification);
-                banner_rect.draw(&self.font_collection, config, cached_layouts);
+                banner_rect.draw(&self.font_collection.borrow(), config, cached_layouts);
                 (banner_rect.notification().id, banner_rect)
             }));
 
@@ -224,7 +225,7 @@ impl Window {
 
             let rect = &mut self.banners[&notification.id];
             rect.update_data(notification);
-            rect.draw(&self.font_collection, config, cached_layouts);
+            rect.draw(&self.font_collection.borrow(), config, cached_layouts);
 
             debug!(
                 "Window: Replaced notification by id {}",
@@ -357,7 +358,7 @@ impl Window {
     ) {
         self.banners
             .values_mut()
-            .for_each(|banner| banner.draw(&self.font_collection, config, cached_layouts));
+            .for_each(|banner| banner.draw(&self.font_collection.borrow(), config, cached_layouts));
 
         self.draw(qhandle, config);
 

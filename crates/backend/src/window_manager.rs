@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use log::debug;
 use shared::cached_data::CachedData;
@@ -19,7 +19,7 @@ pub(crate) struct WindowManager {
     qhandle: Option<QueueHandle<Window>>,
     window: Option<Window>,
 
-    font_collection: Arc<FontCollection>,
+    font_collection: Rc<RefCell<FontCollection>>,
     cached_layouts: CachedData<PathBuf, CachedLayout>,
 
     events: Vec<RendererMessage>,
@@ -28,9 +28,8 @@ pub(crate) struct WindowManager {
 impl WindowManager {
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
         let connection = Connection::connect_to_env()?;
-        let font_collection = Arc::new(FontCollection::load_by_font_name(
-            &config.general().font.name,
-        )?);
+        let font_collection =
+            Rc::new(FontCollection::load_by_font_name(&config.general().font.name)?.into());
         let cached_layouts = config
             .displays()
             .filter_map(|display| match &display.layout {
@@ -68,6 +67,10 @@ impl WindowManager {
                 })
                 .collect(),
         );
+
+        self.font_collection
+            .borrow_mut()
+            .update_by_font_name(&config.general().font.name)?;
 
         if let Some(window) = self.window.as_mut() {
             let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };

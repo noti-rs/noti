@@ -21,6 +21,7 @@ use super::{
 };
 
 pub struct FontCollection {
+    font_name: String,
     map: HashMap<FontStyle, Font>,
     pub emoji: Option<OwnedFace>,
 }
@@ -28,6 +29,15 @@ pub struct FontCollection {
 impl FontCollection {
     const ELLIPSIS: char = '…';
     const ACCEPTED_STYLES: [&'static str; 3] = ["Regular", "Bold", "Italic"];
+
+    pub fn update_by_font_name(&mut self, font_name: &str) -> anyhow::Result<()> {
+        if self.font_name == font_name {
+            return Ok(());
+        }
+
+        *self = Self::load_by_font_name(font_name)?;
+        Ok(())
+    }
 
     pub fn load_by_font_name(font_name: &str) -> anyhow::Result<Self> {
         debug!("Font: Trying load font by name {font_name}");
@@ -83,7 +93,11 @@ impl FontCollection {
             warn!("Font: Not found the 'NotoColorEmoj' font, emoji will be not displayed");
         }
 
-        Ok(Self { map, emoji })
+        Ok(Self {
+            font_name: font_name.to_owned(),
+            map,
+            emoji,
+        })
     }
 
     pub fn load_glyph_by_style(&self, font_style: &FontStyle, ch: char, px_size: f32) -> Glyph {
