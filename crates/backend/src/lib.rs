@@ -2,6 +2,7 @@ use std::thread;
 
 use anyhow::Context;
 use config::Config;
+use internal_messages::InternalChannel;
 use log::{debug, info, warn};
 use scheduler::Scheduler;
 use tokio::sync::mpsc::unbounded_channel;
@@ -25,13 +26,16 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let server = Server::init(sender).await?;
     info!("Backend: Server initialized");
 
-    let (server_internal_channel, mut renderer) = Renderer::init(config)?;
-    info!("Backend: Renderer initialized");
+    let (server_internal_channel, renderer_internal_channel) = InternalChannel::new().split();
+
+    let backend_thread: thread::JoinHandle<Result<(), anyhow::Error>> = thread::spawn(move || {
+        let mut renderer = Renderer::init(config, renderer_internal_channel)?;
+        info!("Backend: Renderer initialized");
+        renderer.run()
+    });
 
     let mut scheduler = Scheduler::new();
     info!("Backend: Scheduler initialized");
-
-    let backend_thread = thread::spawn(move || renderer.run());
 
     loop {
         while let Ok(action) = receiver.try_recv() {

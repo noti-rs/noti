@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use super::internal_messages::{
-    InternalChannel, RendererInternalChannel, ServerInternalChannel, ServerMessage,
-};
+use super::internal_messages::{RendererInternalChannel, ServerMessage};
 use config::Config;
 use log::{debug, info};
 use shared::file_watcher::FileState;
@@ -16,17 +14,15 @@ pub(crate) struct Renderer {
 }
 
 impl Renderer {
-    pub(crate) fn init(config: Config) -> anyhow::Result<(ServerInternalChannel, Self)> {
-        let (server_internal_channel, renderer_internal_channel) = InternalChannel::new().split();
-
-        Ok((
-            server_internal_channel,
-            Self {
-                window_manager: WindowManager::init(&config)?,
-                channel: renderer_internal_channel,
-                config,
-            },
-        ))
+    pub(crate) fn init(
+        config: Config,
+        renderer_internal_channel: RendererInternalChannel,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            window_manager: WindowManager::init(&config)?,
+            channel: renderer_internal_channel,
+            config,
+        })
     }
 
     pub(crate) fn run(&mut self) -> anyhow::Result<()> {
@@ -86,7 +82,6 @@ impl Renderer {
                     FileState::NotFound | FileState::NothingChanged => (),
                 };
 
-                // if self.config.update_themes() || self.window_manager.update_cache() {
                 if self.window_manager.update_cache() {
                     self.window_manager.update_by_config(&self.config)?;
                 }
