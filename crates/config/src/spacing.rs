@@ -6,7 +6,7 @@ use std::{
 
 use macros::GenericBuilder;
 use serde::{de::Visitor, Deserialize};
-use shared::value::TryDowncast;
+use shared::value::TryFromValue;
 
 #[derive(GenericBuilder, Debug, Default, Clone)]
 #[gbuilder(name(GBuilderSpacing))]
@@ -24,16 +24,7 @@ pub struct Spacing {
     left: u8,
 }
 
-impl TryFrom<shared::value::Value> for Spacing {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
-    }
-}
+impl TryFromValue for Spacing {}
 
 impl Spacing {
     const POSSIBLE_KEYS: [&'static str; 6] =

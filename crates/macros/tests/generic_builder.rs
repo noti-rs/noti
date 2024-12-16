@@ -1,4 +1,4 @@
-use shared::value::{TryDowncast, Value};
+use shared::value::{TryFromValue, Value};
 
 #[derive(macros::GenericBuilder, Eq, PartialEq, Debug)]
 #[gbuilder(name(GBuilderTest))]
@@ -63,21 +63,15 @@ enum InnerStructure {
     Second,
 }
 
-impl TryFrom<Value> for InnerStructure {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(str) => match &*str {
-                "first" => Ok(InnerStructure::First),
-                "second" => Ok(InnerStructure::Second),
-                _ => Err(shared::error::ConversionError::InvalidValue {
-                    expected: "first or second",
-                    actual: str,
-                }),
-            },
-            Value::Any(boxed_object) => boxed_object.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
+impl TryFromValue for InnerStructure {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        match &*value {
+            "first" => Ok(InnerStructure::First),
+            "second" => Ok(InnerStructure::Second),
+            _ => Err(shared::error::ConversionError::InvalidValue {
+                expected: "first or second",
+                actual: value,
+            }),
         }
     }
 }
