@@ -49,15 +49,15 @@ impl Structure {
                 .expect("Should be at least one field that have attibutes!");
 
             let r#type = temporary_field_types
-                .entry(also_from_field.ident.to_string())
-                .or_insert(&field.ty);
+                .entry(&also_from_field.ident)
+                .or_insert(field.ty.to_token_stream().to_string());
 
-            if *r#type != &field.ty {
+            if *r#type != field.ty.to_token_stream().to_string() {
                 return Err(syn::Error::new(
                     field.ty.span(),
                     format!(
                         "Expected the same types of fields with same attribute value 'also_from' - {}!", 
-                        also_from_field.ident.to_string()
+                        also_from_field.ident
                     )
                 ));
             }
@@ -241,7 +241,7 @@ impl Structure {
                 let ident = field.ident.as_ref().expect("Must be a named field");
                 let mut line = quote! { #ident: #ident };
 
-                if let Some(field_info) = attribute_info.fields_info.get(&field_name(&field)) {
+                if let Some(field_info) = attribute_info.fields_info.get(&field_name(field)) {
                     if let Some(AlsoFromField {
                         ident: temporary_field_ident,
                         mergeable,
@@ -300,17 +300,12 @@ impl Structure {
 
 impl AttributeInfo<StructInfo, FieldInfo> {
     fn is_temporary_field(&self, field: &syn::Field) -> bool {
-        self.fields_info
-            .values()
-            .find(|field_info| {
-                field_info
-                    .also_from_field
-                    .as_ref()
-                    .is_some_and(|also_from_field| {
-                        Some(&also_from_field.ident) == field.ident.as_ref()
-                    })
-            })
-            .is_some()
+        self.fields_info.values().any(|field_info| {
+            field_info
+                .also_from_field
+                .as_ref()
+                .is_some_and(|also_from_field| Some(&also_from_field.ident) == field.ident.as_ref())
+        })
     }
 
     fn is_mergeable_field(&self, field: &syn::Field) -> bool {
