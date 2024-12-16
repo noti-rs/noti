@@ -5,39 +5,32 @@ use shared::value::TryDowncast;
 use super::{public, Spacing};
 
 public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(
-        name(TextProperty),
-        derive(GenericBuilder, Debug, Clone),
-        attributes(#[gbuilder(name(GBuilderTextProperty))])
-    )]
-    struct TomlTextProperty {
-        #[cfg_prop(
-            default(true),
-            attributes(#[gbuilder(default(true))])
-        )]
-        wrap: Option<bool>,
+    #[derive(ConfigProperty, GenericBuilder, Debug, Clone)]
+    #[cfg_prop(name(TomlTextProperty),derive(Debug, Clone, Default, Deserialize))]
+    #[gbuilder(name(GBuilderTextProperty))]
+    struct TextProperty {
+        #[cfg_prop(default(true))]
+        #[gbuilder(default(true))]
+        wrap: bool,
 
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        ellipsize_at: Option<EllipsizeAt>,
+        #[gbuilder(default)]
+        ellipsize_at: EllipsizeAt,
 
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        style: Option<TextStyle>,
+        #[gbuilder(default)]
+        style: TextStyle,
 
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        margin: Option<Spacing>,
+        #[gbuilder(default)]
+        margin: Spacing,
 
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        justification: Option<TextJustification>,
+        #[gbuilder(default)]
+        justification: TextJustification,
 
         #[cfg_prop(default(12))]
-        font_size: Option<u8>,
+        font_size: u8,
 
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        line_spacing: Option<u8>,
+        #[cfg_prop(default(0))]
+        #[gbuilder(default(0))]
+        line_spacing: u8,
     }
 }
 

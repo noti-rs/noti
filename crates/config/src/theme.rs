@@ -5,19 +5,19 @@ use serde::Deserialize;
 use crate::{color::Color, public};
 
 public! {
-    #[derive(ConfigProperty, Deserialize, Default, Debug)]
-    #[cfg_prop(name(Theme), derive(Debug))]
-    struct TomlTheme {
-        name: Option<String>,
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(TomlTheme), derive(Debug, Deserialize, Default))]
+    struct Theme {
+        name: String,
 
-        #[cfg_prop(use_type(Colors))]
-        low: Option<TomlColors>,
+        #[cfg_prop(use_type(TomlColors))]
+        low: Colors,
 
-        #[cfg_prop(use_type(Colors))]
-        normal: Option<TomlColors>,
+        #[cfg_prop(use_type(TomlColors))]
+        normal: Colors,
 
-        #[cfg_prop(use_type(Colors), default(path = TomlColors::default_critical))]
-        critical: Option<TomlColors>,
+        #[cfg_prop(use_type(TomlColors), default(path = TomlColors::default_critical))]
+        critical: Colors,
     }
 }
 
@@ -38,16 +38,16 @@ impl Default for Theme {
 }
 
 public! {
-    #[derive(ConfigProperty, Clone, Default, Deserialize, Debug)]
-    #[cfg_prop(name(Colors), derive(Debug))]
-    struct TomlColors {
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(TomlColors), derive(Debug, Clone, Deserialize, Default))]
+    struct Colors {
         #[cfg_prop(default(path = Color::new_black))]
-        foreground: Option<Color>,
+        foreground: Color,
         #[cfg_prop(default(path = Color::new_white))]
-        background: Option<Color>,
+        background: Color,
 
         #[cfg_prop(default(path = Color::new_black))]
-        border: Option<Color>,
+        border: Color,
     }
 }
 

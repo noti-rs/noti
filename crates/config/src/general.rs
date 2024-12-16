@@ -8,25 +8,25 @@ use serde::Deserialize;
 use crate::{public, sorting::Sorting};
 
 public! {
-    #[derive(ConfigProperty, Default, Debug, Deserialize, Clone)]
-    #[cfg_prop(name(GeneralConfig), derive(Debug))]
-    struct TomlGeneralConfig {
-        font: Option<Font>,
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(TomlGeneralConfig), derive(Debug, Default, Deserialize, Clone))]
+    struct GeneralConfig {
+        font: Font,
 
         #[cfg_prop(default(300))]
-        width: Option<u16>,
+        width: u16,
         #[cfg_prop(default(150))]
-        height: Option<u16>,
+        height: u16,
 
-        anchor: Option<Anchor>,
-        offset: Option<(u8, u8)>,
+        anchor: Anchor,
+        offset: (u8, u8),
         #[cfg_prop(default(10))]
-        gap: Option<u8>,
+        gap: u8,
 
-        sorting: Option<Sorting>,
+        sorting: Sorting,
 
         #[cfg_prop(default(0))]
-        limit: Option<u8>,
+        limit: u8,
     }
 }
 
