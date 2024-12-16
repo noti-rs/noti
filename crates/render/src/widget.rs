@@ -8,10 +8,7 @@ use config::{
 };
 use dbus::{notification::Notification, text::Text};
 use log::warn;
-use shared::{
-    error::ConversionError,
-    value::{TryDowncast, Value},
-};
+use shared::{error::ConversionError, value::TryFromValue};
 
 use crate::{border::BorderBuilder, drawer::Drawer};
 
@@ -382,16 +379,7 @@ impl Alignment {
     }
 }
 
-impl TryFrom<Value> for Alignment {
-    type Error = ConversionError;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(ConversionError::CannotConvert),
-        }
-    }
-}
+impl TryFromValue for Alignment {}
 
 #[derive(Debug, Default, Clone)]
 pub enum Position {
@@ -402,24 +390,18 @@ pub enum Position {
     SpaceBetween,
 }
 
-impl TryFrom<Value> for Position {
-    type Error = ConversionError;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(str) => Ok(match str.to_lowercase().as_str() {
-                "start" => Position::Start,
-                "center" => Position::Center,
-                "end" => Position::End,
-                "space-between" | "space_between" => Position::SpaceBetween,
-                _ => Err(ConversionError::InvalidValue {
-                    expected: "start, center, end, space-between or space_between",
-                    actual: str,
-                })?,
-            }),
-            Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(ConversionError::CannotConvert),
-        }
+impl TryFromValue for Position {
+    fn try_from_string(value: String) -> Result<Self, ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "start" => Position::Start,
+            "center" => Position::Center,
+            "end" => Position::End,
+            "space-between" | "space_between" => Position::SpaceBetween,
+            _ => Err(ConversionError::InvalidValue {
+                expected: "start, center, end, space-between or space_between",
+                actual: value,
+            })?,
+        })
     }
 }
 
@@ -448,22 +430,16 @@ impl Direction {
     }
 }
 
-impl TryFrom<Value> for Direction {
-    type Error = ConversionError;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(str) => Ok(match str.to_lowercase().as_str() {
-                "horizontal" => Direction::Horizontal,
-                "vertical" => Direction::Vertical,
-                _ => Err(ConversionError::InvalidValue {
-                    expected: "horizontal or vertical",
-                    actual: str,
-                })?,
-            }),
-            Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(ConversionError::CannotConvert),
-        }
+impl TryFromValue for Direction {
+    fn try_from_string(value: String) -> Result<Self, ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "horizontal" => Direction::Horizontal,
+            "vertical" => Direction::Vertical,
+            _ => Err(ConversionError::InvalidValue {
+                expected: "horizontal or vertical",
+                actual: value,
+            })?,
+        })
     }
 }
 
@@ -682,22 +658,16 @@ pub enum WTextKind {
     Body,
 }
 
-impl TryFrom<Value> for WTextKind {
-    type Error = ConversionError;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(val) => Ok(match val.to_lowercase().as_str() {
-                "title" | "summary" => WTextKind::Title,
-                "body" => WTextKind::Body,
-                _ => Err(ConversionError::InvalidValue {
-                    expected: "title or body",
-                    actual: val,
-                })?,
-            }),
-            Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(ConversionError::CannotConvert),
-        }
+impl TryFromValue for WTextKind {
+    fn try_from_string(value: String) -> Result<Self, ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "title" | "summary" => WTextKind::Title,
+            "body" => WTextKind::Body,
+            _ => Err(ConversionError::InvalidValue {
+                expected: "title or body",
+                actual: value,
+            })?,
+        })
     }
 }
 

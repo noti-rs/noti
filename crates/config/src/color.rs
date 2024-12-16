@@ -1,7 +1,7 @@
 use std::str::Chars;
 
 use serde::Deserialize;
-use shared::value::TryDowncast;
+use shared::value::TryFromValue;
 
 use super::public;
 
@@ -95,13 +95,8 @@ impl From<String> for Color {
     }
 }
 
-impl TryFrom<shared::value::Value> for Color {
-    type Error = shared::error::ConversionError;
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::String(str) => Ok(str.into()),
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
+impl TryFromValue for Color {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        Ok(value.into())
     }
 }

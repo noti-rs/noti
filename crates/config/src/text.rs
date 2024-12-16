@@ -1,6 +1,6 @@
 use macros::{ConfigProperty, GenericBuilder};
 use serde::Deserialize;
-use shared::value::TryDowncast;
+use shared::value::TryFromValue;
 
 use super::{public, Spacing};
 
@@ -40,16 +40,7 @@ impl Default for TextProperty {
     }
 }
 
-impl TryFrom<shared::value::Value> for TextProperty {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
-    }
-}
+impl TryFromValue for TextProperty {}
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub enum TextStyle {
@@ -64,24 +55,18 @@ pub enum TextStyle {
     BoldItalic,
 }
 
-impl TryFrom<shared::value::Value> for TextStyle {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::String(str) => Ok(match str.to_lowercase().as_str() {
-                "regular" => TextStyle::Regular,
-                "bold" => TextStyle::Bold,
-                "italic" => TextStyle::Italic,
-                "bold-italic" | "bold_italic" => TextStyle::BoldItalic,
-                _ => Err(shared::error::ConversionError::InvalidValue {
-                    expected: "regular, bold, italic, bold-italic or bold_italic",
-                    actual: str,
-                })?,
-            }),
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
+impl TryFromValue for TextStyle {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "regular" => TextStyle::Regular,
+            "bold" => TextStyle::Bold,
+            "italic" => TextStyle::Italic,
+            "bold-italic" | "bold_italic" => TextStyle::BoldItalic,
+            _ => Err(shared::error::ConversionError::InvalidValue {
+                expected: "regular, bold, italic, bold-italic or bold_italic",
+                actual: value,
+            })?,
+        })
     }
 }
 
@@ -98,24 +83,18 @@ pub enum TextJustification {
     SpaceBetween,
 }
 
-impl TryFrom<shared::value::Value> for TextJustification {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::String(str) => Ok(match str.to_lowercase().as_str() {
-                "center" => TextJustification::Center,
-                "left" => TextJustification::Left,
-                "right" => TextJustification::Right,
-                "space-between" | "space_between" => TextJustification::SpaceBetween,
-                _ => Err(shared::error::ConversionError::InvalidValue {
-                    expected: "center, left, right, space-between or space_between",
-                    actual: str,
-                })?,
-            }),
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
+impl TryFromValue for TextJustification {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "center" => TextJustification::Center,
+            "left" => TextJustification::Left,
+            "right" => TextJustification::Right,
+            "space-between" | "space_between" => TextJustification::SpaceBetween,
+            _ => Err(shared::error::ConversionError::InvalidValue {
+                expected: "center, left, right, space-between or space_between",
+                actual: value,
+            })?,
+        })
     }
 }
 
@@ -138,21 +117,15 @@ pub enum EllipsizeAt {
     End,
 }
 
-impl TryFrom<shared::value::Value> for EllipsizeAt {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::String(str) => Ok(match str.to_lowercase().as_str() {
-                "middle" => EllipsizeAt::Middle,
-                "end" => EllipsizeAt::End,
-                _ => Err(shared::error::ConversionError::InvalidValue {
-                    expected: "middle or end",
-                    actual: str,
-                })?,
-            }),
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
+impl TryFromValue for EllipsizeAt {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "middle" => EllipsizeAt::Middle,
+            "end" => EllipsizeAt::End,
+            _ => Err(shared::error::ConversionError::InvalidValue {
+                expected: "middle or end",
+                actual: value,
+            })?,
+        })
     }
 }

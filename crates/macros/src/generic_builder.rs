@@ -146,7 +146,7 @@ impl Structure {
             .map(|field| {
                 let field_ident = field.ident.clone().expect("Fields should be named");
                 let field_name = field_ident.to_string();
-                quote! { #field_name => self.#field_ident = Some(value.try_into()?) }
+                quote! { #field_name => self.#field_ident = Some(shared::value::TryFromValue::try_from(value)?) }
             })
             .collect();
 

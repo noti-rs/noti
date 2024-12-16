@@ -3,7 +3,7 @@ use std::{collections::HashMap, marker::PhantomData, path::PathBuf};
 use dbus::notification::Urgency;
 use macros::{ConfigProperty, GenericBuilder};
 use serde::{de::Visitor, Deserialize};
-use shared::{error::ConversionError, value::TryDowncast};
+use shared::{error::ConversionError, value::TryFromValue};
 
 use crate::{
     public,
@@ -109,16 +109,7 @@ impl Default for ImageProperty {
     }
 }
 
-impl TryFrom<shared::value::Value> for ImageProperty {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
-    }
-}
+impl TryFromValue for ImageProperty {}
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub enum ResizingMethod {
@@ -135,25 +126,19 @@ pub enum ResizingMethod {
     Lanczos3,
 }
 
-impl TryFrom<shared::value::Value> for ResizingMethod {
-    type Error = shared::error::ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::String(str) => Ok(match str.to_lowercase().as_str() {
-                "nearest" => ResizingMethod::Nearest,
-                "triangle" => ResizingMethod::Triangle,
-                "catmull-rom" | "catmull_rom" => ResizingMethod::CatmullRom,
-                "gaussian" => ResizingMethod::Gaussian,
-                "lanczos3" => ResizingMethod::Lanczos3,
-                _ => Err(shared::error::ConversionError::InvalidValue {
-                    expected: "nearest, triangle, gaussian, lanczos3, catmull-rom or catmull_rom",
-                    actual: str,
-                })?,
-            }),
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(shared::error::ConversionError::CannotConvert),
-        }
+impl TryFromValue for ResizingMethod {
+    fn try_from_string(value: String) -> Result<Self, ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "nearest" => ResizingMethod::Nearest,
+            "triangle" => ResizingMethod::Triangle,
+            "catmull-rom" | "catmull_rom" => ResizingMethod::CatmullRom,
+            "gaussian" => ResizingMethod::Gaussian,
+            "lanczos3" => ResizingMethod::Lanczos3,
+            _ => Err(shared::error::ConversionError::InvalidValue {
+                expected: "nearest, triangle, gaussian, lanczos3, catmull-rom or catmull_rom",
+                actual: value,
+            })?,
+        })
     }
 }
 
@@ -172,16 +157,7 @@ public! {
     }
 }
 
-impl TryFrom<shared::value::Value> for Border {
-    type Error = ConversionError;
-
-    fn try_from(value: shared::value::Value) -> Result<Self, Self::Error> {
-        match value {
-            shared::value::Value::Any(dyn_value) => dyn_value.try_downcast(),
-            _ => Err(ConversionError::CannotConvert),
-        }
-    }
-}
+impl TryFromValue for Border {}
 
 #[derive(Debug, Default, Clone)]
 pub struct Timeout {
