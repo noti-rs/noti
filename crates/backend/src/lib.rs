@@ -9,6 +9,8 @@ use tokio::sync::mpsc::unbounded_channel;
 
 mod banner;
 mod cache;
+mod idle_manager;
+mod idle_notifier;
 mod internal_messages;
 mod render;
 mod scheduler;

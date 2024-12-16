@@ -1,8 +1,10 @@
 use std::time::Duration;
 
+use crate::idle_manager::IdleManager;
+
 use super::internal_messages::{RendererInternalChannel, ServerMessage};
 use config::Config;
-use log::{debug, info};
+use log::{debug, info, warn};
 use shared::file_watcher::FileState;
 
 use super::window_manager::WindowManager;
@@ -10,6 +12,7 @@ use super::window_manager::WindowManager;
 pub(crate) struct Renderer {
     config: Config,
     window_manager: WindowManager,
+    idle_manager: IdleManager,
     channel: RendererInternalChannel,
 }
 
@@ -20,6 +23,7 @@ impl Renderer {
     ) -> anyhow::Result<Self> {
         Ok(Self {
             window_manager: WindowManager::init(&config)?,
+            idle_manager: IdleManager::init(&config)?,
             channel: renderer_internal_channel,
             config,
         })
@@ -66,6 +70,8 @@ impl Renderer {
 
             self.window_manager.handle_actions(&self.config)?;
             self.window_manager.dispatch()?;
+
+            self.idle_manager.dispatch()?;
 
             {
                 match self.config.check_updates() {

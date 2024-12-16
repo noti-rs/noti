@@ -27,6 +27,9 @@ public! {
 
         #[cfg_prop(default(0))]
         limit: u8,
+
+        #[cfg_prop(default(5000))]
+        idle_threshold: u16,
     }
 }
 
