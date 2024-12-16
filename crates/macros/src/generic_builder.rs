@@ -1,59 +1,30 @@
-use std::collections::HashMap;
-
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{
-    braced, parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated,
-    spanned::Spanned, GenericArgument, Ident, Token,
-};
+use syn::{parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated, Token};
 
 use crate::{
-    general::{field_name, DefaultAssignment},
+    general::{field_name, wrap_by_option, AttributeInfo, DefaultAssignment, Structure},
     propagate_err,
 };
 
 pub(super) fn make_derive(item: TokenStream) -> TokenStream {
     let mut structure = parse_macro_input!(item as Structure);
-    let attr_info = propagate_err!(AttrInfo::parse_removal(&mut structure));
+    let attribute_info = propagate_err!(AttributeInfo::parse_removal(&mut structure, "gbuilder"));
 
-    let generic_builder = structure.create_generic_builder(&attr_info.struct_attr_info);
+    let generic_builder = structure.create_generic_builder(&attribute_info.struct_info);
 
     let mut tokens = proc_macro2::TokenStream::new();
     generic_builder.build_gbuilder_struct(&mut tokens);
 
-    propagate_err!(generic_builder.build_gbuilder_impl(&mut tokens, &attr_info, &structure));
+    propagate_err!(generic_builder.build_gbuilder_impl(&mut tokens, &attribute_info, &structure));
 
     tokens.into()
 }
 
-#[derive(Clone)]
-struct Structure {
-    attributes: Vec<syn::Attribute>,
-    visibility: syn::Visibility,
-    struct_token: Token![struct],
-    name: syn::Ident,
-    braces: syn::token::Brace,
-    fields: Punctuated<syn::Field, Token![,]>,
-}
-
-impl Parse for Structure {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let content;
-        Ok(Self {
-            attributes: input.call(syn::Attribute::parse_outer)?,
-            visibility: input.parse()?,
-            struct_token: input.parse()?,
-            name: input.parse()?,
-            braces: braced!(content in input),
-            fields: content.parse_terminated(syn::Field::parse_named, Token![,])?,
-        })
-    }
-}
-
 impl Structure {
-    fn create_generic_builder(&self, struct_attr_info: &StructAttrInfo) -> Self {
+    fn create_generic_builder(&self, struct_info: &StructInfo) -> Self {
         let mut generic_builder = self.clone();
-        generic_builder.name = struct_attr_info.name.clone();
+        generic_builder.name = struct_info.name.clone();
         generic_builder
     }
 
@@ -85,19 +56,19 @@ impl Structure {
     fn build_gbuilder_impl(
         &self,
         tokens: &mut proc_macro2::TokenStream,
-        attr_info: &AttrInfo,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
         target_struct: &Structure,
     ) -> syn::Result<()> {
         let unhidden_fields = self
             .fields
             .iter()
-            .filter(|field| !attr_info.is_hidden_field(field))
+            .filter(|field| !attribute_info.is_hidden_field(field))
             .collect::<Punctuated<&syn::Field, Token![,]>>();
 
         let fn_new = self.build_fn_new();
         let fn_contains_field = self.build_fn_contains_field(&unhidden_fields)?;
         let fn_set_value = self.build_fn_set_value(&unhidden_fields);
-        let fn_try_build = self.build_fn_try_build(target_struct, attr_info);
+        let fn_try_build = self.build_fn_try_build(target_struct, attribute_info);
 
         let gbuilder_ident = &self.name;
         quote! {
@@ -209,7 +180,7 @@ impl Structure {
     fn build_fn_try_build(
         &self,
         target_struct: &Structure,
-        attr_info: &AttrInfo,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
     ) -> proc_macro2::TokenStream {
         let target_type = &target_struct.name;
 
@@ -222,17 +193,17 @@ impl Structure {
                 let field_name = field_ident.to_string();
                 let mut line = quote! { #field_ident: self.#field_ident };
 
-                if let Some(default_assignment) = attr_info
-                    .field_attr_info
+                if let Some(default_assignment) = attribute_info
+                    .fields_info
                     .get(&field_name)
-                    .and_then(|field_attr| field_attr.default.as_ref())
+                    .and_then(|field_attribute| field_attribute.default.as_ref())
                 {
                     match default_assignment {
                         DefaultAssignment::Expression(expr) => {
-                            quote! { .unwrap_or(#expr) }.to_tokens(&mut line)
+                            quote! { .unwrap_or_else(|| #expr) }.to_tokens(&mut line)
                         }
                         DefaultAssignment::FunctionCall(function_path) => {
-                            quote! { .unwrap_or(#function_path()) }.to_tokens(&mut line)
+                            quote! { .unwrap_or_else(#function_path) }.to_tokens(&mut line)
                         }
                         DefaultAssignment::DefaultCall => {
                             quote! { .unwrap_or_default() }.to_tokens(&mut line);
@@ -258,81 +229,20 @@ impl Structure {
     }
 }
 
-struct AttrInfo {
-    struct_attr_info: StructAttrInfo,
-    field_attr_info: HashMap<String, FieldAttrInfo>,
-}
-
-impl AttrInfo {
-    fn parse_removal(cfg_struct: &mut Structure) -> syn::Result<Self> {
-        fn removed_suitable_attr(attributes: &mut Vec<syn::Attribute>) -> Option<syn::Attribute> {
-            let index = attributes
-                .iter()
-                .enumerate()
-                .find_map(|(i, attr)| AttrInfo::is_gbuilder(attr).then_some(i));
-
-            index.map(|index| attributes.remove(index))
-        }
-
-        fn attr_tokens(attr: syn::Attribute) -> syn::Result<proc_macro2::TokenStream> {
-            if let syn::Meta::List(meta_list) = attr.meta {
-                Ok(meta_list.tokens)
-            } else {
-                Err(syn::Error::new(
-                    attr.span(),
-                    "Expected attribute like #[gbuilder()]",
-                ))
-            }
-        }
-
-        let Some(outer_attribute) = removed_suitable_attr(&mut cfg_struct.attributes) else {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "Expected #[gbuilder(name(StructName))] as outer attribute but it isn't provided",
-            ));
-        };
-        let struct_attr_info = syn::parse2(attr_tokens(outer_attribute)?)?;
-
-        let mut field_attr_info = HashMap::new();
-
-        for field in cfg_struct.fields.iter_mut() {
-            let field_name = field_name(field);
-            let Some(field_attribute) = removed_suitable_attr(&mut field.attrs) else {
-                continue;
-            };
-
-            field_attr_info.insert(field_name, syn::parse2(attr_tokens(field_attribute)?)?);
-        }
-
-        Ok(Self {
-            struct_attr_info,
-            field_attr_info,
-        })
-    }
-
+impl AttributeInfo<StructInfo, FieldInfo> {
     fn is_hidden_field(&self, field: &syn::Field) -> bool {
-        self.field_attr_info
+        self.fields_info
             .get(&field_name(field))
             .map(|field_info| field_info.hidden)
             .unwrap_or(false)
     }
-
-    fn is_gbuilder(attr: &syn::Attribute) -> bool {
-        if let syn::Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("gbuilder") {
-                return true;
-            }
-        }
-
-        false
-    }
 }
 
-struct StructAttrInfo {
+struct StructInfo {
     name: syn::Ident,
 }
 
-impl Parse for StructAttrInfo {
+impl Parse for StructInfo {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let beginning_span = input.span();
         let mut name;
@@ -367,12 +277,12 @@ impl Parse for StructAttrInfo {
     }
 }
 
-struct FieldAttrInfo {
+struct FieldInfo {
     hidden: bool,
     default: Option<DefaultAssignment>,
 }
 
-impl Parse for FieldAttrInfo {
+impl Parse for FieldInfo {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut hidden = false;
         let mut default = None;
@@ -403,37 +313,4 @@ impl Parse for FieldAttrInfo {
 
         Ok(Self { default, hidden })
     }
-}
-
-fn wrap_by_option(ty: syn::Type) -> syn::Type {
-    use proc_macro2::Span;
-    use syn::PathSegment;
-
-    syn::Type::Path(syn::TypePath {
-        qself: None,
-        path: syn::Path {
-            leading_colon: None,
-            segments: <Punctuated<PathSegment, Token![::]>>::from_iter(vec![
-                PathSegment {
-                    ident: Ident::new("std", Span::call_site()),
-                    arguments: syn::PathArguments::None,
-                },
-                PathSegment {
-                    ident: Ident::new("option", Span::call_site()),
-                    arguments: syn::PathArguments::None,
-                },
-                PathSegment {
-                    ident: Ident::new("Option", Span::call_site()),
-                    arguments: syn::PathArguments::AngleBracketed(
-                        syn::AngleBracketedGenericArguments {
-                            colon2_token: None,
-                            lt_token: Token![<](Span::call_site()),
-                            args: Punctuated::from_iter(vec![GenericArgument::Type(ty)]),
-                            gt_token: Token![>](Span::call_site()),
-                        },
-                    ),
-                },
-            ]),
-        },
-    })
 }

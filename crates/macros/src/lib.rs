@@ -15,7 +15,7 @@ macro_rules! propagate_err {
 
 pub(crate) use propagate_err;
 
-#[proc_macro_derive(ConfigProperty, attributes(property_name, cfg_prop))]
+#[proc_macro_derive(ConfigProperty, attributes(cfg_prop))]
 pub fn config_property(item: TokenStream) -> TokenStream {
     config_property::make_derive(item)
 }

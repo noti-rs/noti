@@ -12,34 +12,41 @@ use crate::{
 };
 
 public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(name(DisplayConfig), derive(Debug))]
-    struct TomlDisplayConfig {
-        layout: Option<Layout>,
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(TomlDisplayConfig), derive(Debug, Deserialize, Default, Clone))]
+    struct DisplayConfig {
+        layout: Layout,
 
-        theme: Option<String>,
+        theme: String,
 
-        #[cfg_prop(use_type(ImageProperty), mergeable)]
-        image: Option<TomlImageProperty>,
+        #[cfg_prop(use_type(TomlImageProperty), mergeable)]
+        image: ImageProperty,
 
-        padding: Option<Spacing>,
-        #[cfg_prop(use_type(Border), mergeable)]
-        border: Option<TomlBorder>,
+        padding: Spacing,
 
-        #[cfg_prop(temporary, mergeable)]
-        text: Option<TomlTextProperty>,
+        #[cfg_prop(use_type(TomlBorder), mergeable)]
+        border: Border,
 
-        #[cfg_prop(inherits(field = text), use_type(TextProperty), default(TomlTextProperty::default_title()), mergeable)]
-        title: Option<TomlTextProperty>,
+        #[cfg_prop(
+            also_from(name = text, mergeable),
+            use_type(TomlTextProperty),
+            default(TomlTextProperty::default_title()),
+            mergeable
+        )]
+        title: TextProperty,
 
-        #[cfg_prop(inherits(field = text), use_type(TextProperty), mergeable)]
-        body: Option<TomlTextProperty>,
+        #[cfg_prop(
+            also_from(name = text, mergeable),
+            use_type(TomlTextProperty),
+            mergeable
+        )]
+        body: TextProperty,
 
         #[cfg_prop(default(true))]
-        markup: Option<bool>,
+        markup: bool,
 
         #[cfg_prop(default(Timeout::new(0)))]
-        timeout: Option<Timeout>,
+        timeout: Timeout,
     }
 }
 
@@ -76,30 +83,23 @@ impl From<String> for Layout {
 }
 
 public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(
-        name(ImageProperty),
-        derive(GenericBuilder, Debug, Clone),
-        attributes(#[gbuilder(name(GBuilderImageProperty))])
-    )]
-    struct TomlImageProperty {
-        #[cfg_prop(
-            default(64),
-            attributes(#[gbuilder(default(64))])
-        )]
-        max_size: Option<u16>,
+    #[derive(ConfigProperty, GenericBuilder, Debug, Clone)]
+    #[cfg_prop(name(TomlImageProperty), derive(Debug, Clone, Default, Deserialize))]
+    #[gbuilder(name(GBuilderImageProperty))]
+    struct ImageProperty {
+        #[cfg_prop(default(64))]
+        #[gbuilder(default(64))]
+        max_size: u16,
 
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        rounding: Option<u16>,
+        #[cfg_prop(default(0))]
+        #[gbuilder(default(0))]
+        rounding: u16,
 
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        margin: Option<Spacing>,
+        #[gbuilder(default)]
+        margin: Spacing,
 
-        #[cfg_prop(attributes(#[gbuilder(default)]))]
-        resizing_method: Option<ResizingMethod>,
+        #[gbuilder(default)]
+        resizing_method: ResizingMethod,
     }
 }
 
@@ -158,24 +158,17 @@ impl TryFrom<shared::value::Value> for ResizingMethod {
 }
 
 public! {
-    #[derive(ConfigProperty, Debug, Deserialize, Default, Clone)]
-    #[cfg_prop(
-        name(Border),
-        derive(GenericBuilder, Debug, Clone, Default),
-        attributes(#[gbuilder(name(GBuilderBorder))])
-    )]
-    struct TomlBorder {
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        size: Option<u8>,
+    #[derive(ConfigProperty, GenericBuilder, Debug, Default, Clone)]
+    #[cfg_prop(name(TomlBorder), derive(Debug, Clone, Default, Deserialize))]
+    #[gbuilder(name(GBuilderBorder))]
+    struct Border {
+        #[cfg_prop(default(0))]
+        #[gbuilder(default(0))]
+        size: u8,
 
-        #[cfg_prop(
-            default(0),
-            attributes(#[gbuilder(default(0))])
-        )]
-        radius: Option<u8>,
+        #[cfg_prop(default(0))]
+        #[gbuilder(default(0))]
+        radius: u8,
     }
 }
 
