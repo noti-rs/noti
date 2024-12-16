@@ -124,7 +124,6 @@ impl Structure {
         attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
     ) {
         let Structure {
-            attributes,
             visibility,
             struct_token,
             name,
@@ -133,7 +132,6 @@ impl Structure {
             ..
         } = self;
 
-        let attributes: Vec<&syn::Attribute> = attributes.iter().collect();
         let derive_info = attribute_info
             .struct_info
             .derive_info
@@ -141,7 +139,6 @@ impl Structure {
             .map(|derive_info| derive_info.to_token_stream())
             .unwrap_or_default();
         quote! {
-            #(#attributes)*
             #derive_info
             #visibility #struct_token #name
         }
@@ -152,6 +149,7 @@ impl Structure {
             fields = fields
                 .into_iter()
                 .map(|mut field| {
+                    field.attrs.clear();
                     field.ty = wrap_by_option(field.ty);
                     field
                 })
