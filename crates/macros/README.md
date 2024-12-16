@@ -22,12 +22,9 @@ The `ConfigProperty` is powerful, allowing having temporary config variables,
 inherit them into another variable, use correct type, set default values and
 add the way to merge. Here below we listed possible actions with a bit explanation:
 
-- `temporary` - these config variables appears only in config file and uses for
-  ease of declaring values. These values should be moved into other config
-  variables as secondary if the main value is not set.
-
-- `inherits` - auxilliary action for `temporary` fields. It can tell which config
-  variables to use to inherit as secondary value.
+- `also_from` - adds another temporary field from which the value can be acheived.
+  It can be helpful if you want to provide another way to set value for several fields
+  like temporary 'text' property for 'title' and 'body' together.
 
 - `mergeable` - marks that field can be merged with the same field from other
   instance of the same structure.
@@ -37,17 +34,19 @@ add the way to merge. Here below we listed possible actions with a bit explanati
 - And the last, `use_type`. It was added because of the way by which macro works.
 
 To use them, you should just put into attribute `cfg_prop` keywords that described
-above (e.g. `#[cfg_prop(temporary, default)]`). Here is the format of attribute for
-each action:
+above (e.g. `#[cfg_prop(also_from(name = field_name), default)]`). Here is the format of
+attribute for each action:
 
-- `#[cfg_prop(temporary)]`
+- `#[cfg_prop(also_from(name = field_name))]` where `field_name` should be distinct
+  from existing field names. And the field type should be same if you want set the same
+  `field_name` for some fields. Also you can enable `mergeable` option for this field,
+  like `source_field.merge(field_name)`, using the addition:
+  `#[cfg_prop(also_from(name = field_name, mergeable))]`
 
-- `#[cfg_prop(inherits(field = field_name))]` where `field_name` should be vaild
-
-  and picked from original type.
 - `#[cfg_prop(mergeable)]`
 
 - For `default` there are 3 ways to do it:
+
   - `#[cfg_prop(default)]` - uses `Default` trait.
   - `#[cfg_prop(default(path = path::to::function))]` - uses path to function (and
     don't call the function).
@@ -58,34 +57,38 @@ each action:
 - `#[cfg_prop(use_type(SpecificType))]` where `SpecificType` should be valid and
   have the trait `From<OriginFieldType> for SpecificType`.
 
+> [!NOTE]
+> The ConfigProperty macro will try to use default values, even if you didn't attach the 
+> `#[cfg_prop(default)]` attribute. It is because need to unwrap `Option<T>` types by
+> default values if there is no stored value.
+
 ### Usage
 
 Choose or write a struct to which you want to attach the `ConfigProperty` macro.
-This struct should have only fields with types that wrapped by `Option<T>` type.
-Let's lookup an example below:
+This struct shuold be as clear as possible. If it can be default value instead of
+`Option<T>` type, use it. Let's lookup an example below:
 
 ```rust
 #[derive(ConfigProperty)]
-#[cfg_prop(name(Config))]
-struct DirtyConfig {
-    #[cfg_prop(temporary)]
-    temporary_value: Option<String>,
+#[cfg_prop(name(DirtyConfig))]
+struct Config {
+    #[cfg_prop(also_from(name = temporary_value), default)]
+    helpful_value: String,
 
-    #[cfg_prop(inherits(field = temporary_value), default)]
-    helpful_value: Option<String>,
+    // temporary_value: Option<String> will be created in new struct
 
-    #[cfg_prop(use_type(Subconfig), mergeable)]
-    complex_value: Option<DirtySubconfig>,
+    #[cfg_prop(use_type(DirtySubconfig), mergeable)]
+    complex_value: Subconfig,
 }
 
 #[derive(ConfigProperty)]
-#[cfg_prop(name(Subconfig))]
-struct DirtySubconfig {
-    #[cfg_prop(default(crate::path::to::default_simple_value))]
-    simple_value: Option<i32>,
+#[cfg_prop(name(DirtySubconfig))]
+struct Subconfig {
+    #[cfg_prop(default(path = crate::path::to::default_simple_value))]
+    simple_value: i32,
 
     #[cfg_prop(default(EnumType::Variant))]
-    enum_value: Option<EnumType>
+    enum_value: EnumType
 }
 
 // This function should be reachable
@@ -97,26 +100,22 @@ macro. Firstly, you see `cfg_prop` macro attribute that uses to define propertie
 The `#[cfg_prop(name(StructName))]` is important and you always should to set it.
 It will produce new struct which have a big differences.
 
-As I mentioned above, you should wrap all field types by `Option<T>` and it was
-intentional because the new struct will have **unwrapped** field types. And it
-means that result struct will be filled with some data.
-
 For better understanding imagine that new created structs are mirrored to original
-structs but in a cleaner way. And these new structs are more convenient to use in
-other packages because you don't need anymore check is there a config value or not.
-With new struct creates some methods for original type:
+structs but with a lot of boilerplate code. And these new structs are more convenient
+to use for deserializing data that can be in various form and it should be sustainable.
+For new struct creates `impl`s:
 
 - `fn merge(self, other: Option<Self>) -> Self` - merges the current structure with
   other structures by filling empty config values. It's very helpful if provides the
   same structure but from various sources, and need to fill up with secondary or
   default values.
 
-- `fn unwrap_or_default(self) -> OtherType` where `OtherType` is new type that
-  creates by macro. Converts the origin struct which contains field types that
-  wrapped by `Option<T>` to new type by unwrapping field values and filling default
-  values into them.
+- `fn unwrap_or_default(self) -> OriginalType` where `OriginalType` is original type
+  to which the derive macro was attached. Converts the derived struct which contains
+  field types that wrapped by `Option<T>` to original type by unwrapping field values
+  and filling default values into them.
 
-Also creates the single `From<OriginalStruct> for DerivedStruct` trait in which just
+Also creates the single `From<DerivedStruct> for OriginalStruct` trait in which just
 calls `unwrap_or_default` method that described above.
 
 ## GenericBuilder
