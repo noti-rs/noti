@@ -83,7 +83,7 @@ where
         else {
             return Err(syn::Error::new(
                 proc_macro2::Span::call_site(),
-                format!("Expected #[{attribute_name}()] as outer attribute but it isn't provided"),
+                format!("Expected #[{attribute_name}(name(StructName))] as outer attribute but it isn't provided"),
             ));
         };
         let struct_info = syn::parse2(attribute_tokens(outer_attribute, attribute_name)?)?;
@@ -136,7 +136,14 @@ pub(crate) enum DefaultAssignment {
 impl Parse for DefaultAssignment {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         Ok(if input.peek(Ident::peek_any) && input.peek2(Token![=]) {
-            let _ = input.parse::<syn::Ident>()?;
+            let ident = input.parse::<syn::Ident>()?;
+            if ident != "path" {
+                return Err(syn::Error::new(
+                    ident.span(),
+                    format!("Expected 'path' for function path, but given {ident}"),
+                ));
+            }
+
             let _ = input.parse::<Token![=]>()?;
             DefaultAssignment::FunctionCall(input.parse()?)
         } else {

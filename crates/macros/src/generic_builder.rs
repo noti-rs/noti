@@ -200,10 +200,10 @@ impl Structure {
                 {
                     match default_assignment {
                         DefaultAssignment::Expression(expr) => {
-                            quote! { .unwrap_or(#expr) }.to_tokens(&mut line)
+                            quote! { .unwrap_or_else(|| #expr) }.to_tokens(&mut line)
                         }
                         DefaultAssignment::FunctionCall(function_path) => {
-                            quote! { .unwrap_or(#function_path()) }.to_tokens(&mut line)
+                            quote! { .unwrap_or_else(#function_path) }.to_tokens(&mut line)
                         }
                         DefaultAssignment::DefaultCall => {
                             quote! { .unwrap_or_default() }.to_tokens(&mut line);
