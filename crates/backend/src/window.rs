@@ -298,8 +298,8 @@ impl Window {
 
     pub(super) fn reset_timeouts(&mut self) {
         self.banners
-            .iter_mut()
-            .for_each(|(_, banner)| banner.reset_timeout());
+            .values_mut()
+            .for_each(BannerRect::reset_timeout);
     }
 
     pub(super) fn handle_click(&mut self, config: &Config) -> Vec<RendererMessage> {

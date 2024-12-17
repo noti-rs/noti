@@ -38,21 +38,7 @@ impl Renderer {
 
         debug!("Renderer: Running");
         loop {
-            // self.window_manager.reset_timeouts().ok();//
-            while let Some(IdleState::Resumed) = self
-                .idle_manager
-                .idle_notifier
-                .as_ref()
-                .unwrap()
-                .get_idle_state()
-            {
-                self.idle_manager
-                    .event_queue
-                    .as_mut()
-                    .unwrap()
-                    .blocking_dispatch(&mut self.idle_manager.idle_notifier.as_mut().unwrap())
-                    .ok();
-            }
+            self.handle_idle_state()?;
 
             while let Ok(message) = self.channel.try_recv_from_server() {
                 match message {
@@ -114,6 +100,20 @@ impl Renderer {
             std::thread::sleep(Duration::from_millis(50));
             std::hint::spin_loop();
         }
+    }
+
+    fn handle_idle_state(&mut self) -> anyhow::Result<()> {
+        let mut state = self.idle_manager.get_idle_state();
+        while let Some(IdleState::Idled) = state {
+            self.idle_manager.blocking_dispatch()?;
+            state = self.idle_manager.get_idle_state();
+
+            if let Some(IdleState::Resumed) = state {
+                self.window_manager.reset_timeouts().ok();
+            }
+        }
+
+        Ok(())
     }
 
     fn update_config(&mut self) -> anyhow::Result<()> {

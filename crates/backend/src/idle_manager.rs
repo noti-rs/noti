@@ -40,4 +40,18 @@ impl IdleManager {
 
         Ok(idle_manager)
     }
+
+    pub(crate) fn get_idle_state(&self) -> Option<&IdleState> {
+        self.idle_notifier
+            .as_ref()
+            .and_then(IdleNotifier::get_idle_state)
+    }
+
+    pub(crate) fn blocking_dispatch(&mut self) -> anyhow::Result<()> {
+        if let Some(event_queue) = self.event_queue.as_mut() {
+            event_queue.blocking_dispatch(self.idle_notifier.as_mut().unwrap())?;
+        }
+
+        Ok(())
+    }
 }
