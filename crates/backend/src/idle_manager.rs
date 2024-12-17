@@ -30,7 +30,7 @@ impl IdleManager {
 
         display.get_registry(&qhandle, ());
 
-        let idle_notifier = IdleNotifier::init(&config)?;
+        let idle_notifier = IdleNotifier::init(config)?;
 
         let idle_manager = Self {
             event_queue: Some(event_queue),
