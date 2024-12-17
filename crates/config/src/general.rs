@@ -28,8 +28,35 @@ public! {
         #[cfg_prop(default(0))]
         limit: u8,
 
-        #[cfg_prop(default(5000))]
-        idle_threshold: u16,
+        idle_threshold: IdleThreshold,
+    }
+}
+
+public! {
+    #[derive(Debug, Deserialize, Clone)]
+    #[serde(from = "String")]
+    struct IdleThreshold {
+        duration: u32,
+    }
+}
+
+impl From<String> for IdleThreshold {
+    fn from(duration_str: String) -> Self {
+        humantime::parse_duration(&duration_str)
+            .map(|duration| IdleThreshold {
+                duration: duration.as_millis() as u32,
+            })
+            .unwrap_or_default()
+    }
+}
+
+impl Default for IdleThreshold {
+    fn default() -> Self {
+        IdleThreshold {
+            duration: humantime::parse_duration("5 min")
+                .expect("The default duration must be valid")
+                .as_millis() as u32,
+        }
     }
 }
 

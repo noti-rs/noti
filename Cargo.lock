@@ -578,6 +578,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dbus",
+ "humantime",
  "inotify 0.10.2",
  "log",
  "macros",

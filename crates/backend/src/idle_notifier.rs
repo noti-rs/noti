@@ -15,7 +15,7 @@ use wayland_protocols::ext::idle_notify::v1::client::{
 
 pub struct IdleNotifier {
     seat: Option<WlSeat>,
-    threshold: u16,
+    threshold: u32,
     idle_state: Option<IdleState>,
 }
 
@@ -26,7 +26,7 @@ pub enum IdleState {
 
 impl IdleNotifier {
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
-        let threshold = config.general().idle_threshold;
+        let threshold = config.general().idle_threshold.duration;
         let idle_notifier = Self {
             seat: None,
             idle_state: None,
@@ -68,12 +68,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for IdleNotifier {
                     debug!("Idle Notifier: Bound the ext_idle_notifier_v1");
 
                     if let Some(seat) = state.seat.as_ref() {
-                        idle_notifier.get_idle_notification(
-                            state.threshold as u32,
-                            seat,
-                            qhandle,
-                            (),
-                        );
+                        idle_notifier.get_idle_notification(state.threshold, seat, qhandle, ());
                     }
                 }
                 _ => (),
@@ -94,9 +89,11 @@ impl Dispatch<ExtIdleNotificationV1, ()> for IdleNotifier {
         match event {
             ext_idle_notification_v1::Event::Idled => {
                 state.idle_state = Some(IdleState::Idled);
+                debug!("Idle Notifier: Idled");
             }
             ext_idle_notification_v1::Event::Resumed => {
                 state.idle_state = Some(IdleState::Resumed);
+                debug!("Idle Notifier: Resumed");
             }
             _ => (),
         }
