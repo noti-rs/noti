@@ -164,8 +164,9 @@ impl Structure {
         target_type: &syn::Ident,
         attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
     ) -> syn::Result<()> {
-        let fn_merge = self.build_fn_merge(attribute_info)?;
-        let fn_unwrap_or_default = self.build_fn_unwrap_or_default(target_type, attribute_info)?;
+        let fn_merge = self.build_fn_merge(attribute_info);
+        let fn_merge_temporary_fields = self.build_fn_merge_temporary_fields(attribute_info);
+        let fn_unwrap_or_default = self.build_fn_unwrap_or_default(target_type, attribute_info);
 
         let impl_from_to_target = self.build_impl_from_to_target(target_type);
 
@@ -173,6 +174,7 @@ impl Structure {
         quote! {
             impl #ident {
                 #fn_merge
+                #fn_merge_temporary_fields
                 #fn_unwrap_or_default
             }
 
@@ -186,7 +188,7 @@ impl Structure {
     fn build_fn_merge(
         &self,
         attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
-    ) -> syn::Result<proc_macro2::TokenStream> {
+    ) -> proc_macro2::TokenStream {
         let field_idents: Punctuated<&syn::Ident, Token![,]> = self
             .fields
             .iter()
@@ -200,7 +202,11 @@ impl Structure {
                 let ident = field.ident.as_ref().expect("Must be a named field");
                 let mut line = quote! { #ident: #ident };
 
-                if attribute_info.is_mergeable_field(field) {
+                if attribute_info.is_mergeable_field(field)
+                    || attribute_info
+                        .field_info_for_temporary_field(field)
+                        .is_some_and(|also_from_field| also_from_field.mergeable)
+                {
                     line = quote! { #line.map(|#ident| #ident.merge(other.#ident.clone())) };
                 }
 
@@ -208,7 +214,7 @@ impl Structure {
             })
             .collect();
 
-        Ok(quote! {
+        quote! {
             pub fn merge(self, other: Option<Self>) -> Self {
                 let Some(other) = other else {
                     return self;
@@ -219,14 +225,46 @@ impl Structure {
                     #init_members
                 }
             }
-        })
+        }
+    }
+
+    fn build_fn_merge_temporary_fields(
+        &self,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
+    ) -> proc_macro2::TokenStream {
+        let body: Punctuated<proc_macro2::TokenStream, Token![;]> = self
+            .fields
+            .iter()
+            .flat_map(|field| {
+                let field_ident = field.ident.as_ref().expect("Fields should be named");
+                attribute_info
+                    .fields_info
+                    .get(&field_name(field))
+                    .and_then(|field_info| field_info.also_from_field.as_ref())
+                    .map(|AlsoFromField { ident, mergeable }| {
+                        let mut line = quote! { self.#field_ident = self.#field_ident.clone() };
+
+                        if *mergeable {
+                            line = quote! { #line.map(|value| value.merge(self.#ident.clone())) }
+                        }
+
+                        quote! { #line.or(self.#ident.clone()) }
+                    })
+            })
+            .collect();
+
+        quote! {
+            pub fn merge_temporary_fields(&mut self) {
+                #body
+            }
+        }
     }
 
     fn build_fn_unwrap_or_default(
         &self,
         target_type: &syn::Ident,
         attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
-    ) -> syn::Result<proc_macro2::TokenStream> {
+    ) -> proc_macro2::TokenStream {
         let field_idents: Punctuated<&syn::Ident, Token![,]> = self
             .fields
             .iter()
@@ -276,14 +314,14 @@ impl Structure {
             })
             .collect();
 
-        Ok(quote! {
+        quote! {
             pub fn unwrap_or_default(self) -> #target_type {
                 let Self { #field_idents } = self;
                 #target_type {
                     #init_members
                 }
             }
-        })
+        }
     }
 
     fn build_impl_from_to_target(&self, target_type: &syn::Ident) -> proc_macro2::TokenStream {
@@ -299,13 +337,22 @@ impl Structure {
 }
 
 impl AttributeInfo<StructInfo, FieldInfo> {
+    fn field_info_for_temporary_field(&self, field: &syn::Field) -> Option<&AlsoFromField> {
+        self.fields_info
+            .values()
+            .find(|field_info| {
+                field_info
+                    .also_from_field
+                    .as_ref()
+                    .is_some_and(|also_from_field| {
+                        Some(&also_from_field.ident) == field.ident.as_ref()
+                    })
+            })
+            .and_then(|field_info| field_info.also_from_field.as_ref())
+    }
+
     fn is_temporary_field(&self, field: &syn::Field) -> bool {
-        self.fields_info.values().any(|field_info| {
-            field_info
-                .also_from_field
-                .as_ref()
-                .is_some_and(|also_from_field| Some(&also_from_field.ident) == field.ident.as_ref())
-        })
+        self.field_info_for_temporary_field(field).is_some()
     }
 
     fn is_mergeable_field(&self, field: &syn::Field) -> bool {
