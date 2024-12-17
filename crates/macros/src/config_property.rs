@@ -200,7 +200,11 @@ impl Structure {
                 let ident = field.ident.as_ref().expect("Must be a named field");
                 let mut line = quote! { #ident: #ident };
 
-                if attribute_info.is_mergeable_field(field) {
+                if attribute_info.is_mergeable_field(field)
+                    || attribute_info
+                        .field_info_for_temporary_field(field)
+                        .is_some_and(|also_from_field| also_from_field.mergeable)
+                {
                     line = quote! { #line.map(|#ident| #ident.merge(other.#ident.clone())) };
                 }
 
@@ -299,13 +303,22 @@ impl Structure {
 }
 
 impl AttributeInfo<StructInfo, FieldInfo> {
+    fn field_info_for_temporary_field(&self, field: &syn::Field) -> Option<&AlsoFromField> {
+        self.fields_info
+            .values()
+            .find(|field_info| {
+                field_info
+                    .also_from_field
+                    .as_ref()
+                    .is_some_and(|also_from_field| {
+                        Some(&also_from_field.ident) == field.ident.as_ref()
+                    })
+            })
+            .and_then(|field_info| field_info.also_from_field.as_ref())
+    }
+
     fn is_temporary_field(&self, field: &syn::Field) -> bool {
-        self.fields_info.values().any(|field_info| {
-            field_info
-                .also_from_field
-                .as_ref()
-                .is_some_and(|also_from_field| Some(&also_from_field.ident) == field.ident.as_ref())
-        })
+        self.field_info_for_temporary_field(field).is_some()
     }
 
     fn is_mergeable_field(&self, field: &syn::Field) -> bool {
