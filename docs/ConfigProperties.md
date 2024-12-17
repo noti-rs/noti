@@ -24,14 +24,14 @@ Before of all properties, need to understand a few primitive type. The complex t
 | `String` | A string. Usually it used as enumeration                                                                                                                                                                             |
 | `[..]`   | Array containing various type. Used as tuple                                                                                                                                                                         |
 | `Color`  | The hex value which is started by hashtag (#) and wrapped by doubled quotes (defines as string). It can have three, six or eight symbols which represent RGB (including alpha-channel in 8-symboled hex as opacity). |
-| `Path`   | The path to particular file or directory, represented as string (surrounded by double quotes). Currently supported expansion by environment variable and tilde. The relative paths are not yet supported.            |
+| `Path`   | The path to particular file or directory, represented as string (surrounded by double quotes). Currently supported expansion by environment variable, tilde, glob (asterisks) and the relative paths.                |
 
 ## Importing
 
 You can move part of configuration values into other files and import them in
 main configuration files by keyword `use` and accepts array of `Path`s. Accepts
-any valid path except relative, including path that contains environment
-variables, starting with tilde.
+any valid path, including path that contains environment variables,
+starting with tilde, containing glob (asterisks).
 
 The syntax:
 
@@ -41,9 +41,9 @@ use = [
     "~/.config/noti/special_cfg_file.toml",
     "/home/bebra/.config/super-sepcial-file.toml",
 
-    # The relative path is not supported
-    # "./apps/Spotify.toml"
-    # "apps/Spotify.toml"
+    # The relative path also are supported
+    "./apps/Spotify.toml",
+    "apps/Spotify.toml",
 ]
 ```
 

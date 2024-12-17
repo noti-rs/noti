@@ -127,13 +127,14 @@ impl Config {
     }
 
     fn parse(path: Option<&Path>) -> ParsedConfig {
-        let (subwatchers, toml_config) = match TomlConfig::parse_recursive(path) {
-            Some(ParsedTomlConfig {
-                subwatchers,
-                toml_config,
-            }) => (subwatchers, toml_config),
-            None => (vec![], Default::default()),
-        };
+        let (subwatchers, toml_config) =
+            match TomlConfig::parse_recursive(path, &mut std::collections::HashSet::new()) {
+                Some(ParsedTomlConfig {
+                    subwatchers,
+                    toml_config,
+                }) => (subwatchers, toml_config),
+                None => (vec![], Default::default()),
+            };
 
         let TomlConfig {
             general,
@@ -227,22 +228,38 @@ pub struct TomlConfig {
 }
 
 impl TomlConfig {
-    fn parse_recursive(path: Option<&Path>) -> Option<ParsedTomlConfig> {
-        fn expand_path(value: String) -> PathBuf {
-            shellexpand::full(&value)
-                .map(|value| value.into_owned())
-                .unwrap_or(value)
-                .into()
+    fn parse_recursive(
+        path: Option<&Path>,
+        config_tree_path: &mut std::collections::HashSet<PathBuf>,
+    ) -> Option<ParsedTomlConfig> {
+        let config_path = PathBuf::from(path?);
+        if !config_tree_path.insert(config_path.clone()) {
+            error!("Found circular imports! Check the config file {config_path:?}");
+            return None;
         }
 
-        let mut base_toml_config = Self::parse(path)?;
+        let Some(mut base_toml_config) = Self::parse(path?) else {
+            config_tree_path.remove(&config_path);
+            return None;
+        };
+
+        let path_prefix = {
+            let mut config_path = config_path.clone();
+            config_path.pop();
+            config_path
+        };
+
+        if let Some(display) = base_toml_config.display.as_mut() {
+            display.use_relative_path(path_prefix.clone());
+        }
+
         let mut watchers: Vec<FilesWatcher> = base_toml_config
             .imports
             .as_ref()
             .cloned()
             .into_iter()
             .flatten()
-            .map(expand_path)
+            .flat_map(|path| expand_path(path, &path_prefix))
             .map(|path| {
                 FilesWatcher::init(vec![path])
                     .expect("The subconfigs watcher should be initialized")
@@ -252,7 +269,7 @@ impl TomlConfig {
         let subconfigs: Vec<ParsedTomlConfig> = watchers
             .iter()
             .map(FilesWatcher::get_watching_path)
-            .filter_map(TomlConfig::parse_recursive)
+            .filter_map(|path| TomlConfig::parse_recursive(path, config_tree_path))
             .collect();
 
         for ParsedTomlConfig {
@@ -264,14 +281,15 @@ impl TomlConfig {
             base_toml_config = base_toml_config.merge(toml_config);
         }
 
+        config_tree_path.remove(&config_path);
         Some(ParsedTomlConfig {
             subwatchers: watchers,
             toml_config: base_toml_config,
         })
     }
 
-    fn parse(path: Option<&Path>) -> Option<Self> {
-        let content = std::fs::read_to_string(path?).unwrap();
+    fn parse(path: &Path) -> Option<Self> {
+        let content = std::fs::read_to_string(path).unwrap();
         match toml::from_str(&content) {
             Ok(content) => Some(content),
             Err(error) => {
@@ -360,4 +378,42 @@ fn home_config_dir(suffix: &str) -> Option<PathBuf> {
         })
         .map(PathBuf::from)
         .ok()
+}
+
+fn expand_path(value: String, path_prefix: &Path) -> Vec<PathBuf> {
+    let mut expanded_path: PathBuf = shellexpand::full(&value)
+        .map(|value| value.into_owned())
+        .unwrap_or(value)
+        .into();
+
+    if expanded_path.is_relative() {
+        let mut prefix = path_prefix.to_path_buf();
+        prefix.extend(&expanded_path);
+        expanded_path = prefix;
+    }
+
+    let Some(expanded_path_str) = expanded_path.to_str() else {
+        error!("Path {expanded_path:?} is not UTF-8 valid!");
+        return vec![];
+    };
+
+    match glob::glob(expanded_path_str) {
+        Ok(entries) => entries
+            .into_iter()
+            .inspect(|entry| {
+                if let Err(err) = entry {
+                    warn!(
+                        "Failed to read config file at {:?}. Error: {}",
+                        err.path(),
+                        err.error()
+                    );
+                }
+            })
+            .flatten()
+            .collect(),
+        Err(err) => {
+            error!("Failed to parse path glob pattern. Error: {err}");
+            vec![]
+        }
+    }
 }
