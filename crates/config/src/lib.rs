@@ -166,7 +166,10 @@ impl Config {
                 let app_name = app.name.clone();
                 let app_display_config = match app_configs.remove(&app_name) {
                     Some(saved_app_config) => saved_app_config.merge(app.display),
-                    None => app.merge(display.as_ref()).display.unwrap(),
+                    None => match app.display {
+                        Some(display) => display,
+                        None => continue,
+                    },
                 };
                 app_configs.insert(app_name, app_display_config);
             }
@@ -177,14 +180,17 @@ impl Config {
         ParsedConfig {
             subwatchers,
             general: general.unwrap_or_default().into(),
-            display: display.unwrap_or_default().into(),
+            display: display.clone().unwrap_or_default().into(),
             themes: theme_table
                 .into_iter()
                 .map(|(key, value)| (key, value.unwrap_or_default()))
                 .collect(),
             app_configs: app_configs
                 .into_iter()
-                .map(|(key, value)| (key, value.unwrap_or_default()))
+                .map(|(key, mut value)| {
+                    value.merge_temporary_fields();
+                    (key, value.merge(display.clone()).unwrap_or_default())
+                })
                 .collect(),
         }
     }
@@ -324,16 +330,6 @@ struct ParsedTomlConfig {
 pub struct AppConfig {
     pub name: String,
     pub display: Option<TomlDisplayConfig>,
-}
-
-impl AppConfig {
-    fn merge(mut self, other: Option<&TomlDisplayConfig>) -> Self {
-        self.display = self
-            .display
-            .map(|display| display.merge(other.cloned()))
-            .or(other.cloned());
-        self
-    }
 }
 
 fn xdg_config_dir(suffix: &str) -> Option<PathBuf> {
