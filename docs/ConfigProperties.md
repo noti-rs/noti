@@ -154,7 +154,7 @@ Possible values of the `ordering` property name:
 
 When `idle_threshold` is set, notifications will not be removed or expired while the user is idle beyond the configured threshold. Once the user is active again, the timeout resumes.
 This setting accepts a human-readable duration format (e.g., `"15 minutes"`, `"30s"`).
-If set to `"0"`, the idle timeout behavior is disabled.
+If set to `"none"`, the idle timeout behavior is disabled.
 
 > [!WARNING]
 > Changes to the `idle_threshold` setting cannot be applied via hot-reload. To apply a new value, a full restart of the application is required.

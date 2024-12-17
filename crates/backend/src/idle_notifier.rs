@@ -63,6 +63,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for IdleNotifier {
                     debug!("Idle Notifier: Bound the wl_seat");
                 }
                 "ext_idle_notifier_v1" => {
+                    if state.threshold == 0 {
+                        return;
+                    }
+
                     let idle_notifier =
                         registry.bind::<ExtIdleNotifierV1, _, _>(name, version, qhandle, ());
                     debug!("Idle Notifier: Bound the ext_idle_notifier_v1");

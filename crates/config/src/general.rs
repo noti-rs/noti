@@ -42,8 +42,12 @@ public! {
 
 impl From<String> for IdleThreshold {
     fn from(duration_str: String) -> Self {
+        if duration_str.to_lowercase() == "none" {
+            return Self { duration: 0 };
+        }
+
         humantime::parse_duration(&duration_str)
-            .map(|duration| IdleThreshold {
+            .map(|duration| Self {
                 duration: duration.as_millis() as u32,
             })
             .unwrap_or_default()
