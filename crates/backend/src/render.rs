@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use crate::dispatcher::Dispatcher;
 use crate::idle_manager::IdleManager;
+use crate::idle_notifier::IdleState;
 
 use super::internal_messages::{RendererInternalChannel, ServerMessage};
 use config::Config;
@@ -37,6 +38,22 @@ impl Renderer {
 
         debug!("Renderer: Running");
         loop {
+            // self.window_manager.reset_timeouts().ok();//
+            while let Some(IdleState::Resumed) = self
+                .idle_manager
+                .idle_notifier
+                .as_ref()
+                .unwrap()
+                .get_idle_state()
+            {
+                self.idle_manager
+                    .event_queue
+                    .as_mut()
+                    .unwrap()
+                    .blocking_dispatch(&mut self.idle_manager.idle_notifier.as_mut().unwrap())
+                    .ok();
+            }
+
             while let Ok(message) = self.channel.try_recv_from_server() {
                 match message {
                     ServerMessage::ShowNotification(notification) => {

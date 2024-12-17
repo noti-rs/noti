@@ -13,11 +13,15 @@ use wayland_protocols::ext::idle_notify::v1::client::{
     ext_idle_notifier_v1::ExtIdleNotifierV1,
 };
 
-#[derive(Debug)]
 pub struct IdleNotifier {
     seat: Option<WlSeat>,
-    idle_notification: Option<ExtIdleNotificationV1>,
     threshold: u16,
+    idle_state: Option<IdleState>,
+}
+
+pub enum IdleState {
+    Idled,
+    Resumed,
 }
 
 impl IdleNotifier {
@@ -25,11 +29,15 @@ impl IdleNotifier {
         let threshold = config.general().idle_threshold;
         let idle_notifier = Self {
             seat: None,
-            idle_notification: None,
+            idle_state: None,
             threshold,
         };
         debug!("Idle Notifier: Initialized");
         Ok(idle_notifier)
+    }
+
+    pub(crate) fn get_idle_state(&self) -> Option<&IdleState> {
+        self.idle_state.as_ref()
     }
 }
 
@@ -60,12 +68,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for IdleNotifier {
                     debug!("Idle Notifier: Bound the ext_idle_notifier_v1");
 
                     if let Some(seat) = state.seat.as_ref() {
-                        state.idle_notification = Some(idle_notifier.get_idle_notification(
+                        idle_notifier.get_idle_notification(
                             state.threshold as u32,
                             seat,
                             qhandle,
                             (),
-                        ));
+                        );
                     }
                 }
                 _ => (),
@@ -76,7 +84,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for IdleNotifier {
 
 impl Dispatch<ExtIdleNotificationV1, ()> for IdleNotifier {
     fn event(
-        _state: &mut Self,
+        state: &mut Self,
         _idle_notification: &ext_idle_notification_v1::ExtIdleNotificationV1,
         event: <ext_idle_notification_v1::ExtIdleNotificationV1 as wayland_client::Proxy>::Event,
         _data: &(),
@@ -85,10 +93,10 @@ impl Dispatch<ExtIdleNotificationV1, ()> for IdleNotifier {
     ) {
         match event {
             ext_idle_notification_v1::Event::Idled => {
-                debug!("Idle");
+                state.idle_state = Some(IdleState::Idled);
             }
             ext_idle_notification_v1::Event::Resumed => {
-                debug!("Huy");
+                state.idle_state = Some(IdleState::Resumed);
             }
             _ => (),
         }

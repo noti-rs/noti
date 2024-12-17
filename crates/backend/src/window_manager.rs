@@ -222,6 +222,14 @@ impl WindowManager {
         Ok(())
     }
 
+    pub(crate) fn reset_timeouts(&mut self) -> anyhow::Result<()> {
+        if let Some(window) = self.window.as_mut() {
+            window.reset_timeouts();
+        }
+
+        Ok(())
+    }
+
     fn update_window(&mut self, config: &Config) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
             if window.is_empty() {
