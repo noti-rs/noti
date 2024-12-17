@@ -1,12 +1,21 @@
+use crate::{dispatcher::Dispatcher, idle_notifier::IdleNotifier};
 use config::Config;
 use log::debug;
 use wayland_client::{Connection, EventQueue};
 
-use crate::idle_notifier::IdleNotifier;
-
 pub struct IdleManager {
     event_queue: Option<EventQueue<IdleNotifier>>,
     idle_notifier: Option<IdleNotifier>,
+}
+
+impl Dispatcher for IdleManager {
+    type State = IdleNotifier;
+
+    fn get_event_queue_and_state(
+        &mut self,
+    ) -> Option<(&mut EventQueue<Self::State>, &mut Self::State)> {
+        Some((self.event_queue.as_mut()?, self.idle_notifier.as_mut()?))
+    }
 }
 
 impl IdleManager {
@@ -27,35 +36,5 @@ impl IdleManager {
         debug!("Idle Manager: Initialized");
 
         Ok(idle_manager)
-    }
-
-    pub(crate) fn dispatch(&mut self) -> anyhow::Result<bool> {
-        if self.event_queue.is_none() {
-            return Ok(false);
-        }
-
-        let event_queue = unsafe { self.event_queue.as_mut().unwrap_unchecked() };
-        let idle_notifier = unsafe { self.idle_notifier.as_mut().unwrap_unchecked() };
-
-        let dispatched_count = event_queue.dispatch_pending(idle_notifier)?;
-
-        if dispatched_count > 0 {
-            return Ok(true);
-        }
-
-        event_queue.flush()?;
-        let Some(guard) = event_queue.prepare_read() else {
-            return Ok(false);
-        };
-        let Ok(count) = guard.read() else {
-            return Ok(false);
-        };
-
-        Ok(if count > 0 {
-            event_queue.dispatch_pending(idle_notifier)?;
-            true
-        } else {
-            false
-        })
     }
 }

@@ -1,10 +1,11 @@
 use std::time::Duration;
 
+use crate::dispatcher::Dispatcher;
 use crate::idle_manager::IdleManager;
 
 use super::internal_messages::{RendererInternalChannel, ServerMessage};
 use config::Config;
-use log::{debug, info, warn};
+use log::{debug, info};
 use shared::file_watcher::FileState;
 
 use super::window_manager::WindowManager;
