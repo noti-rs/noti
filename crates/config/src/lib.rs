@@ -393,7 +393,7 @@ fn expand_path(value: String, path_prefix: &Path) -> Vec<PathBuf> {
     }
 
     let Some(expanded_path_str) = expanded_path.to_str() else {
-        warn!("Path {expanded_path:?} is not UTF-8 valid!");
+        error!("Path {expanded_path:?} is not UTF-8 valid!");
         return vec![];
     };
 
@@ -412,7 +412,7 @@ fn expand_path(value: String, path_prefix: &Path) -> Vec<PathBuf> {
             .flatten()
             .collect(),
         Err(err) => {
-            warn!("Failed to parse path glob pattern. Error: {err}");
+            error!("Failed to parse path glob pattern. Error: {err}");
             vec![]
         }
     }
