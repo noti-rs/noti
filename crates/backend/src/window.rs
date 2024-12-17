@@ -288,7 +288,7 @@ impl Window {
 
     pub(super) fn handle_hover(&mut self, config: &Config) {
         if let Some(index) = self.get_hovered_banner(config) {
-            self.banners[&index].update_timeout();
+            self.banners[&index].reset_timeout();
 
             // INFO: because of every tracking pointer position, it emits very frequently and it's
             // annoying. So moved to 'TRACE' level for specific situations.

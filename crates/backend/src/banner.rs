@@ -53,12 +53,10 @@ impl BannerRect {
         &self.created_at
     }
 
-    pub(crate) fn update_timeout(&mut self) {
+    pub(crate) fn reset_timeout(&mut self) {
         self.created_at = time::Instant::now();
 
-        // INFO: because of every tracking pointer position, it emits very frequently and it's
-        // annoying. So moved to 'TRACE' level for specific situations.
-        trace!("Banner (id={}): Updated timeout", self.data.id);
+        trace!("Banner (id={}): Timeout reset", self.data.id);
     }
 
     pub(crate) fn update_data(&mut self, notification: Notification) {
