@@ -50,6 +50,17 @@ public! {
     }
 }
 
+impl TomlDisplayConfig {
+    pub(super) fn use_relative_path(&mut self, mut prefix: PathBuf) {
+        if let Some(Layout::FromPath { ref mut path_buf }) = self.layout.as_mut() {
+            if path_buf.is_relative() {
+                prefix.extend(&*path_buf);
+                *path_buf = prefix;
+            }
+        };
+    }
+}
+
 #[derive(Deserialize, Debug, Default, Clone)]
 #[serde(from = "String")]
 pub enum Layout {
