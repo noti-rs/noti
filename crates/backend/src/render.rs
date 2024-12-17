@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+use crate::dispatcher::Dispatcher;
+use crate::idle_manager::IdleManager;
+use crate::idle_notifier::IdleState;
+
 use super::internal_messages::{RendererInternalChannel, ServerMessage};
 use config::Config;
 use log::{debug, info};
@@ -10,6 +14,7 @@ use super::window_manager::WindowManager;
 pub(crate) struct Renderer {
     config: Config,
     window_manager: WindowManager,
+    idle_manager: IdleManager,
     channel: RendererInternalChannel,
 }
 
@@ -20,6 +25,7 @@ impl Renderer {
     ) -> anyhow::Result<Self> {
         Ok(Self {
             window_manager: WindowManager::init(&config)?,
+            idle_manager: IdleManager::init(&config)?,
             channel: renderer_internal_channel,
             config,
         })
@@ -32,6 +38,8 @@ impl Renderer {
 
         debug!("Renderer: Running");
         loop {
+            self.handle_idle_state()?;
+
             while let Ok(message) = self.channel.try_recv_from_server() {
                 match message {
                     ServerMessage::ShowNotification(notification) => {
@@ -67,6 +75,8 @@ impl Renderer {
             self.window_manager.handle_actions(&self.config)?;
             self.window_manager.dispatch()?;
 
+            self.idle_manager.dispatch()?;
+
             {
                 match self.config.check_updates() {
                     FileState::Updated => {
@@ -90,6 +100,20 @@ impl Renderer {
             std::thread::sleep(Duration::from_millis(50));
             std::hint::spin_loop();
         }
+    }
+
+    fn handle_idle_state(&mut self) -> anyhow::Result<()> {
+        let mut state = self.idle_manager.get_idle_state();
+        while let Some(IdleState::Idled) = state {
+            self.idle_manager.blocking_dispatch()?;
+            state = self.idle_manager.get_idle_state();
+
+            if let Some(IdleState::Resumed) = state {
+                self.window_manager.reset_timeouts().ok();
+            }
+        }
+
+        Ok(())
     }
 
     fn update_config(&mut self) -> anyhow::Result<()> {

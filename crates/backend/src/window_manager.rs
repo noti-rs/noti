@@ -5,6 +5,7 @@ use shared::cached_data::CachedData;
 use wayland_client::{Connection, EventQueue, QueueHandle};
 
 use crate::cache::CachedLayout;
+use crate::dispatcher::Dispatcher;
 
 use super::internal_messages::RendererMessage;
 use config::Config;
@@ -25,6 +26,16 @@ pub(crate) struct WindowManager {
     events: Vec<RendererMessage>,
 
     notification_queue: VecDeque<Notification>,
+}
+
+impl Dispatcher for WindowManager {
+    type State = Window;
+
+    fn get_event_queue_and_state(
+        &mut self,
+    ) -> Option<(&mut EventQueue<Self::State>, &mut Self::State)> {
+        Some((self.event_queue.as_mut()?, self.window.as_mut()?))
+    }
 }
 
 impl WindowManager {
@@ -211,34 +222,12 @@ impl WindowManager {
         Ok(())
     }
 
-    pub(crate) fn dispatch(&mut self) -> anyhow::Result<bool> {
-        if self.event_queue.is_none() {
-            return Ok(false);
+    pub(crate) fn reset_timeouts(&mut self) -> anyhow::Result<()> {
+        if let Some(window) = self.window.as_mut() {
+            window.reset_timeouts();
         }
 
-        let event_queue = unsafe { self.event_queue.as_mut().unwrap_unchecked() };
-        let window = unsafe { self.window.as_mut().unwrap_unchecked() };
-
-        let dispatched_count = event_queue.dispatch_pending(window)?;
-
-        if dispatched_count > 0 {
-            return Ok(true);
-        }
-
-        event_queue.flush()?;
-        let Some(guard) = event_queue.prepare_read() else {
-            return Ok(false);
-        };
-        let Ok(count) = guard.read() else {
-            return Ok(false);
-        };
-
-        Ok(if count > 0 {
-            event_queue.dispatch_pending(window)?;
-            true
-        } else {
-            false
-        })
+        Ok(())
     }
 
     fn update_window(&mut self, config: &Config) -> anyhow::Result<()> {

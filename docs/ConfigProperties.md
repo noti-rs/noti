@@ -84,15 +84,16 @@ to go to through from the first one to the last one.
 
 The 'general' word means that it applies to application or all banners together. Here a table of possible general properties and below we'll go through all properties.
 
-| Property name | Description                                         | Type                  | Default value |
-| :------------ | :-------------------------------------------------- | :-------------------- | :-----------: |
-| `font`        | [See desc](#font)                                   | `String`              |  "Noto Sans"  |
-| `width`       | The width of banner frame.                          | `u16`                 |      300      |
-| `height`      | The height of banner frame.                         | `u16`                 |      150      |
-| `anchor`      | [See desc](#anchor)                                 | `String`              |  "top right"  |
-| `gap`         | The space size between two banners. Measures in px. | `u8`                  |      10       |
-| `offset`      | [See desc](#offset)                                 | `[u8, u8]`            |    [0, 0]     |
-| `sorting`     | [See desc](#sorting)                                | `String` or `Sorting` |   "default"   |
+| Property name    | Description                                         | Type                  | Default value |
+| :--------------- | :-------------------------------------------------- | :-------------------- | :-----------: |
+| `font`           | [See desc](#font)                                   | `String`              |  "Noto Sans"  |
+| `width`          | The width of banner frame.                          | `u16`                 |      300      |
+| `height`         | The height of banner frame.                         | `u16`                 |      150      |
+| `anchor`         | [See desc](#anchor)                                 | `String`              |  "top right"  |
+| `gap`            | The space size between two banners. Measures in px. | `u8`                  |      10       |
+| `offset`         | [See desc](#offset)                                 | `[u8, u8]`            |    [0, 0]     |
+| `sorting`        | [See desc](#sorting)                                | `String` or `Sorting` |   "default"   |
+| `idle_threshold` | [See desc](#idle-threshold)                         | `String`              |    "5 sec"    |
 
 ### Font
 
@@ -148,6 +149,15 @@ Possible values of the `ordering` property name:
 
 - "ascending" (also possible short name "asc")
 - "descending" (also possible short name "desc")
+
+### Idle Threshold
+
+When `idle_threshold` is set, notifications will not be removed or expired while the user is idle beyond the configured threshold. Once the user is active again, the timeout resumes.
+This setting accepts a human-readable duration format (e.g., `"15 minutes"`, `"30s"`).
+If set to `"none"`, the idle timeout behavior is disabled.
+
+> [!WARNING]
+> Changes to the `idle_threshold` setting cannot be applied via hot-reload. To apply a new value, a full restart of the application is required.
 
 ---
 
