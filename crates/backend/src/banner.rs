@@ -2,13 +2,14 @@ use std::{path::PathBuf, time};
 
 use config::{
     display::{Border, DisplayConfig},
+    theme::Colors,
     Config,
 };
 use dbus::notification::Notification;
 use log::{debug, trace};
 
 use render::{
-    color::Bgra,
+    color::{Bgra, Color},
     drawer::Drawer,
     font::FontCollection,
     types::RectSize,
@@ -87,15 +88,18 @@ impl BannerRect {
         );
 
         let display = config.display_by_app(&self.data.app_name);
-        let mut drawer = Drawer::new(Bgra::new(), rect_size.clone());
+        let colors = config
+            .theme_by_app(&self.data.app_name)
+            .by_urgency(&self.data.hints.urgency);
+        let mut drawer = Drawer::new(Color::Single(Bgra::new()), rect_size.clone());
 
         let mut layout = match &display.layout {
-            config::display::Layout::Default => Self::default_layout(display),
+            config::display::Layout::Default => Self::default_layout(display, colors),
             config::display::Layout::FromPath { path_buf } => cached_layouts
                 .get(path_buf)
                 .and_then(CachedLayout::layout)
                 .cloned()
-                .unwrap_or_else(|| Self::default_layout(display)),
+                .unwrap_or_else(|| Self::default_layout(display, colors)),
         };
 
         layout.compile(
@@ -115,10 +119,11 @@ impl BannerRect {
         debug!("Banner (id={}): Complete draw", self.data.id);
     }
 
-    fn default_layout(display_config: &DisplayConfig) -> Widget {
+    fn default_layout(display_config: &DisplayConfig, colors: &Colors) -> Widget {
         FlexContainerBuilder::default()
             .spacing(display_config.padding.clone())
             .border(display_config.border.clone())
+            .background_color(colors.background.clone().into())
             .direction(widget::Direction::Horizontal)
             .alignment(Alignment::new(Position::Start, Position::Center))
             .children(vec![

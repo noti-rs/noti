@@ -4,7 +4,7 @@ use shared::{error::ConversionError, value::TryFromValue};
 
 use crate::{
     border::{Border, BorderBuilder},
-    color::Bgra,
+    color::{Bgra, Color},
     drawer::Drawer,
     types::{Offset, RectSize},
 };
@@ -19,9 +19,9 @@ pub struct FlexContainer {
     #[gbuilder(hidden, default(None))]
     rect_size: Option<RectSize>,
 
-    #[builder(private, setter(skip))]
-    #[gbuilder(hidden, default(Bgra::new()))]
-    background_color: Bgra,
+    #[builder(default)]
+    #[gbuilder(default(Bgra::new().into()))]
+    background_color: Color,
 
     #[builder(default = "usize::MAX")]
     #[gbuilder(default(usize::MAX))]
@@ -64,11 +64,10 @@ impl FlexContainer {
         let colors = &configuration
             .theme
             .by_urgency(&configuration.notification.hints.urgency);
-        self.background_color = Bgra::from(&colors.background);
 
         self.compiled_border = Some(
             BorderBuilder::default()
-                .color((&colors.border).into())
+                .color(colors.border.clone().into())
                 .frame_width(rect_size.width)
                 .frame_height(rect_size.height)
                 .size(self.border.size)
@@ -180,7 +179,17 @@ impl Draw for FlexContainer {
             );
         };
 
-        let mut subdrawer = Drawer::new(self.background_color, rect_size.clone());
+        let mut subdrawer = if !self.background_color.is_transparent() {
+            Drawer::new(self.background_color.clone(), rect_size.clone())
+        } else {
+            Drawer::new(Bgra::new().into(), RectSize::new(0, 0))
+        };
+
+        let (picked_drawer, base_offset) = if self.background_color.is_transparent() {
+            (&mut *drawer, *offset)
+        } else {
+            (&mut subdrawer, Offset::no_offset())
+        };
 
         rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
         let mut plane = FlexContainerPlane::new(rect_size, &self.direction);
@@ -214,17 +223,19 @@ impl Draw for FlexContainer {
                     child.len_by_direction(&self.direction.orthogonalize()),
                 );
 
-            child.draw_with_offset(&plane.as_offset(), &mut subdrawer);
+            child.draw_with_offset(&(plane.as_offset() + base_offset), picked_drawer);
 
             plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
             plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset;
         });
 
         if let Some(compiled_border) = self.compiled_border.as_ref() {
-            compiled_border.draw_with_offset(&Offset::no_offset(), &mut subdrawer);
+            compiled_border.draw_with_offset(&base_offset, picked_drawer);
         }
 
-        drawer.draw_area(offset, subdrawer);
+        if !self.background_color.is_transparent() {
+            drawer.draw_area(offset, subdrawer);
+        }
     }
 }
 

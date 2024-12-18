@@ -21,7 +21,7 @@ pub use flex_container::{
 pub use image::{GBuilderWImage, WImage};
 pub use text::{GBuilderWText, WText, WTextKind};
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Coverage(pub f32);
 
 #[derive(Clone)]

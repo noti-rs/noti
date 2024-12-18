@@ -114,7 +114,7 @@ impl Draw for WImage {
         }
 
         // INFO: The ImageProperty initializes with Image so we can calmly unwrap
-        let offset = Offset::from(&self.property.margin) + offset.clone();
+        let offset = Offset::from(&self.property.margin) + *offset;
         self.content.draw_with_offset(&offset, drawer);
     }
 }

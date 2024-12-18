@@ -1,5 +1,5 @@
 use crate::{
-    color::Bgra,
+    color::{Bgra, Color},
     types::{Offset, RectSize},
     widget::{Coverage, DrawColor},
 };
@@ -10,11 +10,27 @@ pub struct Drawer {
 }
 
 impl Drawer {
-    pub fn new(color: Bgra, size: RectSize) -> Self {
-        Self {
-            data: vec![color; size.area()],
-            size,
-        }
+    pub fn new(color: Color, size: RectSize) -> Self {
+        let data =
+            match color {
+                Color::Single(bgra) => vec![bgra; size.area()],
+                Color::LinearGradient(gradient) => {
+                    let mut data = Vec::with_capacity(size.area());
+
+                    for y in (0..size.height).rev() {
+                        for x in 0..size.width {
+                            data.push(gradient.color_at(
+                                x as f32 / size.width as f32,
+                                y as f32 / size.height as f32,
+                            ))
+                        }
+                    }
+
+                    data
+                }
+            };
+
+        Self { data, size }
     }
 
     pub fn draw_area(&mut self, offset: &Offset, mut subdrawer: Drawer) {
@@ -23,7 +39,7 @@ impl Drawer {
         // we reachd x3 drawing speed. So I've [jarkz] decided to only make it more readable
         // and leave it with descriptoin.
         //
-        // WARNING: this code may work not correct in custom border drawing!
+        // WARNING: this code may work not correct in custom border drawing and with gradients!
         //
         // Let's pick this table:
         // +-+-+-+-+-+-+-+-+-+

@@ -4,7 +4,7 @@ use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 use config::display::{ImageProperty, ResizingMethod};
 use dbus::image::ImageData;
 
-use crate::{drawer::Drawer, types::RectSize};
+use crate::{color::Color, drawer::Drawer, types::RectSize};
 
 use super::{
     border::{Border, BorderBuilder},
@@ -320,7 +320,7 @@ impl Image {
 
     fn border_with_rounding(width: i32, height: i32, rounding_radius: u16) -> Border {
         BorderBuilder::default()
-            .color(Bgra::new())
+            .color(Color::default())
             .size(0_usize)
             .radius(rounding_radius)
             .frame_width(width as usize)

@@ -269,7 +269,7 @@ impl TextRect {
 
 impl Draw for TextRect {
     fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
-        let offset = Offset::from(&self.margin) + offset.clone();
+        let offset = Offset::from(&self.margin) + *offset;
 
         self.lines
             .iter()
@@ -451,7 +451,7 @@ impl Draw for LineRect {
             ),
         };
 
-        let mut offset = offset.clone() + Offset::new(x, self.y_offset);
+        let mut offset = *offset + Offset::new(x, self.y_offset);
 
         self.words.iter().for_each(|word| {
             word.draw_with_offset(&offset, drawer);

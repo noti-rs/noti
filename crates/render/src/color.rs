@@ -1,8 +1,152 @@
-use std::ops::{Mul, MulAssign};
+use std::{
+    f32::consts::{FRAC_PI_2, FRAC_PI_4, PI},
+    ops::{Mul, MulAssign},
+};
 
-use config::color::Color;
+use config::color::{Color as CfgColor, LinearGradient as CfgLinearGradient, Rgba as CfgRgba};
+use shared::value::TryFromValue;
 
 use super::widget::Coverage;
+
+#[derive(Clone)]
+pub enum Color {
+    LinearGradient(LinearGradient),
+    Single(Bgra),
+}
+
+impl Color {
+    pub fn is_transparent(&self) -> bool {
+        matches!(self, Color::Single(bgra) if bgra.is_transparent())
+    }
+}
+
+impl From<LinearGradient> for Color {
+    fn from(value: LinearGradient) -> Self {
+        Color::LinearGradient(value)
+    }
+}
+
+impl From<Bgra> for Color {
+    fn from(value: Bgra) -> Self {
+        Color::Single(value)
+    }
+}
+
+impl From<CfgColor> for Color {
+    fn from(value: CfgColor) -> Self {
+        match value {
+            CfgColor::Rgba(rgba) => Bgra::from(rgba).into(),
+            CfgColor::LinearGradient(linear_gradient) => {
+                LinearGradient::from(linear_gradient).into()
+            }
+        }
+    }
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Color::Single(Bgra::new())
+    }
+}
+
+impl TryFromValue for Color {}
+
+#[derive(Clone)]
+pub struct LinearGradient {
+    _angle: f32,
+    grad_vector: [f32; 2],
+    doubled_norm: f32,
+    colors: Vec<Bgra>,
+    segment_per_color: f32,
+}
+
+impl LinearGradient {
+    /// 3π/4
+    const FRAC_3_PI_4: f32 = FRAC_PI_2 + FRAC_PI_4;
+
+    pub fn new(mut angle: u16, mut colors: Vec<CfgRgba>) -> Self {
+        if angle >= 360 {
+            angle = angle - (angle / 360) * 360;
+        }
+
+        if angle >= 180 {
+            colors.reverse();
+            angle -= 180
+        }
+
+        let angle = (angle as f32).to_radians();
+
+        let grad_vector = match angle {
+            x @ 0.0..=FRAC_PI_4 => [1.0, x.tan()],
+            x @ FRAC_PI_4..FRAC_PI_2 => [1.0 / x.tan(), 1.0],
+            FRAC_PI_2 => [0.0, 1.0],
+            x @ FRAC_PI_2..=Self::FRAC_3_PI_4 => [1.0 / x.tan(), 1.0],
+            x @ Self::FRAC_3_PI_4..=PI => [-1.0, -x.tan()],
+            _ => unreachable!(),
+        };
+
+        let norm = (grad_vector[0] * grad_vector[0] + grad_vector[1] * grad_vector[1]).sqrt();
+        let doubled_norm = norm * norm;
+        let segment_per_color = 1.0 / (colors.len() - 1) as f32;
+
+        Self {
+            _angle: angle,
+            grad_vector,
+            doubled_norm,
+            colors: colors.into_iter().map(Bgra::from).collect(),
+            segment_per_color,
+        }
+    }
+
+    /// Returns a concrete color from square color space of linear gradient considering the angle.
+    ///
+    /// Note that the 'x' and 'y' values which you pass into function should be in range
+    /// $0.0 <= x, y <= 1.0$
+    /// The other values will be cause of incorrect color!
+    ///
+    /// To acheive it you can simply divide x or y position by frame width or hegiht respectively.
+    pub fn color_at(&self, mut x: f32, y: f32) -> Bgra {
+        if self._angle > FRAC_PI_2 {
+            x -= 1.0
+        }
+
+        let position_on_grad_line = self.grad_vector.dot_product(&[x, y]) / self.doubled_norm;
+        let left_color_index = (position_on_grad_line / self.segment_per_color).floor() as usize;
+
+        if left_color_index == self.colors.len() - 1 {
+            return self.colors[left_color_index];
+        }
+
+        let difference = (position_on_grad_line
+            - (left_color_index as f32) * self.segment_per_color)
+            / self.segment_per_color;
+
+        self.colors[left_color_index + 1]
+            .linearly_interpolate(&self.colors[left_color_index], difference)
+    }
+}
+
+impl From<CfgLinearGradient> for LinearGradient {
+    fn from(value: CfgLinearGradient) -> Self {
+        LinearGradient::new(value.angle, value.colors)
+    }
+}
+
+trait DotProduct<T>
+where
+    T: std::ops::Mul<Output = T> + std::ops::Add<Output = T>,
+{
+    fn dot_product(&self, other: &Self) -> T;
+}
+
+impl<T> DotProduct<T> for [T; 2]
+where
+    T: std::ops::Mul<Output = T> + std::ops::Add<Output = T> + Copy,
+{
+    fn dot_product(&self, other: &Self) -> T {
+        self[0] * other[0] + self[1] * other[1]
+    }
+}
 
 #[derive(Clone, Copy, Default)]
 pub struct Bgra {
@@ -82,14 +226,32 @@ impl From<&[f32; 4]> for Bgra {
     }
 }
 
-impl From<&Color> for Bgra {
+impl From<&CfgRgba> for Bgra {
     fn from(
-        &Color {
+        &CfgRgba {
             red,
             green,
             blue,
             alpha,
-        }: &Color,
+        }: &CfgRgba,
+    ) -> Self {
+        Bgra {
+            blue: blue as f32 / 255.0,
+            green: green as f32 / 255.0,
+            red: red as f32 / 255.0,
+            alpha: alpha as f32 / 255.0,
+        }
+    }
+}
+
+impl From<CfgRgba> for Bgra {
+    fn from(
+        CfgRgba {
+            red,
+            green,
+            blue,
+            alpha,
+        }: CfgRgba,
     ) -> Self {
         Bgra {
             blue: blue as f32 / 255.0,
@@ -155,6 +317,17 @@ impl MulAssign<f32> for Bgra {
 impl MulAssign<Coverage> for Bgra {
     fn mul_assign(&mut self, Coverage(val): Coverage) {
         *self *= val
+    }
+}
+
+impl TryFromValue for Bgra {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        <CfgRgba as TryFrom<_>>::try_from(value.clone())
+            .map(Into::into)
+            .map_err(|_| shared::error::ConversionError::InvalidValue {
+                expected: "#RGB, #RRGGBB or #RRGGBBAA",
+                actual: value,
+            })
     }
 }
 
