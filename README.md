@@ -9,6 +9,10 @@
 - **Per-App Styling**: Unique notification styles for different applications
 - **Modern Design**: Clean, minimalist approach to desktop notifications
 
+## :rocket: Getting Started
+
+The best way to get started with **Noti** is the [book](https://noti-rs.github.io/notibook).
+
 ## :inbox_tray: Installation
 
 ### 1. Install via Cargo (Recommended)
@@ -36,19 +40,6 @@ cargo build --release
 # Install the binary
 cargo install --path .
 ```
-
-## :rocket: Running Noti
-
-### Manual Startup
-
-```bash
-# Start Noti daemon
-noti run
-```
-
-### Automatic Startup
-
-For detailed instructions on setting up automatic startup with `systemd`, please refer to the [Autostart Guide](docs/Autostart.md).
 
 ## :hammer_and_wrench: Configuration
 
@@ -124,14 +115,14 @@ line_spacing = 5
 ```
 
 > [!TIP]
-> Check [ConfigProperties.md](docs/ConfigProperties.md) for comprehensive configuration options!
+> Check the [book](https://noti-rs.github.io/notibook) for comprehensive configuration guide!
 
 ### :wrench: Custom layout
 
-Want to change the banner layout? The `Noti` application provide **custom** layout by
-our new brand file type `noti` with extension `.noti`!
+Want to change the banner layout?
+The `Noti` application offers a customizable layout using our file format, `.noti`!
 
-**Sample of layout configuration**:
+Example of layout configuration:
 
 ```noti
 FlexContainer(
@@ -173,7 +164,7 @@ write:
 display.layout = "path/to/your/File.noti"
 ```
 
-Read more about it [here](./docs/Filetype.md)!
+Read more about it [here](https://noti-rs.github.io/notibook/CustomLayout.html)!
 
 ## :bug: Troubleshooting
 
