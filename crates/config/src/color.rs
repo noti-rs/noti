@@ -130,7 +130,7 @@ impl TryFrom<String> for Rgba {
                 red: u8::from_str_radix(next_slice(&mut data)?, BASE)?,
                 green: u8::from_str_radix(next_slice(&mut data)?, BASE)?,
                 blue: u8::from_str_radix(next_slice(&mut data)?, BASE)?,
-                alpha: if data.len() == 8 {
+                alpha: if value[1..].len() == 8 {
                     u8::from_str_radix(next_slice(&mut data)?, BASE)?
                 } else {
                     255
