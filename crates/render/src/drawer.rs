@@ -33,13 +33,31 @@ impl Drawer {
         Self { data, size }
     }
 
-    pub fn draw_area(&mut self, offset: &Offset, mut subdrawer: Drawer) {
+    pub fn draw_area(&mut self, offset: &Offset, subdrawer: Drawer) {
+        for x in 0..subdrawer.size.width {
+            for y in 0..subdrawer.size.height {
+                let color = subdrawer.get_color_at(x, y);
+                self.draw_color(
+                    offset.x + x,
+                    offset.y + y,
+                    if color.is_transparent() {
+                        DrawColor::Overlay(*color)
+                    } else {
+                        DrawColor::Replace(*color)
+                    },
+                );
+            }
+        }
+    }
+
+    pub fn draw_area_optimized(&mut self, offset: &Offset, mut subdrawer: Drawer) {
         // INFO: this is specific code and it may be hard to read because the main goal is
         // drawing optimization. Previously just single loop was used but after optimization
         // we reachd x3 drawing speed. So I've [jarkz] decided to only make it more readable
         // and leave it with descriptoin.
         //
-        // WARNING: this code may work not correct in custom border drawing and with gradients!
+        // WARNING: this code may work not correct in custom border drawing and with
+        // semi-transparent gradients!
         //
         // Let's pick this table:
         // +-+-+-+-+-+-+-+-+-+
@@ -84,19 +102,15 @@ impl Drawer {
                                 .zip(end_x..subdrawer.size.width),
                         )
                         .for_each(|(color, x)| {
-                            if color.is_transparent() {
-                                self.draw_color(
-                                    offset.x + x,
-                                    offset.y + y,
-                                    DrawColor::Overlay(color.to_owned()),
-                                )
-                            } else {
-                                self.draw_color(
-                                    offset.x + x,
-                                    offset.y + y,
-                                    DrawColor::Replace(color.to_owned()),
-                                );
-                            }
+                            self.draw_color(
+                                offset.x + x,
+                                offset.y + y,
+                                if color.is_transparent() {
+                                    DrawColor::Overlay(*color)
+                                } else {
+                                    DrawColor::Replace(*color)
+                                },
+                            )
                         });
 
                     let line_in_parent = self.abs_pos_at(offset.x + start_x, offset.y + y)

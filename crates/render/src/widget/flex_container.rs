@@ -234,7 +234,10 @@ impl Draw for FlexContainer {
         }
 
         if !self.background_color.is_transparent() {
-            drawer.draw_area(offset, subdrawer);
+            match &self.background_color {
+                Color::Single(_) => drawer.draw_area_optimized(offset, subdrawer),
+                Color::LinearGradient(_) => drawer.draw_area(offset, subdrawer),
+            }
         }
     }
 }

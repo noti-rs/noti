@@ -16,7 +16,12 @@ pub enum Color {
 
 impl Color {
     pub fn is_transparent(&self) -> bool {
-        matches!(self, Color::Single(bgra) if bgra.is_transparent())
+        match self {
+            Color::LinearGradient(linear_gradient) => {
+                linear_gradient.colors.iter().all(Bgra::is_transparent)
+            }
+            Color::Single(bgra) => bgra.is_transparent(),
+        }
     }
 }
 
@@ -53,7 +58,7 @@ impl TryFromValue for Color {}
 
 #[derive(Clone)]
 pub struct LinearGradient {
-    _angle: f32,
+    angle: f32,
     grad_vector: [f32; 2],
     doubled_norm: f32,
     colors: Vec<Bgra>,
@@ -90,7 +95,7 @@ impl LinearGradient {
         let segment_per_color = 1.0 / (colors.len() - 1) as f32;
 
         Self {
-            _angle: angle,
+            angle,
             grad_vector,
             doubled_norm,
             colors: colors.into_iter().map(Bgra::from).collect(),
@@ -106,7 +111,7 @@ impl LinearGradient {
     ///
     /// To acheive it you can simply divide x or y position by frame width or hegiht respectively.
     pub fn color_at(&self, mut x: f32, y: f32) -> Bgra {
-        if self._angle > FRAC_PI_2 {
+        if self.angle > FRAC_PI_2 {
             x -= 1.0
         }
 
