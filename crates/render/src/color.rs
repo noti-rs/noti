@@ -115,7 +115,16 @@ impl LinearGradient {
             x -= 1.0
         }
 
-        let position_on_grad_line = self.grad_vector.dot_product(&[x, y]) / self.doubled_norm;
+        let mut position_on_grad_line = self.grad_vector.dot_product(&[x, y]) / self.doubled_norm;
+
+        while position_on_grad_line > 1.0 {
+            position_on_grad_line = 1.0 - position_on_grad_line;
+        }
+
+        while position_on_grad_line < 0.0 {
+            position_on_grad_line += 1.0;
+        }
+
         let left_color_index = (position_on_grad_line / self.segment_per_color).floor() as usize;
 
         if left_color_index == self.colors.len() - 1 {
