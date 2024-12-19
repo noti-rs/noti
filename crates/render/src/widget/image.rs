@@ -69,7 +69,7 @@ impl WImage {
                     .iter()
                     .find_map(|size| {
                         freedesktop_icons::lookup(&notification.app_icon)
-                            .with_size(*size as u16)
+                            .with_size(*size)
                             .with_theme(&display_config.theme)
                             .find()
                     })
