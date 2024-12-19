@@ -1,4 +1,4 @@
-use log::{debug, warn};
+use log::{debug, error, warn};
 use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
 
 use config::display::{ImageProperty, ResizingMethod};
@@ -83,6 +83,71 @@ impl Image {
         }
     }
 
+    pub fn from_path(
+        image_path: &std::path::Path,
+        image_property: &ImageProperty,
+        max_size: &RectSize,
+    ) -> Image {
+        let data = match std::fs::read(image_path) {
+            Ok(data) => data,
+            Err(err) => {
+                Self::print_readable_fs_error(err, image_path);
+                return Image::Unknown;
+            }
+        };
+
+        let format = match image::guess_format(&data) {
+            Ok(format) => format,
+            Err(err) => {
+                warn!("Cannot guess the format of image at {image_path:?}. Error: {err}. Maybe it's SVG, trying to parse.");
+                return Self::from_svg(image_path, image_property, max_size);
+            }
+        };
+
+        let image = match image::load_from_memory_with_format(&data, format) {
+            Ok(image) => image,
+            Err(err) => {
+                error!("Cannot laod the image at {image_path:?}. Error: {err}");
+                return Image::Unknown;
+            }
+        };
+
+        let Some((width, height)) = Self::try_fit_into_restricted_space(
+            image.width() as i32,
+            image.height() as i32,
+            image_property,
+            max_size,
+        ) else {
+            warn!("The margins for image is very large! The image will not rendered!");
+            return Image::Unknown;
+        };
+
+        let resized_image = image::imageops::resize(
+            &image,
+            width as u32,
+            height as u32,
+            image_property.resizing_method.to_filter_type(),
+        )
+        .to_vec();
+
+        Image::Exists {
+            data: ImageData {
+                width,
+                height,
+                rowstride: width * 4,
+                has_alpha: true,
+                bits_per_sample: 8,
+                channels: 4,
+                data: resized_image,
+            },
+            border: Some(Self::border_with_rounding(
+                width,
+                height,
+                image_property.rounding,
+            )),
+        }
+    }
+
     pub fn from_raster_glyph_image(
         RasterGlyphImage {
             width,
@@ -150,28 +215,19 @@ impl Image {
         })
     }
 
-    pub fn from_svg(image_path: &str, image_property: &ImageProperty, max_size: &RectSize) -> Self {
-        if image_path.is_empty() {
+    pub fn from_svg(
+        image_path: &std::path::Path,
+        image_property: &ImageProperty,
+        max_size: &RectSize,
+    ) -> Self {
+        if !image_path.is_file() {
             return Image::Unknown;
         }
 
         let data = match std::fs::read(image_path) {
             Ok(data) => data,
             Err(err) => {
-                match err.kind() {
-                    std::io::ErrorKind::NotFound => {
-                        warn!("Not found SVG image in path: {}", image_path)
-                    }
-                    std::io::ErrorKind::PermissionDenied => warn!(
-                        "Permission to read SVG image in path is denied: {}",
-                        image_path
-                    ),
-                    _ => warn!(
-                        "Something wrong happened during reading SVG image in path: {}",
-                        image_path
-                    ),
-                }
-
+                Self::print_readable_fs_error(err, image_path);
                 return Image::Unknown;
             }
         };
@@ -181,13 +237,16 @@ impl Image {
             Err(err) => {
                 match err {
                     resvg::usvg::Error::MalformedGZip => {
-                        warn!("Malformed gzip format of SVG image in path: {}", image_path)
+                        warn!(
+                            "Malformed gzip format of SVG image in path: {:?}",
+                            image_path
+                        )
                     }
                     resvg::usvg::Error::NotAnUtf8Str => warn!(
-                        "The SVG image file contains non-UTF-8 string in path: {}",
+                        "The SVG image file contains non-UTF-8 string in path: {:?}",
                         image_path
                     ),
-                    _ => warn!("Something wrong with SVG image in path: {}", image_path),
+                    _ => warn!("Something wrong with SVG image in path: {:?}", image_path),
                 }
                 return Image::Unknown;
             }
@@ -221,7 +280,7 @@ impl Image {
             &mut pixmap.as_mut(),
         );
 
-        debug!("Image: Created image from svg by path {image_path}");
+        debug!("Image: Created image from svg by path {image_path:?}");
 
         Image::Exists {
             data: ImageData {
@@ -238,6 +297,22 @@ impl Image {
                 height,
                 image_property.rounding,
             )),
+        }
+    }
+
+    fn print_readable_fs_error(error: std::io::Error, image_path: &std::path::Path) {
+        match error.kind() {
+            std::io::ErrorKind::NotFound => {
+                warn!("Not found SVG image in path: {:?}", image_path)
+            }
+            std::io::ErrorKind::PermissionDenied => warn!(
+                "Permission to read SVG image in path is denied: {:?}",
+                image_path
+            ),
+            _ => warn!(
+                "Something wrong happened during reading SVG image in path: {:?}",
+                image_path
+            ),
         }
     }
 
