@@ -250,7 +250,7 @@ impl Border {
 
     fn get_color(&self, x: usize, y: usize) -> Bgra {
         match &self.color {
-            Color::Single(bgra) => *bgra,
+            Color::Fill(bgra) => *bgra,
             Color::LinearGradient(gradient) => gradient.color_at(
                 x as f32 / self.frame_width as f32,
                 y as f32 / self.frame_height as f32,

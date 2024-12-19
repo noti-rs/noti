@@ -13,7 +13,7 @@ impl Drawer {
     pub fn new(color: Color, size: RectSize) -> Self {
         let data =
             match color {
-                Color::Single(bgra) => vec![bgra; size.area()],
+                Color::Fill(bgra) => vec![bgra; size.area()],
                 Color::LinearGradient(gradient) => {
                     let mut data = Vec::with_capacity(size.area());
 

@@ -87,7 +87,7 @@ impl BannerRect {
         );
 
         let display = config.display_by_app(&self.data.app_name);
-        let mut drawer = Drawer::new(Color::Single(Bgra::new()), rect_size.clone());
+        let mut drawer = Drawer::new(Color::Fill(Bgra::new()), rect_size.clone());
 
         let mut layout = match &display.layout {
             config::display::Layout::Default => Self::default_layout(display),

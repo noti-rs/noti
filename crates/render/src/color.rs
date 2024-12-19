@@ -11,7 +11,7 @@ use super::widget::Coverage;
 #[derive(Clone)]
 pub enum Color {
     LinearGradient(LinearGradient),
-    Single(Bgra),
+    Fill(Bgra),
 }
 
 impl Color {
@@ -20,7 +20,7 @@ impl Color {
             Color::LinearGradient(linear_gradient) => {
                 linear_gradient.colors.iter().all(Bgra::is_transparent)
             }
-            Color::Single(bgra) => bgra.is_transparent(),
+            Color::Fill(bgra) => bgra.is_transparent(),
         }
     }
 }
@@ -33,7 +33,7 @@ impl From<LinearGradient> for Color {
 
 impl From<Bgra> for Color {
     fn from(value: Bgra) -> Self {
-        Color::Single(value)
+        Color::Fill(value)
     }
 }
 
@@ -50,7 +50,7 @@ impl From<CfgColor> for Color {
 
 impl Default for Color {
     fn default() -> Self {
-        Color::Single(Bgra::new())
+        Color::Fill(Bgra::new())
     }
 }
 
