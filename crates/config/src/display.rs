@@ -104,7 +104,7 @@ public! {
         theme: String,
 
         #[cfg_prop(default(vec![64, 32]))]
-        size: Vec<u8>,
+        size: Vec<u16>,
     }
 }
 
