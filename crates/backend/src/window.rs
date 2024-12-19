@@ -12,7 +12,6 @@ use std::{
     path::PathBuf,
     rc::Rc,
 };
-
 use wayland_client::{
     delegate_noop,
     protocol::{
@@ -21,6 +20,9 @@ use wayland_client::{
         wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
     },
     Dispatch, QueueHandle, WEnum,
+};
+use wayland_protocols::wp::cursor_shape::v1::client::{
+    wp_cursor_shape_device_v1, wp_cursor_shape_manager_v1,
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1,
@@ -53,6 +55,7 @@ pub(super) struct Window {
 
     configuration_state: ConfigurationState,
     pointer_state: PointerState,
+    cursor_manager: Option<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1>,
 }
 
 pub(super) enum ConfigurationState {
@@ -87,6 +90,7 @@ impl Window {
 
             configuration_state: ConfigurationState::NotConfiured,
             pointer_state: Default::default(),
+            cursor_manager: None,
         }
     }
 
@@ -731,6 +735,18 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Window {
                     state.configuration_state = ConfigurationState::Ready;
                     debug!("Window: Ready to configure")
                 }
+                "wp_cursor_shape_manager_v1" => {
+                    state.cursor_manager = Some(
+                        registry.bind::<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1, _, _>(
+                            name,
+                            version,
+                            qhandle,
+                            (),
+                        ),
+                    );
+
+                    debug!("Window: Bound the wp_cursor_shape_manager_v1");
+                }
                 _ => (),
             }
         }
@@ -744,6 +760,8 @@ delegate_noop!(Window: ignore wl_shm::WlShm);
 delegate_noop!(Window: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(Window: ignore wl_buffer::WlBuffer);
 delegate_noop!(Window: ignore wl_callback::WlCallback);
+delegate_noop!(Window: ignore wp_cursor_shape_manager_v1::WpCursorShapeManagerV1);
+delegate_noop!(Window: ignore wp_cursor_shape_device_v1::WpCursorShapeDeviceV1);
 
 impl Dispatch<wl_seat::WlSeat, ()> for Window {
     fn event(
@@ -769,18 +787,26 @@ impl Dispatch<wl_seat::WlSeat, ()> for Window {
 impl Dispatch<wl_pointer::WlPointer, ()> for Window {
     fn event(
         state: &mut Self,
-        _pointer: &wl_pointer::WlPointer,
+        pointer: &wl_pointer::WlPointer,
         event: <wl_pointer::WlPointer as wayland_client::Proxy>::Event,
         _data: &(),
         _conn: &wayland_client::Connection,
-        _qhandle: &wayland_client::QueueHandle<Self>,
+        qhandle: &wayland_client::QueueHandle<Self>,
     ) {
         match event {
             wl_pointer::Event::Enter {
                 surface_x,
                 surface_y,
+                serial,
                 ..
-            } => state.pointer_state.enter_and_relocate(surface_x, surface_y),
+            } => {
+                if let Some(cursor_manager) = &state.cursor_manager {
+                    let cursor_shape = cursor_manager.get_pointer(pointer, qhandle, ());
+                    cursor_shape.set_shape(serial, wp_cursor_shape_device_v1::Shape::Pointer);
+                }
+
+                state.pointer_state.enter_and_relocate(surface_x, surface_y);
+            }
             wl_pointer::Event::Leave { .. } => state.pointer_state.leave(),
             wl_pointer::Event::Motion {
                 surface_x,
