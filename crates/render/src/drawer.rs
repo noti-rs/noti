@@ -1,5 +1,5 @@
 use crate::{
-    color::Bgra,
+    color::{Bgra, Color},
     types::{Offset, RectSize},
     widget::{Coverage, DrawColor},
 };
@@ -10,20 +10,54 @@ pub struct Drawer {
 }
 
 impl Drawer {
-    pub fn new(color: Bgra, size: RectSize) -> Self {
-        Self {
-            data: vec![color; size.area()],
-            size,
+    pub fn new(color: Color, size: RectSize) -> Self {
+        let data =
+            match color {
+                Color::Fill(bgra) => vec![bgra; size.area()],
+                Color::LinearGradient(gradient) => {
+                    let mut data = Vec::with_capacity(size.area());
+
+                    for y in (0..size.height).rev() {
+                        for x in 0..size.width {
+                            data.push(gradient.color_at(
+                                x as f32 / size.width as f32,
+                                y as f32 / size.height as f32,
+                            ))
+                        }
+                    }
+
+                    data
+                }
+            };
+
+        Self { data, size }
+    }
+
+    pub fn draw_area(&mut self, offset: &Offset, subdrawer: Drawer) {
+        for x in 0..subdrawer.size.width {
+            for y in 0..subdrawer.size.height {
+                let color = subdrawer.get_color_at(x, y);
+                self.draw_color(
+                    offset.x + x,
+                    offset.y + y,
+                    if color.is_transparent() {
+                        DrawColor::Overlay(*color)
+                    } else {
+                        DrawColor::Replace(*color)
+                    },
+                );
+            }
         }
     }
 
-    pub fn draw_area(&mut self, offset: &Offset, mut subdrawer: Drawer) {
+    pub fn draw_area_optimized(&mut self, offset: &Offset, mut subdrawer: Drawer) {
         // INFO: this is specific code and it may be hard to read because the main goal is
         // drawing optimization. Previously just single loop was used but after optimization
         // we reachd x3 drawing speed. So I've [jarkz] decided to only make it more readable
         // and leave it with descriptoin.
         //
-        // WARNING: this code may work not correct in custom border drawing!
+        // WARNING: this code may work not correct in custom border drawing and with
+        // semi-transparent gradients!
         //
         // Let's pick this table:
         // +-+-+-+-+-+-+-+-+-+
@@ -68,19 +102,15 @@ impl Drawer {
                                 .zip(end_x..subdrawer.size.width),
                         )
                         .for_each(|(color, x)| {
-                            if color.is_transparent() {
-                                self.draw_color(
-                                    offset.x + x,
-                                    offset.y + y,
-                                    DrawColor::Overlay(color.to_owned()),
-                                )
-                            } else {
-                                self.draw_color(
-                                    offset.x + x,
-                                    offset.y + y,
-                                    DrawColor::Replace(color.to_owned()),
-                                );
-                            }
+                            self.draw_color(
+                                offset.x + x,
+                                offset.y + y,
+                                if color.is_transparent() {
+                                    DrawColor::Overlay(*color)
+                                } else {
+                                    DrawColor::Replace(*color)
+                                },
+                            )
                         });
 
                     let line_in_parent = self.abs_pos_at(offset.x + start_x, offset.y + y)

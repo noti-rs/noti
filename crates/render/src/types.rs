@@ -55,7 +55,7 @@ impl AddAssign<RectSize> for RectSize {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Offset {
     pub x: usize,
     pub y: usize,
