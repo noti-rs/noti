@@ -19,9 +19,13 @@ pub struct FlexContainer {
     #[gbuilder(hidden, default(None))]
     rect_size: Option<RectSize>,
 
-    #[builder(default)]
-    #[gbuilder(default(Bgra::new().into()))]
+    #[builder(private, default)]
+    #[gbuilder(hidden, default(Bgra::new().into()))]
     background_color: Color,
+
+    #[builder(default = "false")]
+    #[gbuilder(default(false))]
+    transparent_background: bool,
 
     #[builder(default = "usize::MAX")]
     #[gbuilder(default(usize::MAX))]
@@ -65,6 +69,7 @@ impl FlexContainer {
             .theme
             .by_urgency(&configuration.notification.hints.urgency);
 
+        self.background_color = colors.background.clone().into();
         self.compiled_border = Some(
             BorderBuilder::default()
                 .color(colors.border.clone().into())
@@ -179,13 +184,17 @@ impl Draw for FlexContainer {
             );
         };
 
-        let mut subdrawer = if !self.background_color.is_transparent() {
-            Drawer::new(self.background_color.clone(), rect_size.clone())
-        } else {
+        // NOTE: if the background color is transparent or forces to be transparent, no need to use
+        // another layer as new Drawer instance. Instead of this use the current Drawer instance.
+        // It will avoid to use costly methods `draw_area` and `draw_with_offset`.
+        let transparent_bg = self.transparent_background || self.background_color.is_transparent();
+        let mut subdrawer = if transparent_bg {
             Drawer::new(Bgra::new().into(), RectSize::new(0, 0))
+        } else {
+            Drawer::new(self.background_color.clone(), rect_size.clone())
         };
 
-        let (picked_drawer, base_offset) = if self.background_color.is_transparent() {
+        let (picked_drawer, base_offset) = if transparent_bg {
             (&mut *drawer, *offset)
         } else {
             (&mut subdrawer, Offset::no_offset())
@@ -233,7 +242,7 @@ impl Draw for FlexContainer {
             compiled_border.draw_with_offset(&base_offset, picked_drawer);
         }
 
-        if !self.background_color.is_transparent() {
+        if !transparent_bg {
             match &self.background_color {
                 Color::Single(_) => drawer.draw_area_optimized(offset, subdrawer),
                 Color::LinearGradient(_) => drawer.draw_area(offset, subdrawer),
