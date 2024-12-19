@@ -59,8 +59,21 @@ impl WImage {
                     .hints
                     .image_path
                     .as_deref()
-                    .or(Some(notification.app_icon.as_str()))
+                    .map(std::path::Path::new)
                     .map(|svg_path| Image::from_svg(svg_path, &self.property, &rect_size))
+            })
+            .or_else(|| {
+                display_config
+                    .icons
+                    .size
+                    .iter()
+                    .find_map(|size| {
+                        freedesktop_icons::lookup(&notification.app_icon)
+                            .with_size(*size as u16)
+                            .with_theme(&display_config.theme)
+                            .find()
+                    })
+                    .map(|icon_path| Image::from_path(&icon_path, &self.property, &rect_size))
             })
             .unwrap_or(Image::Unknown);
 

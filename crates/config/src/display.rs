@@ -19,6 +19,9 @@ public! {
 
         theme: String,
 
+        #[cfg_prop(use_type(IconInfoProperty), mergeable)]
+        icons: IconInfo,
+
         #[cfg_prop(use_type(TomlImageProperty), mergeable)]
         image: ImageProperty,
 
@@ -90,6 +93,18 @@ impl From<String> for Layout {
                     .unwrap_or(value),
             ),
         }
+    }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(IconInfoProperty), derive(Debug, Deserialize, Clone, Default))]
+    struct IconInfo {
+        #[cfg_prop(default("Adwaita".to_string()))]
+        theme: String,
+
+        #[cfg_prop(default(vec![64, 32]))]
+        size: Vec<u8>,
     }
 }
 
