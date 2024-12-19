@@ -8,7 +8,7 @@ use dbus::notification::Notification;
 use log::{debug, trace};
 
 use render::{
-    color::Bgra,
+    color::{Bgra, Color},
     drawer::Drawer,
     font::FontCollection,
     types::RectSize,
@@ -87,7 +87,7 @@ impl BannerRect {
         );
 
         let display = config.display_by_app(&self.data.app_name);
-        let mut drawer = Drawer::new(Bgra::new(), rect_size.clone());
+        let mut drawer = Drawer::new(Color::Fill(Bgra::new()), rect_size.clone());
 
         let mut layout = match &display.layout {
             config::display::Layout::Default => Self::default_layout(display),
@@ -128,6 +128,7 @@ impl BannerRect {
                     .border(Border::default())
                     .direction(widget::Direction::Vertical)
                     .alignment(Alignment::new(Position::Center, Position::Center))
+                    .transparent_background(true)
                     .children(vec![
                         WText::new(WTextKind::Title).into(),
                         WText::new(WTextKind::Body).into(),
