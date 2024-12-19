@@ -16,7 +16,7 @@ filetype = { path = "../filetype" }
 
 tempfile = "3.12.0"
 wayland-client = "0.31.5"
-wayland-protocols = { version = "0.32.3", features = ["client", "wayland-client", "staging"] }
+wayland-protocols = { version = "0.32.3", features = ["client", "wayland-client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3.3", features = ["client", "wayland-client"] }
 indexmap = "2.4.0"
 humantime = "2.1.0"
