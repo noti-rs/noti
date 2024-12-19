@@ -4,11 +4,12 @@ use crate::{
 };
 use config::Config;
 use log::debug;
-use wayland_client::{Connection, EventQueue};
+use wayland_client::{Connection, EventQueue, QueueHandle};
 
 pub struct IdleManager {
-    pub event_queue: Option<EventQueue<IdleNotifier>>,
-    pub idle_notifier: Option<IdleNotifier>,
+    event_queue: EventQueue<IdleNotifier>,
+    qhandle: QueueHandle<IdleNotifier>,
+    pub idle_notifier: IdleNotifier,
 }
 
 impl Dispatcher for IdleManager {
@@ -17,7 +18,7 @@ impl Dispatcher for IdleManager {
     fn get_event_queue_and_state(
         &mut self,
     ) -> Option<(&mut EventQueue<Self::State>, &mut Self::State)> {
-        Some((self.event_queue.as_mut()?, self.idle_notifier.as_mut()?))
+        Some((&mut self.event_queue, &mut self.idle_notifier))
     }
 }
 
@@ -33,25 +34,31 @@ impl IdleManager {
         let idle_notifier = IdleNotifier::init(config)?;
 
         let idle_manager = Self {
-            event_queue: Some(event_queue),
-            idle_notifier: Some(idle_notifier),
+            event_queue,
+            qhandle,
+            idle_notifier,
         };
         debug!("Idle Manager: Initialized");
 
         Ok(idle_manager)
     }
 
-    pub(crate) fn get_idle_state(&self) -> Option<&IdleState> {
-        self.idle_notifier
-            .as_ref()
-            .and_then(IdleNotifier::get_idle_state)
+    pub(crate) fn update_by_config(&mut self, config: &Config) {
+        self.idle_notifier.recreate(&self.qhandle, config);
     }
 
-    pub(crate) fn blocking_dispatch(&mut self) -> anyhow::Result<()> {
-        if let Some(event_queue) = self.event_queue.as_mut() {
-            event_queue.blocking_dispatch(self.idle_notifier.as_mut().unwrap())?;
-        }
+    pub(crate) fn reset_idle_state(&mut self) {
+        self.idle_notifier.was_idled = false;
+    }
 
-        Ok(())
+    pub(crate) fn was_idled(&self) -> bool {
+        self.idle_notifier.was_idled
+    }
+
+    pub(crate) fn is_idled(&self) -> bool {
+        self.idle_notifier
+            .idle_state
+            .as_ref()
+            .is_some_and(|state| matches!(state, IdleState::Idled))
     }
 }
