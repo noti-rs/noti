@@ -7,7 +7,7 @@ use wayland_client::{Connection, EventQueue, QueueHandle};
 use crate::cache::CachedLayout;
 use crate::dispatcher::Dispatcher;
 
-use super::internal_messages::RendererMessage;
+use super::internal_messages::BackendMessage;
 use config::Config;
 use dbus::notification::Notification;
 
@@ -23,7 +23,7 @@ pub(crate) struct WindowManager {
     font_collection: Rc<RefCell<FontCollection>>,
     cached_layouts: CachedData<PathBuf, CachedLayout>,
 
-    events: Vec<RendererMessage>,
+    events: Vec<BackendMessage>,
 
     notification_queue: VecDeque<Notification>,
 }
@@ -166,7 +166,7 @@ impl WindowManager {
                 .into_iter()
                 .map(|notification| notification.id)
                 .for_each(|id| {
-                    self.events.push(RendererMessage::ClosedNotification {
+                    self.events.push(BackendMessage::ClosedNotification {
                         id,
                         reason: dbus::actions::ClosingReason::CallCloseNotification,
                     })
@@ -187,7 +187,7 @@ impl WindowManager {
             }
 
             notifications.into_iter().for_each(|notification| {
-                self.events.push(RendererMessage::ClosedNotification {
+                self.events.push(BackendMessage::ClosedNotification {
                     id: notification.id,
                     reason: dbus::actions::ClosingReason::Expired,
                 })
@@ -199,7 +199,7 @@ impl WindowManager {
         Ok(())
     }
 
-    pub(crate) fn pop_event(&mut self) -> Option<RendererMessage> {
+    pub(crate) fn pop_event(&mut self) -> Option<BackendMessage> {
         self.events.pop()
     }
 

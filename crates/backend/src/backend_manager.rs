@@ -4,24 +4,24 @@ use crate::dispatcher::Dispatcher;
 use crate::idle_manager::IdleManager;
 use crate::idle_notifier::IdleState;
 
-use super::internal_messages::{RendererInternalChannel, ServerMessage};
+use super::internal_messages::{BackendChannel, ServerMessage};
 use config::Config;
 use log::{debug, info};
 use shared::file_watcher::FileState;
 
 use super::window_manager::WindowManager;
 
-pub(crate) struct Renderer {
+pub(crate) struct BackendManager {
     config: Config,
     window_manager: WindowManager,
     idle_manager: IdleManager,
-    channel: RendererInternalChannel,
+    channel: BackendChannel,
 }
 
-impl Renderer {
+impl BackendManager {
     pub(crate) fn init(
         config: Config,
-        renderer_internal_channel: RendererInternalChannel,
+        renderer_internal_channel: BackendChannel,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             window_manager: WindowManager::init(&config)?,
@@ -66,15 +66,15 @@ impl Renderer {
                 notifications_to_close.clear();
                 debug!("Renderer: Closed notifications");
             }
+
             self.window_manager.remove_expired(&self.config)?;
+            self.window_manager.handle_actions(&self.config)?;
 
             while let Some(message) = self.window_manager.pop_event() {
                 self.channel.send_to_server(message)?;
             }
 
-            self.window_manager.handle_actions(&self.config)?;
             self.window_manager.dispatch()?;
-
             self.idle_manager.dispatch()?;
 
             {
