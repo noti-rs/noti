@@ -29,7 +29,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use super::internal_messages::RendererMessage;
+use super::internal_messages::BackendMessage;
 use config::{self, Config};
 use dbus::notification::{self, Notification};
 
@@ -306,7 +306,7 @@ impl Window {
             .for_each(BannerRect::reset_timeout);
     }
 
-    pub(super) fn handle_click(&mut self, config: &Config) -> Vec<RendererMessage> {
+    pub(super) fn handle_click(&mut self, config: &Config) -> Vec<BackendMessage> {
         if let PrioritiedPressState::Unpressed = self.pointer_state.press_state {
             return vec![];
         }
@@ -323,7 +323,7 @@ impl Window {
             return self
                 .remove_banners_by_id(&[id])
                 .into_iter()
-                .map(|notification| RendererMessage::ClosedNotification {
+                .map(|notification| BackendMessage::ClosedNotification {
                     id: notification.id,
                     reason: dbus::actions::ClosingReason::DismissedByUser,
                 })

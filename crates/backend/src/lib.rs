@@ -7,13 +7,13 @@ use log::{debug, info, warn};
 use scheduler::Scheduler;
 use tokio::sync::mpsc::unbounded_channel;
 
+mod backend_manager;
 mod banner;
 mod cache;
 mod dispatcher;
 mod idle_manager;
 mod idle_notifier;
 mod internal_messages;
-mod render;
 mod scheduler;
 mod window;
 mod window_manager;
@@ -21,7 +21,7 @@ mod window_manager;
 use dbus::actions::Action;
 use dbus::server::Server;
 
-use render::Renderer;
+use backend_manager::BackendManager;
 
 pub async fn run(config: Config) -> anyhow::Result<()> {
     let (sender, mut receiver) = unbounded_channel();
@@ -32,7 +32,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let (server_internal_channel, renderer_internal_channel) = InternalChannel::new().split();
 
     let backend_thread: thread::JoinHandle<Result<(), anyhow::Error>> = thread::spawn(move || {
-        let mut renderer = Renderer::init(config, renderer_internal_channel)?;
+        let mut renderer = BackendManager::init(config, renderer_internal_channel)?;
         info!("Backend: Renderer initialized");
         renderer.run()
     });
@@ -95,11 +95,11 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             match message {
                 //TODO: add actions for notifications in render module
                 #[allow(unused)]
-                internal_messages::RendererMessage::ActionInvoked {
+                internal_messages::BackendMessage::ActionInvoked {
                     notification_id,
                     action_key,
                 } => todo!(),
-                internal_messages::RendererMessage::ClosedNotification { id, reason } => {
+                internal_messages::BackendMessage::ClosedNotification { id, reason } => {
                     match reason {
                         //INFO: ignore the first one because it always emits in server.
                         dbus::actions::ClosingReason::CallCloseNotification => (),

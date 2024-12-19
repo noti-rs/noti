@@ -2,26 +2,25 @@ use std::time::Duration;
 
 use crate::dispatcher::Dispatcher;
 use crate::idle_manager::IdleManager;
-use crate::idle_notifier::IdleState;
 
-use super::internal_messages::{RendererInternalChannel, ServerMessage};
+use super::internal_messages::{BackendChannel, ServerMessage};
 use config::Config;
 use log::{debug, info};
 use shared::file_watcher::FileState;
 
 use super::window_manager::WindowManager;
 
-pub(crate) struct Renderer {
+pub(crate) struct BackendManager {
     config: Config,
     window_manager: WindowManager,
     idle_manager: IdleManager,
-    channel: RendererInternalChannel,
+    channel: BackendChannel,
 }
 
-impl Renderer {
+impl BackendManager {
     pub(crate) fn init(
         config: Config,
-        renderer_internal_channel: RendererInternalChannel,
+        renderer_internal_channel: BackendChannel,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             window_manager: WindowManager::init(&config)?,
@@ -38,8 +37,6 @@ impl Renderer {
 
         debug!("Renderer: Running");
         loop {
-            self.handle_idle_state()?;
-
             while let Ok(message) = self.channel.try_recv_from_server() {
                 match message {
                     ServerMessage::ShowNotification(notification) => {
@@ -66,15 +63,23 @@ impl Renderer {
                 notifications_to_close.clear();
                 debug!("Renderer: Closed notifications");
             }
-            self.window_manager.remove_expired(&self.config)?;
+
+            if !self.idle_manager.is_idled() {
+                if self.idle_manager.was_idled() {
+                    self.idle_manager.reset_idle_state();
+
+                    self.window_manager.reset_timeouts()?;
+                }
+
+                self.window_manager.remove_expired(&self.config)?;
+                self.window_manager.handle_actions(&self.config)?;
+            }
 
             while let Some(message) = self.window_manager.pop_event() {
                 self.channel.send_to_server(message)?;
             }
 
-            self.window_manager.handle_actions(&self.config)?;
             self.window_manager.dispatch()?;
-
             self.idle_manager.dispatch()?;
 
             {
@@ -102,23 +107,11 @@ impl Renderer {
         }
     }
 
-    fn handle_idle_state(&mut self) -> anyhow::Result<()> {
-        let mut state = self.idle_manager.get_idle_state();
-        while let Some(IdleState::Idled) = state {
-            self.idle_manager.blocking_dispatch()?;
-            state = self.idle_manager.get_idle_state();
-
-            if let Some(IdleState::Resumed) = state {
-                self.window_manager.reset_timeouts().ok();
-            }
-        }
-
-        Ok(())
-    }
-
     fn update_config(&mut self) -> anyhow::Result<()> {
         self.config.update();
         self.window_manager.update_by_config(&self.config)?;
+        self.idle_manager.update_by_config(&self.config);
+        self.window_manager.reset_timeouts()?;
         Ok(())
     }
 }
