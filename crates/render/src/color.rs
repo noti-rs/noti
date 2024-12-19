@@ -69,7 +69,11 @@ impl LinearGradient {
     /// 3π/4
     const FRAC_3_PI_4: f32 = FRAC_PI_2 + FRAC_PI_4;
 
-    pub fn new(mut angle: u16, mut colors: Vec<CfgRgba>) -> Self {
+    pub fn new(mut angle: i16, mut colors: Vec<CfgRgba>) -> Self {
+        if angle < 0 {
+            angle += ((angle / 360) + 1) * 360;
+        }
+
         if angle >= 360 {
             angle = angle - (angle / 360) * 360;
         }
@@ -142,7 +146,7 @@ impl LinearGradient {
 
 impl From<CfgLinearGradient> for LinearGradient {
     fn from(value: CfgLinearGradient) -> Self {
-        LinearGradient::new(value.angle, value.colors)
+        LinearGradient::new(value.degree, value.colors)
     }
 }
 

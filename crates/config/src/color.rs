@@ -1,16 +1,17 @@
 use std::{slice::ChunksExact, str::Chars};
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use serde::Deserialize;
 use shared::value::TryFromValue;
 
 use super::public;
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "mode", rename_all = "kebab-case")]
 pub enum Color {
-    Rgba(Rgba),
     LinearGradient(LinearGradient),
+    #[serde(untagged)]
+    Rgba(Rgba),
 }
 
 impl Color {
@@ -155,37 +156,8 @@ impl TryFromValue for Rgba {
 
 public! {
     #[derive(Debug, Clone, Deserialize)]
-    #[serde(try_from = "Vec<String>")]
     struct LinearGradient {
-        angle: u16,
+        degree: i16,
         colors: Vec<Rgba>,
-    }
-}
-
-impl TryFrom<Vec<String>> for LinearGradient {
-    type Error = anyhow::Error;
-
-    fn try_from(mut value: Vec<String>) -> Result<Self, Self::Error> {
-        if value.len() < 2 {
-            bail!("The length of array must be greater than 2");
-        }
-
-        let degree_str = value.remove(0);
-        if !degree_str.len() < 4 || &degree_str[degree_str.len() - 3..] != "deg" {
-            bail!("The first element of array should be a degree. For example, '15deg'")
-        }
-
-        let mut degree = degree_str[..degree_str.len() - 3].parse::<i16>()?;
-        if degree < 0 {
-            degree += ((degree / 360) + 1) * 360;
-        }
-
-        Ok(Self {
-            angle: degree as u16,
-            colors: value
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<Rgba>, _>>()?,
-        })
     }
 }
