@@ -5,8 +5,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-anyhow = { workspace = true }
-tokio = { workspace = true }
-log = { workspace = true }
-dbus = { workspace = true }
-zbus = { workspace = true }
+dbus.workspace = true
+
+anyhow.workspace = true
+tokio.workspace = true
+log.workspace = true
+zbus.workspace = true

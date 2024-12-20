@@ -5,15 +5,15 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-macros = { path = "../macros" }
-dbus = { workspace = true }
-anyhow = { workspace = true }
-log = { workspace = true }
-shared = { workspace = true }
+dbus.workspace = true
+macros.workspace = true
+shared.workspace = true
 
-inotify = "0.10.2"
+anyhow.workspace = true
+log.workspace = true
+humantime.workspace = true
+
 serde = "1.0.205"
 toml = "0.8.19"
 shellexpand = "3.1.0"
-humantime = "2.1.0"
 glob = "0.3.1"
