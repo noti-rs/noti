@@ -338,10 +338,6 @@ impl LineRect {
         ellipsis: Glyph,
         ellipsize_at: &EllipsizeAt,
     ) -> EllipsizationState {
-        if paragraph_num != self.paragraph_num {
-            last_word.replace(WordRect::new_empty());
-        }
-
         match ellipsize_at {
             EllipsizeAt::Middle => {
                 self.ellipsize_middle(last_word, ellipsis);
@@ -349,6 +345,9 @@ impl LineRect {
             }
             EllipsizeAt::End => {
                 if last_word.is_some() || self.available_space < 0 {
+                    if paragraph_num != self.paragraph_num {
+                        last_word.replace(WordRect::new_empty());
+                    }
                     self.ellipsize_end(ellipsis)
                 } else {
                     EllipsizationState::Complete
