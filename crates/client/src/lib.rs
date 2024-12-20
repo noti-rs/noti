@@ -59,7 +59,8 @@ impl<'a> NotiClient<'a> {
             \ttimeout - {timeout}"
         );
 
-        let notification_id = self.dbus_client
+        let notification_id = self
+            .dbus_client
             .notify(
                 &app_name, id, &icon, &summary, &body, actions, new_hints, timeout,
             )
