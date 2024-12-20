@@ -5,11 +5,11 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-anyhow = { workspace = true }
-tokio = { workspace = true }
-log = { workspace = true }
-zbus = { workspace = true }
+anyhow.workspace = true
+tokio.workspace = true
+log.workspace = true
+zbus.workspace = true
+derive_more.workspace = true
 
-derive_more = { version = "1.0.0", features = ["display"] }
 html-escape = "0.2.13"
 unic-segment = "0.9.0"
