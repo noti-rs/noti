@@ -119,6 +119,8 @@ impl WindowManager {
                 return self.display_all_notifications(config);
             }
 
+            window.replace_by_indices(&mut self.notification_queue, config, &self.cached_layouts);
+
             let current_notifications_count = window.get_current_notifications_count();
             let available_slots = notifications_limit.saturating_sub(current_notifications_count);
 
@@ -138,6 +140,8 @@ impl WindowManager {
 
     fn display_all_notifications(&mut self, config: &Config) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
+            window.replace_by_indices(&mut self.notification_queue, config, &self.cached_layouts);
+
             let notifications_to_display: Vec<Notification> =
                 self.notification_queue.drain(..).collect();
 
