@@ -73,6 +73,14 @@ pub struct SendCommand {
     timeout: i32,
 
     #[arg(
+        short,
+        long,
+        help = "Prints ID",
+        long_help = "Prints the ID of created notification",
+    )]
+    print_id: bool,
+
+    #[arg(
         short = 'A',
         long,
         help = "Actions",
@@ -209,7 +217,7 @@ async fn send(noti: client::NotiClient<'_>, args: SendCommand) -> anyhow::Result
         schedule: args.schedule,
     };
 
-    noti.send_notification(
+    let notification_id = noti.send_notification(
         args.replaces_id,
         args.app_name,
         args.icon,
@@ -220,7 +228,13 @@ async fn send(noti: client::NotiClient<'_>, args: SendCommand) -> anyhow::Result
         args.hints,
         hints_data,
     )
-    .await
+    .await?;
+
+    if args.print_id {
+        print!("{notification_id}")
+    }
+
+    Ok(())
 }
 
 async fn server_info(noti: client::NotiClient<'_>) -> anyhow::Result<()> {

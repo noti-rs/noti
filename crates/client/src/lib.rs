@@ -41,7 +41,7 @@ impl<'a> NotiClient<'a> {
         actions: Vec<String>,
         hints: Vec<String>,
         hints_data: HintsData,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<u32> {
         debug!("Client: Building hints and actions from user prompt");
         let new_hints = build_hints(&hints, hints_data)?;
 
@@ -59,7 +59,7 @@ impl<'a> NotiClient<'a> {
             \ttimeout - {timeout}"
         );
 
-        self.dbus_client
+        let notification_id = self.dbus_client
             .notify(
                 &app_name, id, &icon, &summary, &body, actions, new_hints, timeout,
             )
@@ -67,7 +67,7 @@ impl<'a> NotiClient<'a> {
 
         debug!("Client: Successful send");
 
-        Ok(())
+        Ok(notification_id)
     }
 
     pub async fn get_server_info(&self) -> anyhow::Result<()> {
