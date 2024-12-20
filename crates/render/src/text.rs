@@ -175,6 +175,8 @@ impl TextRect {
     pub fn compile(&mut self, mut rect_size: RectSize) {
         self.rect_size.width = rect_size.width;
         rect_size.shrink_by(&self.margin);
+
+        let mut paragraph_num = 0;
         self.current_paragraph = self.paragraphs.pop_front().unwrap_or_default();
 
         let mut lines = vec![];
@@ -185,6 +187,7 @@ impl TextRect {
             .take(if self.wrap { usize::MAX } else { 1 })
         {
             let mut line = LineRectBuilder::create_empty()
+                .paragraph_num(paragraph_num)
                 .y_offset(y)
                 .available_space(rect_size.width as isize)
                 .spacebar_width(self.spacebar_width)
@@ -217,20 +220,22 @@ impl TextRect {
 
             if self.current_paragraph.is_empty() {
                 self.current_paragraph = self.paragraphs.pop_front().unwrap_or_default();
+                paragraph_num += 1;
             }
         }
 
         self.lines = lines;
-        self.ellipsize();
+        self.ellipsize(paragraph_num);
         self.apply_color();
     }
 
-    fn ellipsize(&mut self) {
+    fn ellipsize(&mut self, paragraph_num: u8) {
         let mut state = self
             .lines
             .last_mut()
             .map(|last_line| {
                 last_line.ellipsize(
+                    paragraph_num,
                     self.current_paragraph.pop_front(),
                     self.ellipsis.clone(),
                     &self.ellipsize_at,
@@ -238,14 +243,23 @@ impl TextRect {
             })
             .unwrap_or_default();
 
-        while let EllipsizationState::Continue(word) = state {
+        while let EllipsizationState::Continue {
+            paragraph_num,
+            last_word,
+        } = state
+        {
             self.lines.pop();
 
             state = self
                 .lines
                 .last_mut()
                 .map(|last_line| {
-                    last_line.ellipsize(word, self.ellipsis.clone(), &self.ellipsize_at)
+                    last_line.ellipsize(
+                        paragraph_num,
+                        last_word,
+                        self.ellipsis.clone(),
+                        &self.ellipsize_at,
+                    )
                 })
                 .unwrap_or_default();
         }
@@ -288,6 +302,7 @@ impl Draw for TextRect {
 #[derive(Builder, Default)]
 #[builder(pattern = "owned")]
 struct LineRect {
+    paragraph_num: u8,
     y_offset: usize,
 
     available_space: isize,
@@ -318,10 +333,15 @@ impl LineRect {
 
     fn ellipsize(
         &mut self,
-        last_word: Option<WordRect>,
+        paragraph_num: u8,
+        mut last_word: Option<WordRect>,
         ellipsis: Glyph,
         ellipsize_at: &EllipsizeAt,
     ) -> EllipsizationState {
+        if paragraph_num != self.paragraph_num {
+            last_word.replace(WordRect::new_empty());
+        }
+
         match ellipsize_at {
             EllipsizeAt::Middle => {
                 self.ellipsize_middle(last_word, ellipsis);
@@ -385,7 +405,10 @@ impl LineRect {
 
     fn ellipsize_end(&mut self, ellipsis: Glyph) -> EllipsizationState {
         if self.words.is_empty() {
-            return EllipsizationState::Continue(Some(WordRect::new_empty()));
+            return EllipsizationState::Continue {
+                paragraph_num: self.paragraph_num,
+                last_word: Some(WordRect::new_empty()),
+            };
         }
 
         if ellipsis.advance_width() as isize <= self.available_space {
@@ -471,7 +494,10 @@ impl Draw for LineRect {
 
 #[derive(Default)]
 enum EllipsizationState {
-    Continue(Option<WordRect>),
+    Continue {
+        paragraph_num: u8,
+        last_word: Option<WordRect>,
+    },
     #[default]
     Complete,
 }
