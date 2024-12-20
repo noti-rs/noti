@@ -20,7 +20,9 @@ use super::{
 
 #[derive(Default)]
 pub struct TextRect {
-    words: VecDeque<WordRect>,
+    paragraphs: VecDeque<VecDeque<WordRect>>,
+    current_paragraph: VecDeque<WordRect>,
+
     lines: Vec<LineRect>,
     wrap: bool,
 
@@ -47,14 +49,23 @@ impl TextRect {
         font_collection: &FontCollection,
     ) -> Self {
         let font_style = base_style.into();
-        let glyph_collection: Vec<Glyph> = string
+        let paragraphs: VecDeque<VecDeque<WordRect>> = string
             .chars()
-            .map(|ch| font_collection.load_glyph_by_style(&font_style, ch, px_size))
+            .chunk_by(|char| *char != '\n')
+            .into_iter()
+            .filter_map(|(matches, chunk)| {
+                matches.then(|| {
+                    chunk
+                        .into_iter()
+                        .map(|ch| font_collection.load_glyph_by_style(&font_style, ch, px_size))
+                        .collect()
+                })
+            })
+            .map(Self::convert_to_words)
             .collect();
 
-        let words = Self::convert_to_words(glyph_collection);
         Self {
-            words,
+            paragraphs,
             wrap: true,
             spacebar_width: Self::get_spacebar_width(font_collection, px_size),
             ellipsis: font_collection.get_ellipsis(px_size),
@@ -76,47 +87,46 @@ impl TextRect {
         let mut current_entities = VecDeque::new();
         let mut current_style = FontStyle::Regular;
 
-        let glyph_collection: Vec<Glyph> = body
-            .chars()
-            .enumerate()
-            .map(|(pos, ch)| {
-                // TODO: need to refactor it with handling the cases, when inputs a image
-                while let Some(entity) = entities.front() {
-                    if entity.offset == pos {
-                        current_style += FontStyle::from(&entity.kind);
-                        // SAFETY: because of it acquires AFTER `while let Some(_)` it guarantee
-                        // that acquired data always valid
-                        current_entities
-                            .push_back(unsafe { entities.pop_front().unwrap_unchecked() });
-                    } else {
-                        break;
-                    }
-                }
+        let mut paragraphs = VecDeque::new();
+        let mut current_paragraph = vec![];
 
-                let glyph = font_collection.load_glyph_by_style(
+        for (position, ch) in body.chars().enumerate() {
+            while let Some(entity) = entities.front() {
+                if entity.offset == position {
+                    current_style += FontStyle::from(&entity.kind);
+                    current_entities.push_back(entities.pop_front().unwrap());
+                } else {
+                    break;
+                }
+            }
+
+            if ch == '\n' {
+                paragraphs.push_back(Self::convert_to_words(current_paragraph));
+                current_paragraph = vec![];
+            } else {
+                current_paragraph.push(font_collection.load_glyph_by_style(
                     &(&base_style + &current_style),
                     ch,
                     px_size,
-                );
+                ))
+            }
 
-                while let Some(entity) = current_entities.front() {
-                    if entity.offset + entity.length <= pos {
-                        // SAFETY: because of it acquires AFTER `while let Some(_)` it guarantee
-                        // that acquired data always valid
-                        let entity = unsafe { current_entities.pop_front().unwrap_unchecked() };
-                        current_style -= FontStyle::from(&entity.kind);
-                    } else {
-                        break;
-                    }
+            while let Some(entity) = current_entities.front() {
+                if entity.offset + entity.length <= position {
+                    let entity = current_entities.pop_front().unwrap();
+                    current_style -= FontStyle::from(&entity.kind);
+                } else {
+                    break;
                 }
+            }
+        }
 
-                glyph
-            })
-            .collect();
+        if !current_paragraph.is_empty() {
+            paragraphs.push_back(Self::convert_to_words(current_paragraph));
+        }
 
-        let words = Self::convert_to_words(glyph_collection);
         Self {
-            words,
+            paragraphs,
             wrap: true,
             spacebar_width: Self::get_spacebar_width(font_collection, px_size),
             ellipsis: font_collection.get_ellipsis(px_size),
@@ -165,6 +175,7 @@ impl TextRect {
     pub fn compile(&mut self, mut rect_size: RectSize) {
         self.rect_size.width = rect_size.width;
         rect_size.shrink_by(&self.margin);
+        self.current_paragraph = self.paragraphs.pop_front().unwrap_or_default();
 
         let mut lines = vec![];
 
@@ -182,7 +193,7 @@ impl TextRect {
                 .build()
                 .expect("Can't create a Line rect from existing components. Please contact with developers with this information.");
 
-            while let Some(word) = self.words.pop_front() {
+            while let Some(word) = self.current_paragraph.pop_front() {
                 line.push_word(word);
 
                 if line.is_overflow() {
@@ -190,18 +201,11 @@ impl TextRect {
                     // line and use it for ellipsization. Otherwise (when it is not single word)
                     // remove last word to clean up the overflow and return it to `self.words`.
                     if line.len() > 1 {
-                        // SAFETY: because the if-statement checks that line is non-empty, the
-                        // popped word alvays valid.
-                        self.words
-                            .push_front(unsafe { line.pop_word().unwrap_unchecked() })
+                        self.current_paragraph.push_front(line.pop_word().unwrap())
                     }
 
                     break;
                 }
-            }
-
-            if line.is_empty() {
-                break;
             }
 
             let is_overflow = line.is_overflow();
@@ -209,6 +213,10 @@ impl TextRect {
 
             if is_overflow {
                 break;
+            }
+
+            if self.current_paragraph.is_empty() {
+                self.current_paragraph = self.paragraphs.pop_front().unwrap_or_default();
             }
         }
 
@@ -223,7 +231,7 @@ impl TextRect {
             .last_mut()
             .map(|last_line| {
                 last_line.ellipsize(
-                    self.words.pop_front(),
+                    self.current_paragraph.pop_front(),
                     self.ellipsis.clone(),
                     &self.ellipsize_at,
                 )
@@ -376,14 +384,15 @@ impl LineRect {
     }
 
     fn ellipsize_end(&mut self, ellipsis: Glyph) -> EllipsizationState {
+        if self.words.is_empty() {
+            return EllipsizationState::Continue(Some(WordRect::new_empty()));
+        }
+
         if ellipsis.advance_width() as isize <= self.available_space {
             self.push_ellipsis_to_last_word(ellipsis);
             EllipsizationState::Complete
         } else {
-            if self.pop_word().is_none() {
-                return EllipsizationState::Continue(Some(WordRect::new_empty()));
-            };
-
+            self.pop_word();
             self.ellipsize_end(ellipsis)
         }
     }
