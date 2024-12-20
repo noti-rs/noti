@@ -4,6 +4,7 @@ use shared::cached_data::CachedData;
 use std::{
     cell::RefCell,
     cmp::Ordering,
+    collections::VecDeque,
     fs::File,
     os::{
         fd::{AsFd, BorrowedFd},
@@ -192,12 +193,10 @@ impl Window {
 
     pub(super) fn update_banners(
         &mut self,
-        mut notifications: Vec<Notification>,
+        notifications: Vec<Notification>,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) {
-        self.replace_by_indices(&mut notifications, config, cached_layouts);
-
         self.banners
             .extend(notifications.into_iter().map(|notification| {
                 let mut banner_rect = BannerRect::init(notification);
@@ -214,7 +213,7 @@ impl Window {
 
     pub(super) fn replace_by_indices(
         &mut self,
-        notifications: &mut Vec<Notification>,
+        notifications: &mut VecDeque<Notification>,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) {
@@ -225,7 +224,7 @@ impl Window {
             .collect();
 
         for notification_index in matching_indices.into_iter().rev() {
-            let notification = notifications.remove(notification_index);
+            let notification = notifications.remove(notification_index).unwrap();
 
             let rect = &mut self.banners[&notification.id];
             rect.update_data(notification);
