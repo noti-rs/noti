@@ -45,17 +45,24 @@ impl IdleNotifier {
     }
 
     pub(super) fn recreate(&mut self, qh: &QueueHandle<Self>, config: &Config) {
+        self.threshold = config.general().idle_threshold.duration;
+
         if let Some(notifier) = self.notifier.as_ref() {
-            if let Some(notification) = self.notification.replace(notifier.get_idle_notification(
-                config.general().idle_threshold.duration,
-                self.wl_seat.as_ref().unwrap(),
-                qh,
-                (),
-            )) {
+            if let Some(notification) = self.notification.take() {
                 self.idle_state = None;
                 self.was_idled = false;
                 notification.destroy();
-                debug!("Idle Notifier: Was recreated by new idle_threshold value");
+                debug!("Idle Notifier: Destroyed")
+            }
+
+            if self.wl_seat.is_some() && self.threshold != 0 {
+                self.notification.replace(notifier.get_idle_notification(
+                    self.threshold,
+                    self.wl_seat.as_ref().unwrap(),
+                    qh,
+                    (),
+                ));
+                debug!("Idle Notifier: Recreated by new idle_threshold value");
             }
         }
     }
@@ -83,24 +90,21 @@ impl Dispatch<wl_registry::WlRegistry, ()> for IdleNotifier {
                     debug!("Idle Notifier: Bound the wl_seat");
                 }
                 "ext_idle_notifier_v1" => {
-                    if state.threshold == 0 {
-                        return;
-                    }
-
                     let idle_notifier =
                         registry.bind::<ExtIdleNotifierV1, _, _>(name, version, qhandle, ());
                     debug!("Idle Notifier: Bound the ext_idle_notifier_v1");
 
-                    if let Some(seat) = state.wl_seat.as_ref() {
+                    if state.wl_seat.is_some() && state.threshold != 0 {
                         state
                             .notification
                             .replace(idle_notifier.get_idle_notification(
                                 state.threshold,
-                                seat,
+                                state.wl_seat.as_ref().unwrap(),
                                 qhandle,
                                 (),
                             ));
                     }
+
                     state.notifier.replace(idle_notifier);
                 }
                 _ => (),
