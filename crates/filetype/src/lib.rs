@@ -22,21 +22,25 @@ fn minimal_type() {
 
         // WText(kind = title)
         
-        FlexContainer(
+        alias SizedText = Text(font_size = 20)
+        alias DefaultAlignment = Alignment(
+            horizontal = start,
+            vertical = space_between,
+        )
+
+        alias Title = SizedText(kind = title)
+        alias Row = FlexContainer(direction = horizontal)
+        
+        Row(
             max_width = 400,
             max_height = 120,
 
-            direction = horizontal,
-            alignment = Alignment(
-                horizontal = start,
-                vertical = space_between,
-            )
+            alignment = DefaultAlignment(),
         ) {
             Image(
                 max_size = 86,
             )
-            Text(
-                kind = title,
+            Title(
                 wrap = false,
                 line_spacing = 10,
             )

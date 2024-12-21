@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::bail;
 use config::{
     display::{Border, GBuilderBorder, GBuilderImageProperty, ImageProperty},
@@ -27,11 +29,57 @@ pub(super) fn convert_into_widgets(mut pairs: Pairs<Rule>) -> anyhow::Result<Wid
         "In input should be a parsed Layout"
     );
 
-    let node_type = pair.into_inner().next().unwrap();
-    convert_node_type(node_type)
+    let mut inner_pairs = pair.into_inner();
+    let mut alias_storage = HashMap::new();
+
+    let maybe_aliases = inner_pairs.next().unwrap();
+    let node_type = if maybe_aliases.as_rule() == Rule::AliasDefinitions {
+        convert_aliases(maybe_aliases, &mut alias_storage)?;
+        inner_pairs.next().unwrap()
+    } else {
+        maybe_aliases
+    };
+
+    convert_node_type(node_type, &alias_storage)
 }
 
-fn convert_node_type(node_type: Pair<Rule>) -> anyhow::Result<Widget> {
+fn convert_aliases<'a>(
+    alias_definitions: Pair<'a, Rule>,
+    alias_storage: &mut HashMap<&'a str, GBuilder>,
+) -> anyhow::Result<()> {
+    assert_eq!(
+        alias_definitions.as_rule(),
+        Rule::AliasDefinitions,
+        "In input should be an AliasDefinitions"
+    );
+
+    for alias_definition in alias_definitions.into_inner() {
+        debug_assert_eq!(
+            alias_definition.as_rule(),
+            Rule::AliasDefinition,
+            "In input should be an AliasDefinition"
+        );
+
+        let mut alias_definition_pairs = alias_definition.into_inner();
+
+        let _alias_keyword = alias_definition_pairs.next().unwrap();
+        let alias_identifier = alias_definition_pairs.next().unwrap().as_str();
+        let _eq_token = alias_definition_pairs.next().unwrap();
+        let type_value_definition = alias_definition_pairs.next().unwrap();
+
+        alias_storage.insert(
+            alias_identifier,
+            convert_type_value(type_value_definition, alias_storage)?,
+        );
+    }
+
+    Ok(())
+}
+
+fn convert_node_type<'a>(
+    node_type: Pair<'a, Rule>,
+    alias_storage: &'a HashMap<&'a str, GBuilder>,
+) -> anyhow::Result<Widget> {
     assert_eq!(
         node_type.as_rule(),
         Rule::NodeType,
@@ -41,11 +89,11 @@ fn convert_node_type(node_type: Pair<Rule>) -> anyhow::Result<Widget> {
     let mut node_type_pairs = node_type.into_inner();
 
     let widget_name = node_type_pairs.next().unwrap().as_str();
-    let mut widget_gbuilder: GBuilder = widget_name.try_into()?;
+    let mut widget_gbuilder: GBuilder = (widget_name, alias_storage).try_into()?;
 
-    let properties = convert_properties(&mut node_type_pairs);
+    let properties = convert_properties(&mut node_type_pairs, alias_storage);
 
-    let children = convert_children(&mut node_type_pairs)?;
+    let children = convert_children(&mut node_type_pairs, alias_storage)?;
     widget_gbuilder.set_properties(widget_name, properties);
 
     if !children.is_empty() {
@@ -60,7 +108,10 @@ fn convert_node_type(node_type: Pair<Rule>) -> anyhow::Result<Widget> {
     Ok(widget_gbuilder.try_build()?.try_downcast()?)
 }
 
-fn convert_properties(node_type_pairs: &mut Pairs<Rule>) -> Vec<Property> {
+fn convert_properties<'a>(
+    node_type_pairs: &mut Pairs<'a, Rule>,
+    alias_storage: &'a HashMap<&'a str, GBuilder>,
+) -> Vec<Property> {
     let _open_paren = node_type_pairs.next();
 
     let properties_or_close_paren = node_type_pairs.next().unwrap();
@@ -81,7 +132,7 @@ fn convert_properties(node_type_pairs: &mut Pairs<Rule>) -> Vec<Property> {
     let mut converted_properties = vec![];
     let mut properties_pairs = properties.into_inner();
     while let Some(property) = properties_pairs.next() {
-        match convert_property(property) {
+        match convert_property(property, alias_storage) {
             Ok(property) => converted_properties.push(property),
             Err(err) => warn!("Failed to parse property and skipped. Error: {err}"),
         }
@@ -91,7 +142,10 @@ fn convert_properties(node_type_pairs: &mut Pairs<Rule>) -> Vec<Property> {
     converted_properties
 }
 
-fn convert_property(property: Pair<Rule>) -> anyhow::Result<Property> {
+fn convert_property<'a>(
+    property: Pair<'a, Rule>,
+    alias_storage: &'a HashMap<&'a str, GBuilder>,
+) -> anyhow::Result<Property> {
     assert_eq!(
         property.as_rule(),
         Rule::Property,
@@ -101,12 +155,15 @@ fn convert_property(property: Pair<Rule>) -> anyhow::Result<Property> {
     let mut property_pairs = property.into_inner();
     let name = property_pairs.next().unwrap().as_str().to_string();
     let _eq_token = property_pairs.next();
-    let value = convert_property_value(property_pairs.next().unwrap())?;
+    let value = convert_property_value(property_pairs.next().unwrap(), alias_storage)?;
 
     Ok(Property { name, value })
 }
 
-fn convert_property_value(property_value: Pair<Rule>) -> anyhow::Result<Value> {
+fn convert_property_value<'a>(
+    property_value: Pair<'a, Rule>,
+    alias_storage: &'a HashMap<&'a str, GBuilder>,
+) -> anyhow::Result<Value> {
     assert_eq!(
         property_value.as_rule(),
         Rule::PropertyValue,
@@ -116,14 +173,19 @@ fn convert_property_value(property_value: Pair<Rule>) -> anyhow::Result<Value> {
     let value = property_value.into_inner().next().unwrap();
 
     Ok(match value.as_rule() {
-        Rule::TypeValue => convert_type_value(value)?,
+        Rule::TypeValue => convert_type_value(value, alias_storage)
+            .and_then(GBuilder::try_build)
+            .map(Value::Any)?,
         Rule::Literal => Value::String(value.as_str().to_string()),
         Rule::UInt => Value::UInt(value.as_str().parse().unwrap()),
         _ => unreachable!(),
     })
 }
 
-fn convert_children(node_type_pairs: &mut Pairs<Rule>) -> anyhow::Result<Vec<Widget>> {
+fn convert_children<'a>(
+    node_type_pairs: &mut Pairs<'a, Rule>,
+    alias_storage: &'a HashMap<&'a str, GBuilder>,
+) -> anyhow::Result<Vec<Widget>> {
     let open_brace = node_type_pairs.next();
 
     let mut children = None;
@@ -148,11 +210,14 @@ fn convert_children(node_type_pairs: &mut Pairs<Rule>) -> anyhow::Result<Vec<Wid
 
     children
         .into_inner()
-        .map(convert_node_type)
+        .map(|child| convert_node_type(child, alias_storage))
         .collect::<anyhow::Result<Vec<Widget>>>()
 }
 
-fn convert_type_value(type_value: Pair<Rule>) -> anyhow::Result<Value> {
+fn convert_type_value<'a>(
+    type_value: Pair<'a, Rule>,
+    alias_storage: &'a HashMap<&'a str, GBuilder>,
+) -> anyhow::Result<GBuilder> {
     assert_eq!(
         type_value.as_rule(),
         Rule::TypeValue,
@@ -162,12 +227,17 @@ fn convert_type_value(type_value: Pair<Rule>) -> anyhow::Result<Value> {
     let mut type_value_pairs = type_value.into_inner();
 
     let type_name = type_value_pairs.next().unwrap().as_str();
-    let mut type_gbuilder: GBuilder = type_name.try_into()?;
+    let mut type_gbuilder: GBuilder = (type_name, alias_storage).try_into()?;
 
-    type_gbuilder.set_properties(type_name, convert_properties(&mut type_value_pairs));
-    type_gbuilder.try_build().map(Value::Any).map(Ok)?
+    type_gbuilder.set_properties(
+        type_name,
+        convert_properties(&mut type_value_pairs, alias_storage),
+    );
+
+    Ok(type_gbuilder)
 }
 
+#[derive(Clone)]
 enum GBuilder {
     FlexContainer(GBuilderFlexContainer),
     WImage(GBuilderWImage),
@@ -303,18 +373,26 @@ impl GBuilder {
     }
 }
 
-impl TryFrom<&str> for GBuilder {
+impl TryFrom<(&str, &HashMap<&str, GBuilder>)> for GBuilder {
     type Error = anyhow::Error;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Ok(match value {
+    fn try_from(
+        (identifier, alias_storage): (&str, &HashMap<&str, GBuilder>),
+    ) -> Result<Self, Self::Error> {
+        Ok(match identifier {
             "FlexContainer" => GBuilder::FlexContainer(GBuilderFlexContainer::new()),
             "Image" => GBuilder::WImage(GBuilderWImage::new()),
             "Text" => GBuilder::WText(GBuilderWText::new()),
             "Spacing" => GBuilder::Spacing(GBuilderSpacing::new()),
             "Alignment" => GBuilder::Alignment(GBuilderAlignment::new()),
             "Border" => GBuilder::Border(GBuilderBorder::new()),
-            _ => bail!("Unknown type: {value}!"),
+            other => {
+                if let Some(aliased_gbuilder) = alias_storage.get(other).cloned() {
+                    aliased_gbuilder
+                } else {
+                    bail!("Unknown type: {other}!")
+                }
+            }
         })
     }
 }
