@@ -3,7 +3,9 @@ use quote::{quote, ToTokens};
 use syn::{parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated, Token};
 
 use crate::{
-    general::{field_name, wrap_by_option, AttributeInfo, DefaultAssignment, Structure},
+    general::{
+        field_name, wrap_by_option, AttributeInfo, DefaultAssignment, DeriveInfo, Structure,
+    },
     propagate_err,
 };
 
@@ -14,7 +16,7 @@ pub(super) fn make_derive(item: TokenStream) -> TokenStream {
     let generic_builder = structure.create_generic_builder(&attribute_info.struct_info);
 
     let mut tokens = proc_macro2::TokenStream::new();
-    generic_builder.build_gbuilder_struct(&mut tokens);
+    generic_builder.build_gbuilder_struct(&mut tokens, &attribute_info.struct_info);
 
     propagate_err!(generic_builder.build_gbuilder_impl(&mut tokens, &attribute_info, &structure));
 
@@ -28,7 +30,11 @@ impl Structure {
         generic_builder
     }
 
-    fn build_gbuilder_struct(&self, tokens: &mut proc_macro2::TokenStream) {
+    fn build_gbuilder_struct(
+        &self,
+        tokens: &mut proc_macro2::TokenStream,
+        struct_info: &StructInfo,
+    ) {
         let Structure {
             ref visibility,
             ref struct_token,
@@ -38,7 +44,13 @@ impl Structure {
             ..
         } = self;
 
+        let derive_info = struct_info
+            .derive_info
+            .as_ref()
+            .map(ToTokens::to_token_stream)
+            .unwrap_or_default();
         quote! {
+            #derive_info
             #visibility #struct_token #name
         }
         .to_tokens(tokens);
@@ -240,12 +252,14 @@ impl AttributeInfo<StructInfo, FieldInfo> {
 
 struct StructInfo {
     name: syn::Ident,
+    derive_info: Option<DeriveInfo>,
 }
 
 impl Parse for StructInfo {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let beginning_span = input.span();
-        let mut name;
+        let mut name = None;
+        let mut derive_info = None;
 
         loop {
             let ident = input.parse::<syn::Ident>()?;
@@ -255,6 +269,9 @@ impl Parse for StructInfo {
                     let content;
                     let _paren = parenthesized!(content in input);
                     name = Some(content.parse()?);
+                }
+                "derive" => {
+                    derive_info = Some(DeriveInfo::from_ident_and_input(ident, &input)?);
                 }
                 _ => return Err(syn::Error::new(ident.span(), "Unknown attribute")),
             }
@@ -273,7 +290,7 @@ impl Parse for StructInfo {
             ));
         };
 
-        Ok(Self { name })
+        Ok(Self { name, derive_info })
     }
 }
 

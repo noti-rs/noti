@@ -10,7 +10,7 @@ use crate::{
 use super::{CompileState, Draw, WidgetConfiguration};
 
 #[derive(macros::GenericBuilder, Clone)]
-#[gbuilder(name(GBuilderWImage))]
+#[gbuilder(name(GBuilderWImage), derive(Clone))]
 pub struct WImage {
     #[gbuilder(hidden, default(Image::Unknown))]
     content: Image,

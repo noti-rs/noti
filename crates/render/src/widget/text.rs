@@ -34,6 +34,16 @@ impl Clone for WText {
     }
 }
 
+impl Clone for GBuilderWText {
+    fn clone(&self) -> Self {
+        Self {
+            kind: self.kind.as_ref().cloned(),
+            content: None,
+            property: self.property.as_ref().cloned(),
+        }
+    }
+}
+
 #[derive(Clone, derive_more::Display)]
 pub enum WTextKind {
     #[display("title")]
