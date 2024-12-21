@@ -160,9 +160,12 @@ pub struct DeriveInfo {
 }
 
 impl DeriveInfo {
-    pub fn from_ident_and_input(ident: syn::Ident, input: &syn::parse::ParseStream) -> syn::Result<Self> {
+    pub fn from_ident_and_input(
+        ident: syn::Ident,
+        input: &syn::parse::ParseStream,
+    ) -> syn::Result<Self> {
         let content;
-        Ok(Self{
+        Ok(Self {
             ident,
             paren: syn::parenthesized!(content in input),
             traits: content.parse_terminated(syn::Ident::parse_any, Token![,])?,

@@ -2,9 +2,8 @@ use std::collections::HashMap;
 
 use anyhow::bail;
 use config::{
-    display::{Border, GBuilderBorder, GBuilderImageProperty, ImageProperty},
+    display::{Border, GBuilderBorder},
     spacing::{GBuilderSpacing, Spacing},
-    text::{GBuilderTextProperty, TextProperty},
 };
 use log::warn;
 use pest::iterators::{Pair, Pairs};
@@ -100,7 +99,7 @@ fn convert_node_type<'a>(
         let assignment_result =
             widget_gbuilder.set_value("children", Value::Any(Box::new(children)));
 
-        if let Err(ConversionError::UnknownField { field_name }) = assignment_result {
+        if let Err(ConversionError::UnknownField { field_name, .. }) = assignment_result {
             warn!("The {widget_name} doesn't contain the '{field_name}' field! Skipped.");
         }
     }
@@ -243,80 +242,20 @@ enum GBuilder {
     WImage(GBuilderWImage),
     WText(GBuilderWText),
 
-    TextProperty(GBuilderTextProperty),
-    ImageProperty(GBuilderImageProperty),
-
     Spacing(GBuilderSpacing),
     Alignment(GBuilderAlignment),
     Border(GBuilderBorder),
 }
 
 impl GBuilder {
-    fn get_associated_property(&self) -> Option<GBuilder> {
-        match self {
-            GBuilder::WImage(_) => Some(GBuilder::ImageProperty(GBuilderImageProperty::new())),
-            GBuilder::WText(_) => Some(GBuilder::TextProperty(GBuilderTextProperty::new())),
-            _ => None,
-        }
-    }
-
     fn set_properties(&mut self, self_name: &str, properties: Vec<Property>) {
-        let mut associated_property = self.get_associated_property();
-
         for Property { name, value } in properties {
-            let this = if self.contains_field(&name) {
-                &mut *self
-            } else if let Some(property) = associated_property.as_mut() {
-                property
-            } else {
-                warn!("The '{name}' field for the {self_name} widget is unknown. Skipped.");
-                continue;
-            };
-
-            if let Err(err) = this.set_value(&name, value) {
+            if let Err(err) = self.set_value(&name, value) {
                 warn!(
-                    "Cannot set value for the '{name}' field due error and skipped. Error: {err}"
+                    "Cannot set value for the '{name}' field in {self_name} due error and skipped. Error: {err}"
                 );
             }
         }
-
-        if let Some(property) = associated_property {
-            let property = match property.try_build() {
-                Ok(property) => Value::Any(property),
-                Err(err) => {
-                    println!("{err}");
-                    warn!("Failed to analyze properties of the '{self_name}' type and skipped. Error: {err}");
-                    return;
-                }
-            };
-
-            if let Err(err) = self.set_value("property", property) {
-                warn!("Failed to apply properties to the '{self_name}' wiget and skipped. Error: {err}");
-            }
-        }
-    }
-
-    fn contains_field(&self, field_name: &str) -> bool {
-        macro_rules! implement_variants {
-            ($($variant:ident),*) => {
-                match self {
-                    $(
-                        Self::$variant(val) => val.contains_field(field_name),
-                    )*
-                }
-            };
-        }
-
-        implement_variants!(
-            FlexContainer,
-            WImage,
-            WText,
-            TextProperty,
-            ImageProperty,
-            Spacing,
-            Alignment,
-            Border
-        )
     }
 
     fn set_value(&mut self, field_name: &str, value: Value) -> Result<&mut Self, ConversionError> {
@@ -332,20 +271,11 @@ impl GBuilder {
             };
         }
 
-        implement_variants!(
-            FlexContainer,
-            WImage,
-            WText,
-            TextProperty,
-            ImageProperty,
-            Spacing,
-            Alignment,
-            Border
-        );
+        implement_variants!(FlexContainer, WImage, WText, Spacing, Alignment, Border);
         Ok(self)
     }
 
-    fn try_build(self) -> anyhow::Result<Box<dyn std::any::Any>> {
+    fn try_build(self) -> anyhow::Result<Box<dyn std::any::Any + Send + Sync>> {
         macro_rules! implement_variants {
             ($($variant:ident into $dest_type:path),*) => {
                 match self {
@@ -362,9 +292,6 @@ impl GBuilder {
             WImage into Widget,
             WText into Widget,
             FlexContainer into Widget,
-
-            TextProperty into TextProperty,
-            ImageProperty into ImageProperty,
 
             Spacing into Spacing,
             Alignment into Alignment,

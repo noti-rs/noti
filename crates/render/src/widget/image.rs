@@ -1,4 +1,4 @@
-use config::display::ImageProperty;
+use config::display::{GBuilderImageProperty, ImageProperty};
 use log::warn;
 
 use crate::{
@@ -20,7 +20,7 @@ pub struct WImage {
     #[gbuilder(hidden, default(0))]
     height: usize,
 
-    #[gbuilder(default)]
+    #[gbuilder(use_gbuilder(GBuilderImageProperty), default)]
     property: ImageProperty,
 }
 
