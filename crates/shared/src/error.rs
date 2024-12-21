@@ -1,7 +1,9 @@
+use crate::value::Value;
+
 #[derive(Debug, derive_more::Display)]
 pub enum ConversionError {
     #[display("The '{field_name}' field is unknown")]
-    UnknownField { field_name: String },
+    UnknownField { field_name: String, value: Value },
     #[display("Provided invalid value. Expected [{expected}], but given [{actual}]")]
     InvalidValue {
         expected: &'static str,

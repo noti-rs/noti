@@ -11,6 +11,8 @@
 // They will be here until the Pest parser gets better token
 // analyzing.
 
+Alias = { "alias" }
+
 OpeningBrace = { "{" }
 ClosingBrace = { "}" }
 
@@ -24,7 +26,10 @@ Hashtag = { "#" }
 
 // END BASE TOKENS
 
-Layout = { SOI ~ NodeType ~ EOI }
+Layout = { SOI ~ AliasDefinitions? ~ NodeType ~ EOI }
+
+AliasDefinitions = { AliasDefinition+ }
+AliasDefinition = { Alias ~ Identifier ~ Equal ~ TypeValue }
 
 NodeType = { 
   Identifier ~ OpeningParenthesis

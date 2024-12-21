@@ -6,8 +6,8 @@ use super::{public, Spacing};
 
 public! {
     #[derive(ConfigProperty, GenericBuilder, Debug, Clone)]
-    #[cfg_prop(name(TomlTextProperty),derive(Debug, Clone, Default, Deserialize))]
-    #[gbuilder(name(GBuilderTextProperty))]
+    #[cfg_prop(name(TomlTextProperty), derive(Debug, Clone, Default, Deserialize))]
+    #[gbuilder(name(GBuilderTextProperty), derive(Clone))]
     struct TextProperty {
         #[cfg_prop(default(true))]
         #[gbuilder(default(true))]

@@ -13,7 +13,7 @@ use super::{CompileState, Draw, Widget, WidgetConfiguration};
 
 #[derive(macros::GenericBuilder, derive_builder::Builder, Clone)]
 #[builder(pattern = "owned")]
-#[gbuilder(name(GBuilderFlexContainer))]
+#[gbuilder(name(GBuilderFlexContainer), derive(Clone))]
 pub struct FlexContainer {
     #[builder(private, setter(skip))]
     #[gbuilder(hidden, default(None))]
@@ -252,7 +252,7 @@ impl Draw for FlexContainer {
 }
 
 #[derive(macros::GenericBuilder, Debug, Default, Clone)]
-#[gbuilder(name(GBuilderAlignment))]
+#[gbuilder(name(GBuilderAlignment), derive(Clone))]
 pub struct Alignment {
     pub horizontal: Position,
     pub vertical: Position,

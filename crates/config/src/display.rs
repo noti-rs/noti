@@ -111,7 +111,7 @@ public! {
 public! {
     #[derive(ConfigProperty, GenericBuilder, Debug, Clone)]
     #[cfg_prop(name(TomlImageProperty), derive(Debug, Clone, Default, Deserialize))]
-    #[gbuilder(name(GBuilderImageProperty))]
+    #[gbuilder(name(GBuilderImageProperty), derive(Clone))]
     struct ImageProperty {
         #[cfg_prop(default(64))]
         #[gbuilder(default(64))]
@@ -171,7 +171,7 @@ impl TryFromValue for ResizingMethod {
 public! {
     #[derive(ConfigProperty, GenericBuilder, Debug, Default, Clone)]
     #[cfg_prop(name(TomlBorder), derive(Debug, Clone, Default, Deserialize))]
-    #[gbuilder(name(GBuilderBorder))]
+    #[gbuilder(name(GBuilderBorder), derive(Clone))]
     struct Border {
         #[cfg_prop(default(0))]
         #[gbuilder(default(0))]

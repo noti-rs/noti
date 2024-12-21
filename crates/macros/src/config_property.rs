@@ -2,12 +2,13 @@ use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::{quote, ToTokens};
 use syn::{
-    ext::IdentExt, parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated,
-    spanned::Spanned, Token,
+    parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated, spanned::Spanned, Token,
 };
 
 use crate::{
-    general::{field_name, wrap_by_option, AttributeInfo, DefaultAssignment, Structure},
+    general::{
+        field_name, wrap_by_option, AttributeInfo, DefaultAssignment, DeriveInfo, Structure,
+    },
     propagate_err,
 };
 
@@ -383,14 +384,7 @@ impl Parse for StructInfo {
                     let _paren = parenthesized!(content in input);
                     name = Some(content.parse()?);
                 }
-                "derive" => {
-                    let content;
-                    derive_info = Some(DeriveInfo {
-                        ident,
-                        paren: parenthesized!(content in input),
-                        traits: content.parse_terminated(syn::Ident::parse_any, Token![,])?,
-                    });
-                }
+                "derive" => derive_info = Some(DeriveInfo::from_ident_and_input(ident, &input)?),
                 _ => return Err(syn::Error::new(ident.span(), "Unknown attribute")),
             }
 
@@ -409,23 +403,6 @@ impl Parse for StructInfo {
         };
 
         Ok(Self { name, derive_info })
-    }
-}
-
-struct DeriveInfo {
-    ident: syn::Ident,
-    paren: syn::token::Paren,
-    traits: Punctuated<syn::Ident, Token![,]>,
-}
-
-impl ToTokens for DeriveInfo {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        proc_macro2::Punct::new('#', proc_macro2::Spacing::Joint).to_tokens(tokens);
-        syn::token::Bracket::default().surround(tokens, |tokens| {
-            self.ident.to_tokens(tokens);
-            self.paren
-                .surround(tokens, |tokens| self.traits.to_tokens(tokens));
-        });
     }
 }
 

@@ -221,6 +221,10 @@ impl TextRect {
             if self.current_paragraph.is_empty() {
                 self.current_paragraph = self.paragraphs.pop_front().unwrap_or_default();
                 paragraph_num += 1;
+
+                if self.current_paragraph.is_empty() {
+                    break;
+                }
             }
         }
 

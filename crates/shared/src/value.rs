@@ -4,7 +4,7 @@ use crate::error::ConversionError;
 pub enum Value {
     UInt(usize),
     String(String),
-    Any(Box<dyn std::any::Any>),
+    Any(Box<dyn std::any::Any + Send + Sync>),
 }
 
 pub trait TryFromValue: Sized + 'static {
@@ -29,7 +29,7 @@ pub trait TryDowncast {
     fn try_downcast<T: 'static>(self) -> Result<T, ConversionError>;
 }
 
-impl TryDowncast for Box<dyn std::any::Any> {
+impl TryDowncast for Box<dyn std::any::Any + Send + Sync> {
     fn try_downcast<T: 'static>(self) -> Result<T, ConversionError> {
         Ok(*self
             .downcast()
@@ -51,7 +51,7 @@ macro_rules! impl_from_for_value {
 
 impl_from_for_value!(usize => Value::UInt);
 impl_from_for_value!(String => Value::String);
-impl_from_for_value!(Box<dyn std::any::Any> => Value::Any);
+impl_from_for_value!(Box<dyn std::any::Any + Send + Sync> => Value::Any);
 
 impl TryFromValue for usize {
     fn try_from_uint(value: usize) -> Result<Self, ConversionError> {

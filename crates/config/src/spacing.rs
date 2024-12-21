@@ -9,7 +9,7 @@ use serde::{de::Visitor, Deserialize};
 use shared::value::TryFromValue;
 
 #[derive(GenericBuilder, Debug, Default, Clone)]
-#[gbuilder(name(GBuilderSpacing))]
+#[gbuilder(name(GBuilderSpacing), derive(Clone))]
 pub struct Spacing {
     #[gbuilder(default(0))]
     top: u8,

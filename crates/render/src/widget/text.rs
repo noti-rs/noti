@@ -1,4 +1,4 @@
-use config::text::TextProperty;
+use config::text::{GBuilderTextProperty, TextProperty};
 use dbus::text::Text;
 use log::warn;
 use shared::{error::ConversionError, value::TryFromValue};
@@ -19,7 +19,7 @@ pub struct WText {
     #[gbuilder(hidden, default(None))]
     content: Option<TextRect>,
 
-    #[gbuilder(default)]
+    #[gbuilder(use_gbuilder(GBuilderTextProperty), default)]
     property: TextProperty,
 }
 
@@ -28,6 +28,16 @@ impl Clone for WText {
         // INFO: we shouldn't clone compiled info about text
         Self {
             kind: self.kind.clone(),
+            content: None,
+            property: self.property.clone(),
+        }
+    }
+}
+
+impl Clone for GBuilderWText {
+    fn clone(&self) -> Self {
+        Self {
+            kind: self.kind.as_ref().cloned(),
             content: None,
             property: self.property.clone(),
         }
