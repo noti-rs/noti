@@ -21,6 +21,7 @@ pub trait Notifications {
     ) -> anyhow::Result<u32>;
 
     async fn get_server_information(&self) -> anyhow::Result<(String, String, String, String)>;
+    async fn history_check(&self) -> anyhow::Result<()>;
 }
 
 pub struct Client<'a> {

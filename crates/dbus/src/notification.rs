@@ -1,5 +1,7 @@
 use super::{image::ImageData, text::Text};
 use derive_more::Display;
+use rusqlite::Row;
+use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashMap};
 use zbus::zvariant::Value;
 
@@ -15,6 +17,54 @@ pub struct Notification {
     pub actions: Vec<NotificationAction>,
     pub is_read: bool,
     pub created_at: u64,
+}
+
+impl TryFrom<&Row<'_>> for Notification {
+    type Error = rusqlite::Error;
+
+    fn try_from(row: &Row) -> anyhow::Result<Self, Self::Error> {
+        let actions_json: String = row.get("actions")?;
+        let hints_json: String = row.get("hints")?;
+        let body_json: String = row.get("body")?;
+        let expire_timeout_json: String = row.get("expire_timeout")?;
+
+        Ok(Notification {
+            id: row.get("replaces_id")?,
+            app_name: row.get("app_name")?,
+            app_icon: row.get("app_icon")?,
+            summary: row.get("summary")?,
+            body: serde_json::from_str(&body_json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?,
+            expire_timeout: serde_json::from_str(&expire_timeout_json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?,
+            hints: serde_json::from_str(&hints_json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?,
+            actions: serde_json::from_str(&actions_json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?,
+            is_read: row.get("is_read")?,
+            created_at: row.get("created_at")?,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -44,7 +94,7 @@ impl PartialEq for ScheduledNotification {
 
 impl Eq for ScheduledNotification {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hints {
     /// The urgency level.
     pub urgency: Urgency,
@@ -150,7 +200,7 @@ impl From<HashMap<&str, Value<'_>>> for Hints {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NotificationAction {
     #[allow(unused)]
     action_key: String,
@@ -175,7 +225,7 @@ impl NotificationAction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Coordinates {
     pub x: i32,
     pub y: i32,
@@ -193,7 +243,7 @@ impl Coordinates {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum Category {
     Device(CategoryEvent),
     Email(CategoryEvent),
@@ -239,7 +289,7 @@ impl From<&str> for Category {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CategoryEvent {
     Generic,
     Added,
@@ -255,7 +305,7 @@ pub enum CategoryEvent {
     Complete,
 }
 
-#[derive(Default, Debug, Clone, Display)]
+#[derive(Default, Debug, Clone, Display, Serialize, Deserialize)]
 pub enum Timeout {
     Millis(u32),
     Never,
@@ -274,7 +324,7 @@ impl From<i32> for Timeout {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Display, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Display, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Urgency {
     Low,
     #[default]

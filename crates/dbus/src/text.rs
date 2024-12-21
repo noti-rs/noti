@@ -1,8 +1,9 @@
 use log::warn;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use unic_segment;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Text {
     pub body: String,
     pub entities: Vec<Entity>,
@@ -261,14 +262,14 @@ impl<'a> Parser<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entity {
     pub offset: usize,
     pub length: usize,
     pub kind: EntityKind,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EntityKind {
     Bold,      // <b> ... </b>
     Italic,    // <i> ... </i>

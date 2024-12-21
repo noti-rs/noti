@@ -2,6 +2,7 @@ use std::thread;
 
 use anyhow::Context;
 use config::Config;
+use history_manager::HistoryManager;
 use internal_messages::InternalChannel;
 use log::{debug, info, warn};
 use scheduler::Scheduler;
@@ -10,7 +11,9 @@ use tokio::sync::mpsc::unbounded_channel;
 mod backend_manager;
 mod banner;
 mod cache;
+mod db;
 mod dispatcher;
+mod history_manager;
 mod idle_manager;
 mod idle_notifier;
 mod internal_messages;
@@ -40,6 +43,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let mut scheduler = Scheduler::new();
     info!("Backend: Scheduler initialized");
 
+    let history = HistoryManager::init()?;
+
     loop {
         while let Ok(action) = receiver.try_recv() {
             match action {
@@ -48,6 +53,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
                         "Backend: Sent a request to renderer to show notification with id: {}",
                         &notification.id
                     );
+                    history.push(&notification)?;
                     server_internal_channel.send_to_renderer(
                         internal_messages::ServerMessage::ShowNotification(notification),
                     )?;

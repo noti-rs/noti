@@ -22,3 +22,5 @@ wayland-protocols = { version = "0.32.3", features = ["client", "wayland-client"
 wayland-protocols-wlr = { version = "0.3.3", features = ["client", "wayland-client"] }
 indexmap = "2.4.0"
 chrono = "0.4.39"
+rusqlite = "0.32.1"
+serde_json = "1.0.133"
