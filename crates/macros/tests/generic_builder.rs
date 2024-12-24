@@ -1,5 +1,34 @@
 use shared::value::{TryFromValue, Value};
 
+#[derive(macros::GenericBuilder, PartialEq, Debug)]
+#[gbuilder(name(GBuilderHomogeneousStruct), constructor)]
+#[allow(unused)]
+struct HomogeneousStruct {
+    field1: usize,
+    field2: usize,
+    field3: usize,
+    field4: usize,
+    field5: usize,
+}
+
+#[test]
+fn homogeneous_struct() {
+    let mut gbuilder = GBuilderHomogeneousStruct::new();
+    gbuilder.constructor(Value::UInt(5)).unwrap();
+    let result = gbuilder.try_build().unwrap();
+
+    assert_eq!(
+        result,
+        HomogeneousStruct {
+            field1: 5,
+            field2: 5,
+            field3: 5,
+            field4: 5,
+            field5: 5
+        }
+    )
+}
+
 #[derive(macros::GenericBuilder, Eq, PartialEq, Debug)]
 #[gbuilder(name(GBuilderTest))]
 struct Test {
