@@ -4,6 +4,8 @@ use crate::value::Value;
 pub enum ConversionError {
     #[display("The '{field_name}' field is unknown")]
     UnknownField { field_name: String, value: Value },
+    #[display("Unsupported constructor")]
+    UnsupportedConstructor,
     #[display("Provided invalid value. Expected [{expected}], but given [{actual}]")]
     InvalidValue {
         expected: &'static str,

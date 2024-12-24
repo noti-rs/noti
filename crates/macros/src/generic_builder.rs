@@ -38,6 +38,24 @@ impl Structure {
             .map(ExpectIdent::expect_ident)
             .map(ToString::to_string)
             .collect();
+
+        if attribute_info.struct_info.constructor
+            && !self
+                .fields
+                .first()
+                .map(|field| {
+                    self.fields
+                        .iter()
+                        .all(|other_field| field.ty == other_field.ty)
+                })
+                .unwrap_or(true)
+        {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "The 'constructor' attribute requires equality of field types",
+            ));
+        }
+
         let mut alias_types = std::collections::HashMap::new();
 
         for (attached_field_name, field_info) in &attribute_info.fields_info {
@@ -144,6 +162,7 @@ impl Structure {
             .collect::<Punctuated<&syn::Field, Token![,]>>();
 
         let fn_new = self.build_fn_new(attribute_info);
+        let fn_constructor = self.build_fn_constructor(&attribute_info.struct_info);
         let fn_set_value = self.build_fn_set_value(&unhidden_fields, attribute_info);
         let fn_try_build = self.build_fn_try_build(target_struct, attribute_info);
 
@@ -151,6 +170,7 @@ impl Structure {
         quote! {
             impl #gbuilder_ident {
                 #fn_new
+                #fn_constructor
                 #fn_set_value
                 #fn_try_build
             }
@@ -197,6 +217,34 @@ impl Structure {
         }
     }
 
+    fn build_fn_constructor(&self, struct_info: &StructInfo) -> proc_macro2::TokenStream {
+        let body = if struct_info.constructor {
+            let set_members: Vec<_> = self.fields.iter().map(|field| {
+                let field_ident = field.expect_ident();
+                quote! { self.#field_ident = Some(shared::value::TryFromValue::try_from_cloned(&value)?); }
+            }).collect();
+
+            quote! {
+                #(#set_members)*
+                Ok(self)
+            }
+        } else {
+            quote! {
+                Err(shared::error::ConversionError::UnsupportedConstructor)
+            }
+        };
+
+        let visibility = &self.visibility;
+        quote! {
+            #visibility fn constructor(
+                &mut self,
+                value: shared::value::Value
+            ) -> Result<&mut Self, shared::error::ConversionError> {
+                #body
+            }
+        }
+    }
+
     fn build_fn_set_value(
         &self,
         unhidden_fields: &Punctuated<&syn::Field, Token![,]>,
@@ -224,16 +272,18 @@ impl Structure {
             })
             .collect();
 
-        let assignment_of_aliases: Vec<_> = self.hashmap_of_aliases(attribute_info)
+        let assignment_of_aliases: Vec<_> = self
+            .hashmap_of_aliases(attribute_info)
             .iter()
             .map(|(alias_ident, field)| {
                 let alias_name = alias_ident.to_string();
                 let assignments: Vec<_> = field.iter().map(|field|{
-                let field_ident = field.expect_ident();
-                quote!{
-                    self.#field_ident = Some(shared::value::TryFromValue::try_from_cloned(&value)?);
-                }
-            }).collect();
+                    let field_ident = field.expect_ident();
+                    quote!{
+                        self.#field_ident = Some(shared::value::TryFromValue::try_from_cloned(&value)?);
+                    }
+                }).collect();
+
                 quote! {
                     #alias_name => {
                         #(#assignments)*
@@ -241,7 +291,8 @@ impl Structure {
                         Ok(self)
                     }
                 }
-            }).collect();
+            })
+            .collect();
 
         let associated_gbuilder_assignments: Vec<proc_macro2::TokenStream> = associated_gbuilders
             .into_iter()
@@ -378,6 +429,7 @@ impl AttributeInfo<StructInfo, FieldInfo> {
 struct StructInfo {
     name: syn::Ident,
     derive_info: Option<DeriveInfo>,
+    constructor: bool,
 }
 
 impl Parse for StructInfo {
@@ -385,6 +437,7 @@ impl Parse for StructInfo {
         let beginning_span = input.span();
         let mut name = None;
         let mut derive_info = None;
+        let mut constructor = false;
 
         loop {
             let ident = input.parse::<syn::Ident>()?;
@@ -398,6 +451,7 @@ impl Parse for StructInfo {
                 "derive" => {
                     derive_info = Some(DeriveInfo::from_ident_and_input(ident, &input)?);
                 }
+                "constructor" => constructor = true,
                 _ => return Err(syn::Error::new(ident.span(), "Unknown attribute")),
             }
 
@@ -415,7 +469,11 @@ impl Parse for StructInfo {
             ));
         };
 
-        Ok(Self { name, derive_info })
+        Ok(Self {
+            name,
+            derive_info,
+            constructor,
+        })
     }
 }
 

@@ -228,10 +228,18 @@ fn convert_type_value<'a>(
     let type_name = type_value_pairs.next().unwrap().as_str();
     let mut type_gbuilder: GBuilder = (type_name, alias_storage).try_into()?;
 
-    type_gbuilder.set_properties(
-        type_name,
-        convert_properties(&mut type_value_pairs, alias_storage),
-    );
+    let maybe_value = type_value_pairs.clone().nth(1).unwrap();
+    if maybe_value.as_rule() == Rule::Properties {
+        type_gbuilder.set_properties(
+            type_name,
+            convert_properties(&mut type_value_pairs, alias_storage),
+        );
+    } else {
+        type_gbuilder.constructor(
+            type_name,
+            convert_property_value(maybe_value, alias_storage)?,
+        );
+    }
 
     Ok(type_gbuilder)
 }
@@ -255,6 +263,26 @@ impl GBuilder {
                     "Cannot set value for the '{name}' field in {self_name} due error and skipped. Error: {err}"
                 );
             }
+        }
+    }
+
+    fn constructor(&mut self, self_name: &str, value: Value) {
+        macro_rules! implement_variants {
+            ($($variant:ident),*) => {
+                match self {
+                    $(
+                        Self::$variant(val) => {
+                            val.constructor(value).err()
+                        }
+                    )*
+                }
+            };
+        }
+
+        if let Some(err) =
+            implement_variants!(FlexContainer, WImage, WText, Spacing, Alignment, Border)
+        {
+            warn!("Failed to call constructor of {self_name}, trying to defaulting. Error: {err}");
         }
     }
 
