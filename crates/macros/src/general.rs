@@ -121,11 +121,7 @@ fn matches(attribute: &syn::Attribute, attribute_name: &str) -> bool {
     false
 }
 pub(crate) fn field_name(field: &syn::Field) -> String {
-    field
-        .ident
-        .as_ref()
-        .expect("Must be a named field")
-        .to_string()
+    field.expect_ident().to_string()
 }
 
 pub(crate) enum DefaultAssignment {
@@ -181,6 +177,16 @@ impl ToTokens for DeriveInfo {
             self.paren
                 .surround(tokens, |tokens| self.traits.to_tokens(tokens));
         });
+    }
+}
+
+pub(crate) trait ExpectIdent {
+    fn expect_ident(&self) -> &syn::Ident;
+}
+
+impl ExpectIdent for syn::Field {
+    fn expect_ident(&self) -> &syn::Ident {
+        self.ident.as_ref().expect("Fields should be named!")
     }
 }
 

@@ -1,10 +1,13 @@
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated, Token};
+use syn::{
+    parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated, spanned::Spanned, Token,
+};
 
 use crate::{
     general::{
-        field_name, wrap_by_option, AttributeInfo, DefaultAssignment, DeriveInfo, Structure,
+        field_name, wrap_by_option, AttributeInfo, DefaultAssignment, DeriveInfo, ExpectIdent,
+        Structure,
     },
     propagate_err,
 };
@@ -12,6 +15,7 @@ use crate::{
 pub(super) fn make_derive(item: TokenStream) -> TokenStream {
     let mut structure = parse_macro_input!(item as Structure);
     let attribute_info = propagate_err!(AttributeInfo::parse_removal(&mut structure, "gbuilder"));
+    propagate_err!(structure.verify_attributes(&attribute_info));
 
     let generic_builder = structure.create_generic_builder(&attribute_info.struct_info);
 
@@ -24,6 +28,56 @@ pub(super) fn make_derive(item: TokenStream) -> TokenStream {
 }
 
 impl Structure {
+    fn verify_attributes(
+        &self,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
+    ) -> syn::Result<()> {
+        let seen_field_names: std::collections::HashSet<_> = self
+            .fields
+            .iter()
+            .map(ExpectIdent::expect_ident)
+            .map(ToString::to_string)
+            .collect();
+        let mut alias_types = std::collections::HashMap::new();
+
+        for (attached_field_name, field_info) in &attribute_info.fields_info {
+            let Some(aliases) = &field_info.aliases else {
+                continue;
+            };
+
+            let field = self
+                .fields
+                .iter()
+                .find(|field| &field_name(field) == attached_field_name)
+                .expect("Should be at least one field that have attibutes!");
+
+            for alias in aliases.iter() {
+                if seen_field_names.contains(&alias.to_string()) {
+                    return Err(syn::Error::new(
+                        alias.span(),
+                        "The alias name clashes to field name!",
+                    ));
+                }
+
+                let r#type = alias_types
+                    .entry(alias)
+                    .or_insert(field.ty.to_token_stream().to_string());
+
+                if *r#type != field.ty.to_token_stream().to_string() {
+                    return Err(syn::Error::new(
+                        field.ty.span(),
+                        format!(
+                            "Expected the same types of fields with same attribute value 'aliases' - {}!", 
+                            alias
+                        )
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn create_generic_builder(&self, struct_info: &StructInfo) -> Self {
         let mut generic_builder = self.clone();
         generic_builder.name = struct_info.name.clone();
@@ -156,18 +210,43 @@ impl Structure {
                     .is_none_or(|field_info| field_info.use_gbuilder.is_none())
             });
 
-        let set_members: Punctuated<proc_macro2::TokenStream, Token![,]> = simple_fields.into_iter()
+        let set_members: Vec<proc_macro2::TokenStream> = simple_fields
+            .into_iter()
             .map(|field| {
                 let field_ident = field.ident.clone().expect("Fields should be named");
                 let field_name = field_ident.to_string();
-                quote! { #field_name => self.#field_ident = Some(shared::value::TryFromValue::try_from(value)?) }
+                quote! {
+                    #field_name => {
+                        self.#field_ident = Some(shared::value::TryFromValue::try_from(value)?);
+                        Ok(self)
+                    }
+                }
             })
             .collect();
+
+        let assignment_of_aliases: Vec<_> = self.hashmap_of_aliases(attribute_info)
+            .iter()
+            .map(|(alias_ident, field)| {
+                let alias_name = alias_ident.to_string();
+                let assignments: Vec<_> = field.iter().map(|field|{
+                let field_ident = field.expect_ident();
+                quote!{
+                    self.#field_ident = Some(shared::value::TryFromValue::try_from_cloned(&value)?);
+                }
+            }).collect();
+                quote! {
+                    #alias_name => {
+                        #(#assignments)*
+
+                        Ok(self)
+                    }
+                }
+            }).collect();
 
         let associated_gbuilder_assignments: Vec<proc_macro2::TokenStream> = associated_gbuilders
             .into_iter()
             .map(|field| {
-                let field_ident = field.ident.as_ref().expect("Fields should be named");
+                let field_ident = field.expect_ident();
 
                 quote! {
                     match self.#field_ident.set_value(field_name, value) {
@@ -179,27 +258,6 @@ impl Structure {
             })
             .collect();
 
-        let alternative_expression = quote! {
-            #(#associated_gbuilder_assignments)*
-
-            return Err(shared::error::ConversionError::UnknownField { field_name: field_name.to_string(), value })
-        };
-        let function_body = if set_members.is_empty() {
-            quote! {
-                #alternative_expression
-            }
-        } else {
-            quote! {
-                match field_name {
-                    #set_members,
-                    _ => {
-                        #alternative_expression
-                    }
-                }
-                Ok(self)
-            }
-        };
-
         let visibility = &self.visibility;
         quote! {
             #visibility fn set_value(
@@ -207,7 +265,15 @@ impl Structure {
                 field_name: &str,
                 mut value: shared::value::Value
             ) -> std::result::Result<&mut Self, shared::error::ConversionError> {
-                #function_body
+                match field_name {
+                    #(#set_members)*
+                    #(#assignment_of_aliases)*
+                    _ => {
+                        #(#associated_gbuilder_assignments)*
+
+                        Err(shared::error::ConversionError::UnknownField { field_name: field_name.to_string(), value })
+                    }
+                }
             }
         }
     }
@@ -224,7 +290,7 @@ impl Structure {
             .clone()
             .into_iter()
             .map(|field| {
-                let field_ident = field.ident.expect("Fields should be named");
+                let field_ident = field.expect_ident();
                 let field_name = field_ident.to_string();
                 let mut line = quote! { #field_ident: self.#field_ident };
 
@@ -272,6 +338,31 @@ impl Structure {
                 })
             }
         }
+    }
+
+    fn hashmap_of_aliases<'a>(
+        &'a self,
+        attribute_info: &'a AttributeInfo<StructInfo, FieldInfo>,
+    ) -> std::collections::HashMap<&'a syn::Ident, Vec<&'a syn::Field>> {
+        let mut alias_fields = std::collections::HashMap::new();
+
+        for (attached_field_name, field_info) in &attribute_info.fields_info {
+            let Some(aliases) = &field_info.aliases else {
+                continue;
+            };
+
+            let field = self
+                .fields
+                .iter()
+                .find(|field| &field_name(field) == attached_field_name)
+                .expect("Should be at least one field that have attibutes!");
+
+            aliases
+                .iter()
+                .for_each(|alias| alias_fields.entry(alias).or_insert(vec![]).push(field));
+        }
+
+        alias_fields
     }
 }
 
@@ -332,6 +423,7 @@ struct FieldInfo {
     hidden: bool,
     default: Option<DefaultAssignment>,
     use_gbuilder: Option<syn::Path>,
+    aliases: Option<Punctuated<syn::Ident, Token![,]>>,
 }
 
 impl Parse for FieldInfo {
@@ -339,6 +431,7 @@ impl Parse for FieldInfo {
         let mut hidden = false;
         let mut default = None;
         let mut use_gbuilder = None;
+        let mut aliases = None;
 
         loop {
             let ident = input.parse::<syn::Ident>()?;
@@ -359,6 +452,11 @@ impl Parse for FieldInfo {
                     let _paren = parenthesized!(content in input);
                     use_gbuilder = Some(content.parse()?);
                 }
+                "aliases" => {
+                    let content;
+                    let _paren = parenthesized!(content in input);
+                    aliases = Some(content.parse_terminated(syn::Ident::parse, Token![,])?);
+                }
                 _ => return Err(syn::Error::new(ident.span(), "Unknown attribute")),
             }
 
@@ -373,6 +471,7 @@ impl Parse for FieldInfo {
             default,
             hidden,
             use_gbuilder,
+            aliases,
         })
     }
 }

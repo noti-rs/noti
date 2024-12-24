@@ -7,7 +7,8 @@ use syn::{
 
 use crate::{
     general::{
-        field_name, wrap_by_option, AttributeInfo, DefaultAssignment, DeriveInfo, Structure,
+        field_name, wrap_by_option, AttributeInfo, DefaultAssignment, DeriveInfo, ExpectIdent,
+        Structure,
     },
     propagate_err,
 };
@@ -190,17 +191,14 @@ impl Structure {
         &self,
         attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
     ) -> proc_macro2::TokenStream {
-        let field_idents: Punctuated<&syn::Ident, Token![,]> = self
-            .fields
-            .iter()
-            .map(|field| field.ident.as_ref().expect("Must be a name field!"))
-            .collect();
+        let field_idents: Punctuated<&syn::Ident, Token![,]> =
+            self.fields.iter().map(ExpectIdent::expect_ident).collect();
 
         let init_members: Punctuated<proc_macro2::TokenStream, Token![,]> = self
             .fields
             .iter()
             .map(|field| {
-                let ident = field.ident.as_ref().expect("Must be a named field");
+                let ident = field.expect_ident();
                 let mut line = quote! { #ident: #ident };
 
                 if attribute_info.is_mergeable_field(field)
@@ -237,7 +235,7 @@ impl Structure {
             .fields
             .iter()
             .flat_map(|field| {
-                let field_ident = field.ident.as_ref().expect("Fields should be named");
+                let field_ident = field.expect_ident();
                 attribute_info
                     .fields_info
                     .get(&field_name(field))
@@ -266,18 +264,15 @@ impl Structure {
         target_type: &syn::Ident,
         attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
     ) -> proc_macro2::TokenStream {
-        let field_idents: Punctuated<&syn::Ident, Token![,]> = self
-            .fields
-            .iter()
-            .map(|field| field.ident.as_ref().expect("Must be a name field!"))
-            .collect();
+        let field_idents: Punctuated<&syn::Ident, Token![,]> =
+            self.fields.iter().map(ExpectIdent::expect_ident).collect();
 
         let init_members: Punctuated<proc_macro2::TokenStream, Token![,]> = self
             .fields
             .iter()
             .filter(|field| !attribute_info.is_temporary_field(field))
             .map(|field| {
-                let ident = field.ident.as_ref().expect("Must be a named field");
+                let ident = field.expect_ident();
                 let mut line = quote! { #ident: #ident };
 
                 if let Some(field_info) = attribute_info.fields_info.get(&field_name(field)) {
