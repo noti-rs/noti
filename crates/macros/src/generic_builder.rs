@@ -179,19 +179,21 @@ impl Structure {
             })
             .collect();
 
-        let err_expression = quote! {
-            Err(shared::error::ConversionError::UnknownField { field_name: field_name.to_string(), value })
+        let alternative_expression = quote! {
+            #(#associated_gbuilder_assignments)*
+
+            return Err(shared::error::ConversionError::UnknownField { field_name: field_name.to_string(), value })
         };
         let function_body = if set_members.is_empty() {
-            err_expression
+            quote! {
+                #alternative_expression
+            }
         } else {
             quote! {
                 match field_name {
                     #set_members,
                     _ => {
-                        #(#associated_gbuilder_assignments)*
-
-                        return #err_expression
+                        #alternative_expression
                     }
                 }
                 Ok(self)
