@@ -1,4 +1,4 @@
-use config::display::ImageProperty;
+use config::display::{GBuilderImageProperty, ImageProperty};
 use log::warn;
 
 use crate::{
@@ -10,7 +10,7 @@ use crate::{
 use super::{CompileState, Draw, WidgetConfiguration};
 
 #[derive(macros::GenericBuilder, Clone)]
-#[gbuilder(name(GBuilderWImage))]
+#[gbuilder(name(GBuilderWImage), derive(Clone))]
 pub struct WImage {
     #[gbuilder(hidden, default(Image::Unknown))]
     content: Image,
@@ -20,7 +20,7 @@ pub struct WImage {
     #[gbuilder(hidden, default(0))]
     height: usize,
 
-    #[gbuilder(default)]
+    #[gbuilder(use_gbuilder(GBuilderImageProperty), default)]
     property: ImageProperty,
 }
 

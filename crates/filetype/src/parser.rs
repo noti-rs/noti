@@ -91,3 +91,83 @@ fn test_redundant_semicolon_in_children() {
     )
     .unwrap();
 }
+
+#[test]
+#[should_panic]
+fn test_invalid_alias_definition() {
+    LayoutParser::parse(
+        Rule::Layout,
+        r#"
+            alas Test = Title()
+
+            FlexContainer(
+                min_width = 3,
+                max_width = 4
+            ) {
+                Text()
+                Image()
+            }
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+#[should_panic]
+fn test_invalid_alias_definition2() {
+    LayoutParser::parse(
+        Rule::Layout,
+        r#"
+            alias Test = 3
+
+            FlexContainer(
+                min_width = 3,
+                max_width = 4
+            ) {
+                Text()
+                Image()
+            }
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+#[should_panic]
+fn test_invalid_alias_definition3() {
+    LayoutParser::parse(
+        Rule::Layout,
+        r#"
+            alias Test = literal
+
+            FlexContainer(
+                min_width = 3,
+                max_width = 4
+            ) {
+                Text()
+                Image()
+            }
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+#[should_panic]
+fn test_invalid_alias_definition4() {
+    LayoutParser::parse(
+        Rule::Layout,
+        r#"
+            alias _ = Text()
+
+            FlexContainer(
+                min_width = 3,
+                max_width = 4
+            ) {
+                Text()
+                Image()
+            }
+        "#,
+    )
+    .unwrap();
+}

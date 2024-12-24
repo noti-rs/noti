@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use quote::ToTokens;
 use syn::{ext::IdentExt, parse::Parse, spanned::Spanned, Ident, Token};
 
 #[derive(Clone)]
@@ -149,6 +150,37 @@ impl Parse for DefaultAssignment {
         } else {
             DefaultAssignment::Expression(input.parse()?)
         })
+    }
+}
+
+pub struct DeriveInfo {
+    ident: syn::Ident,
+    paren: syn::token::Paren,
+    traits: syn::punctuated::Punctuated<syn::Ident, Token![,]>,
+}
+
+impl DeriveInfo {
+    pub fn from_ident_and_input(
+        ident: syn::Ident,
+        input: &syn::parse::ParseStream,
+    ) -> syn::Result<Self> {
+        let content;
+        Ok(Self {
+            ident,
+            paren: syn::parenthesized!(content in input),
+            traits: content.parse_terminated(syn::Ident::parse_any, Token![,])?,
+        })
+    }
+}
+
+impl ToTokens for DeriveInfo {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        proc_macro2::Punct::new('#', proc_macro2::Spacing::Joint).to_tokens(tokens);
+        syn::token::Bracket::default().surround(tokens, |tokens| {
+            self.ident.to_tokens(tokens);
+            self.paren
+                .surround(tokens, |tokens| self.traits.to_tokens(tokens));
+        });
     }
 }
 

@@ -3,7 +3,9 @@ use quote::{quote, ToTokens};
 use syn::{parenthesized, parse::Parse, parse_macro_input, punctuated::Punctuated, Token};
 
 use crate::{
-    general::{field_name, wrap_by_option, AttributeInfo, DefaultAssignment, Structure},
+    general::{
+        field_name, wrap_by_option, AttributeInfo, DefaultAssignment, DeriveInfo, Structure,
+    },
     propagate_err,
 };
 
@@ -14,7 +16,7 @@ pub(super) fn make_derive(item: TokenStream) -> TokenStream {
     let generic_builder = structure.create_generic_builder(&attribute_info.struct_info);
 
     let mut tokens = proc_macro2::TokenStream::new();
-    generic_builder.build_gbuilder_struct(&mut tokens);
+    generic_builder.build_gbuilder_struct(&mut tokens, &attribute_info);
 
     propagate_err!(generic_builder.build_gbuilder_impl(&mut tokens, &attribute_info, &structure));
 
@@ -28,7 +30,11 @@ impl Structure {
         generic_builder
     }
 
-    fn build_gbuilder_struct(&self, tokens: &mut proc_macro2::TokenStream) {
+    fn build_gbuilder_struct(
+        &self,
+        tokens: &mut proc_macro2::TokenStream,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
+    ) {
         let Structure {
             ref visibility,
             ref struct_token,
@@ -38,7 +44,14 @@ impl Structure {
             ..
         } = self;
 
+        let derive_info = attribute_info
+            .struct_info
+            .derive_info
+            .as_ref()
+            .map(ToTokens::to_token_stream)
+            .unwrap_or_default();
         quote! {
+            #derive_info
             #visibility #struct_token #name
         }
         .to_tokens(tokens);
@@ -47,7 +60,18 @@ impl Structure {
             let mut fields = fields.clone();
             fields.iter_mut().for_each(|field| {
                 field.attrs.clear();
-                field.ty = wrap_by_option(field.ty.clone())
+                field.ty = if let Some(use_gbuilder) = attribute_info
+                    .fields_info
+                    .get(&field_name(field))
+                    .and_then(|field_info| field_info.use_gbuilder.as_ref())
+                {
+                    syn::Type::Path(syn::TypePath {
+                        qself: None,
+                        path: use_gbuilder.clone(),
+                    })
+                } else {
+                    wrap_by_option(field.ty.clone())
+                }
             });
             fields.to_tokens(tokens)
         });
@@ -65,16 +89,14 @@ impl Structure {
             .filter(|field| !attribute_info.is_hidden_field(field))
             .collect::<Punctuated<&syn::Field, Token![,]>>();
 
-        let fn_new = self.build_fn_new();
-        let fn_contains_field = self.build_fn_contains_field(&unhidden_fields)?;
-        let fn_set_value = self.build_fn_set_value(&unhidden_fields);
+        let fn_new = self.build_fn_new(attribute_info);
+        let fn_set_value = self.build_fn_set_value(&unhidden_fields, attribute_info);
         let fn_try_build = self.build_fn_try_build(target_struct, attribute_info);
 
         let gbuilder_ident = &self.name;
         quote! {
             impl #gbuilder_ident {
                 #fn_new
-                #fn_contains_field
                 #fn_set_value
                 #fn_try_build
             }
@@ -90,12 +112,25 @@ impl Structure {
         Ok(())
     }
 
-    fn build_fn_new(&self) -> proc_macro2::TokenStream {
+    fn build_fn_new(
+        &self,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
+    ) -> proc_macro2::TokenStream {
         let init_members: Punctuated<proc_macro2::TokenStream, Token![,]> = self
             .fields
             .iter()
             .map(|field| field.ident.clone().expect("Fields should be named"))
-            .map(|field_ident| quote! { #field_ident: None })
+            .map(|field_ident| {
+                if let Some(use_gbuilder) = attribute_info
+                    .fields_info
+                    .get(&field_ident.to_string())
+                    .and_then(|field_info| field_info.use_gbuilder.as_ref())
+                {
+                    quote! { #field_ident: #use_gbuilder::new() }
+                } else {
+                    quote! { #field_ident: None }
+                }
+            })
             .collect();
 
         let visibility = &self.visibility;
@@ -108,41 +143,20 @@ impl Structure {
         }
     }
 
-    fn build_fn_contains_field(
-        &self,
-        unhidden_fields: &Punctuated<&syn::Field, Token![,]>,
-    ) -> syn::Result<proc_macro2::TokenStream> {
-        let quoted_field_names: Punctuated<String, Token![,]> = unhidden_fields
-            .iter()
-            .map(|field| {
-                field
-                    .ident
-                    .clone()
-                    .expect("Fields should be named")
-                    .to_string()
-            })
-            .collect();
-        let field_count = quoted_field_names.len();
-
-        let visibility = &self.visibility;
-        Ok(quote! {
-            const FIELD_NAMES: [&'static str; #field_count] = [
-                #quoted_field_names
-            ];
-
-            #visibility fn contains_field(&self, field_name: &str) -> bool {
-                Self::FIELD_NAMES.contains(&field_name)
-            }
-        })
-    }
-
     fn build_fn_set_value(
         &self,
         unhidden_fields: &Punctuated<&syn::Field, Token![,]>,
+        attribute_info: &AttributeInfo<StructInfo, FieldInfo>,
     ) -> proc_macro2::TokenStream {
-        let set_members: Punctuated<proc_macro2::TokenStream, Token![,]> = unhidden_fields
-            .clone()
-            .into_iter()
+        let (simple_fields, associated_gbuilders): (Vec<&syn::Field>, Vec<&syn::Field>) =
+            unhidden_fields.clone().into_iter().partition(|field| {
+                attribute_info
+                    .fields_info
+                    .get(&field_name(field))
+                    .is_none_or(|field_info| field_info.use_gbuilder.is_none())
+            });
+
+        let set_members: Punctuated<proc_macro2::TokenStream, Token![,]> = simple_fields.into_iter()
             .map(|field| {
                 let field_ident = field.ident.clone().expect("Fields should be named");
                 let field_name = field_ident.to_string();
@@ -150,16 +164,37 @@ impl Structure {
             })
             .collect();
 
-        let err_expression = quote! {
-            Err(shared::error::ConversionError::UnknownField { field_name: field_name.to_string() })
+        let associated_gbuilder_assignments: Vec<proc_macro2::TokenStream> = associated_gbuilders
+            .into_iter()
+            .map(|field| {
+                let field_ident = field.ident.as_ref().expect("Fields should be named");
+
+                quote! {
+                    match self.#field_ident.set_value(field_name, value) {
+                        Ok(_) => return Ok(self),
+                        Err(shared::error::ConversionError::UnknownField{ value: returned_value,.. }) => value = returned_value,
+                        Err(err) => return Err(err),
+                    }
+                }
+            })
+            .collect();
+
+        let alternative_expression = quote! {
+            #(#associated_gbuilder_assignments)*
+
+            return Err(shared::error::ConversionError::UnknownField { field_name: field_name.to_string(), value })
         };
         let function_body = if set_members.is_empty() {
-            err_expression
+            quote! {
+                #alternative_expression
+            }
         } else {
             quote! {
                 match field_name {
                     #set_members,
-                    _ => return #err_expression
+                    _ => {
+                        #alternative_expression
+                    }
                 }
                 Ok(self)
             }
@@ -170,7 +205,7 @@ impl Structure {
             #visibility fn set_value(
                 &mut self,
                 field_name: &str,
-                value: shared::value::Value
+                mut value: shared::value::Value
             ) -> std::result::Result<&mut Self, shared::error::ConversionError> {
                 #function_body
             }
@@ -193,6 +228,15 @@ impl Structure {
                 let field_name = field_ident.to_string();
                 let mut line = quote! { #field_ident: self.#field_ident };
 
+                let is_associated_gbuilder = attribute_info
+                    .fields_info
+                    .get(&field_name)
+                    .and_then(|field_info| field_info.use_gbuilder.as_ref())
+                    .is_some();
+                if is_associated_gbuilder {
+                    line = quote! { #line.try_build() }
+                };
+
                 if let Some(default_assignment) = attribute_info
                     .fields_info
                     .get(&field_name)
@@ -200,18 +244,20 @@ impl Structure {
                 {
                     match default_assignment {
                         DefaultAssignment::Expression(expr) => {
-                            quote! { .unwrap_or_else(|| #expr) }.to_tokens(&mut line)
+                            line = quote! { #line.unwrap_or_else(|| #expr) }
                         }
                         DefaultAssignment::FunctionCall(function_path) => {
-                            quote! { .unwrap_or_else(#function_path) }.to_tokens(&mut line)
+                            line = quote! { #line.unwrap_or_else(#function_path) }
                         }
                         DefaultAssignment::DefaultCall => {
-                            quote! { .unwrap_or_default() }.to_tokens(&mut line);
+                            line = quote! { #line.unwrap_or_default() }
                         }
                     }
+                } else if is_associated_gbuilder {
+                    line = quote! { #line? }
                 } else {
-                    quote! { .ok_or("The field '".to_string() + #field_name + "' should be set")? }
-                        .to_tokens(&mut line);
+                    let err_msg = format!("The field '{field_name}' should be set");
+                    line = quote! { #line.ok_or(#err_msg)? }
                 }
 
                 line
@@ -240,12 +286,14 @@ impl AttributeInfo<StructInfo, FieldInfo> {
 
 struct StructInfo {
     name: syn::Ident,
+    derive_info: Option<DeriveInfo>,
 }
 
 impl Parse for StructInfo {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let beginning_span = input.span();
-        let mut name;
+        let mut name = None;
+        let mut derive_info = None;
 
         loop {
             let ident = input.parse::<syn::Ident>()?;
@@ -255,6 +303,9 @@ impl Parse for StructInfo {
                     let content;
                     let _paren = parenthesized!(content in input);
                     name = Some(content.parse()?);
+                }
+                "derive" => {
+                    derive_info = Some(DeriveInfo::from_ident_and_input(ident, &input)?);
                 }
                 _ => return Err(syn::Error::new(ident.span(), "Unknown attribute")),
             }
@@ -273,19 +324,21 @@ impl Parse for StructInfo {
             ));
         };
 
-        Ok(Self { name })
+        Ok(Self { name, derive_info })
     }
 }
 
 struct FieldInfo {
     hidden: bool,
     default: Option<DefaultAssignment>,
+    use_gbuilder: Option<syn::Path>,
 }
 
 impl Parse for FieldInfo {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut hidden = false;
         let mut default = None;
+        let mut use_gbuilder = None;
 
         loop {
             let ident = input.parse::<syn::Ident>()?;
@@ -301,6 +354,11 @@ impl Parse for FieldInfo {
                         default = Some(DefaultAssignment::DefaultCall)
                     }
                 }
+                "use_gbuilder" => {
+                    let content;
+                    let _paren = parenthesized!(content in input);
+                    use_gbuilder = Some(content.parse()?);
+                }
                 _ => return Err(syn::Error::new(ident.span(), "Unknown attribute")),
             }
 
@@ -311,6 +369,10 @@ impl Parse for FieldInfo {
             }
         }
 
-        Ok(Self { default, hidden })
+        Ok(Self {
+            default,
+            hidden,
+            use_gbuilder,
+        })
     }
 }
