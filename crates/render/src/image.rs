@@ -1,5 +1,5 @@
 use log::{debug, error, warn};
-use owned_ttf_parser::{RasterGlyphImage, RasterImageFormat};
+use ttf_parser::{RasterGlyphImage, RasterImageFormat};
 
 use config::display::{ImageProperty, ResizingMethod};
 use dbus::image::ImageData;
