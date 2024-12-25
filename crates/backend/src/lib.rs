@@ -1,10 +1,7 @@
-use std::thread;
-
-use anyhow::Context;
 use config::Config;
-use internal_messages::InternalChannel;
 use log::{debug, info, warn};
 use scheduler::Scheduler;
+use shared::file_watcher::FileState;
 use tokio::sync::mpsc::unbounded_channel;
 
 mod backend_manager;
@@ -13,52 +10,36 @@ mod cache;
 mod dispatcher;
 mod idle_manager;
 mod idle_notifier;
-mod internal_messages;
 mod scheduler;
 mod window;
 mod window_manager;
 
-use dbus::actions::Action;
+use dbus::actions::{Action, ClosingReason, Signal};
 use dbus::server::Server;
 
 use backend_manager::BackendManager;
 
-pub async fn run(config: Config) -> anyhow::Result<()> {
+pub async fn run(mut config: Config) -> anyhow::Result<()> {
     let (sender, mut receiver) = unbounded_channel();
 
     let server = Server::init(sender).await?;
     info!("Backend: Server initialized");
-
-    let (server_internal_channel, renderer_internal_channel) = InternalChannel::new().split();
-
-    let backend_thread: thread::JoinHandle<Result<(), anyhow::Error>> = thread::spawn(move || {
-        let mut renderer = BackendManager::init(config, renderer_internal_channel)?;
-        info!("Backend: Renderer initialized");
-        renderer.run()
-    });
+    let mut backend_manager = BackendManager::init(&config)?;
+    info!("Backend: Manager initialized");
 
     let mut scheduler = Scheduler::new();
     info!("Backend: Scheduler initialized");
+
+    let mut partially_default_config = false;
 
     loop {
         while let Ok(action) = receiver.try_recv() {
             match action {
                 Action::Show(notification) => {
-                    debug!(
-                        "Backend: Sent a request to renderer to show notification with id: {}",
-                        &notification.id
-                    );
-                    server_internal_channel.send_to_renderer(
-                        internal_messages::ServerMessage::ShowNotification(notification),
-                    )?;
+                    backend_manager.create_notification(notification);
                 }
                 Action::Close(Some(id)) => {
-                    server_internal_channel.send_to_renderer(
-                        internal_messages::ServerMessage::CloseNotification { id },
-                    )?;
-                    debug!(
-                        "Backend: Sent a request to renderer to close notification with id: {id}"
-                    );
+                    backend_manager.close_notification(id);
                 }
                 Action::Schedule(notification) => {
                     debug!(
@@ -80,51 +61,58 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             .pop_due_notifications()
             .into_iter()
             .for_each(|scheduled| {
-                server_internal_channel
-                    .send_to_renderer(internal_messages::ServerMessage::ShowNotification(
-                        scheduled.data,
-                    ))
-                    .unwrap();
+                backend_manager.create_notification(scheduled.data);
                 debug!(
-                    "Backend: Notification with id {} due for delivery. Sending to renderer",
+                    "Backend: Notification with id {} due for delivery",
                     &scheduled.id
                 );
             });
 
-        while let Ok(message) = server_internal_channel.try_recv_from_renderer() {
-            match message {
-                //TODO: add actions for notifications in render module
-                #[allow(unused)]
-                internal_messages::BackendMessage::ActionInvoked {
-                    notification_id,
-                    action_key,
-                } => todo!(),
-                internal_messages::BackendMessage::ClosedNotification { id, reason } => {
-                    match reason {
-                        //INFO: ignore the first one because it always emits in server.
-                        dbus::actions::ClosingReason::CallCloseNotification => (),
-                        other_reason => {
-                            debug!("Backend: Closed notification with id {id} for reason {other_reason}");
-                            server
-                                .emit_signal(dbus::actions::Signal::NotificationClosed {
-                                    notification_id: id,
-                                    reason: other_reason,
-                                })
-                                .await?;
-                        }
-                    }
-                }
+        backend_manager.poll(&config)?;
+
+        match config.check_updates() {
+            FileState::Updated => {
+                partially_default_config = false;
+                config.update();
+                backend_manager.update_config(&config)?;
+                info!("Renderer: Detected changes of config files and updated")
             }
+            FileState::NotFound if !partially_default_config => {
+                partially_default_config = true;
+                config.update();
+                backend_manager.update_config(&config)?;
+                info!("The main or imported configuration file is not found, reverting this part to default values.");
+            }
+            FileState::NotFound | FileState::NothingChanged => (),
+        };
+
+        while let Some(signal) = backend_manager.pop_signal() {
+            //INFO: ignore this one because it always emits at server
+            if let Signal::NotificationClosed {
+                reason: ClosingReason::CallCloseNotification,
+                ..
+            } = &signal
+            {
+                continue;
+            }
+            debug_signal(&signal);
+            server.emit_signal(signal).await?;
         }
 
-        if backend_thread.is_finished() {
-            return backend_thread
-                .join()
-                .expect("Join the backend thread to finish main thread")
-                .with_context(|| "The backend is shutting down due to an error");
-        }
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         std::hint::spin_loop();
+    }
+}
+
+fn debug_signal(signal: &Signal) {
+    match signal {
+        Signal::ActionInvoked {
+            notification_id,
+            action_key,
+        } => debug!("Action '{action_key}' was invoked for notification id {notification_id}"),
+        Signal::NotificationClosed {
+            notification_id,
+            reason,
+        } => debug!("Notification with id {notification_id} closed by {reason} reason"),
     }
 }

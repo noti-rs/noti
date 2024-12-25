@@ -7,9 +7,8 @@ use wayland_client::{Connection, EventQueue, QueueHandle};
 use crate::cache::CachedLayout;
 use crate::dispatcher::Dispatcher;
 
-use super::internal_messages::BackendMessage;
 use config::Config;
-use dbus::notification::Notification;
+use dbus::{actions::Signal, notification::Notification};
 
 use super::window::{ConfigurationState, Window};
 use render::font::FontCollection;
@@ -23,9 +22,10 @@ pub(crate) struct WindowManager {
     font_collection: Rc<RefCell<FontCollection>>,
     cached_layouts: CachedData<PathBuf, CachedLayout>,
 
-    events: Vec<BackendMessage>,
+    signals: Vec<Signal>,
 
     notification_queue: VecDeque<Notification>,
+    close_notifications: Vec<u32>,
 }
 
 impl Dispatcher for WindowManager {
@@ -60,9 +60,11 @@ impl WindowManager {
             font_collection,
             cached_layouts,
 
-            events: vec![],
+            signals: vec![],
             notification_queue: VecDeque::new(),
+            close_notifications: vec![],
         };
+
         debug!("Window Manager: Created");
 
         Ok(wm)
@@ -101,30 +103,45 @@ impl WindowManager {
         self.roundtrip_event_queue()
     }
 
-    pub(crate) fn create_notifications(
-        &mut self,
-        notifications: Vec<Notification>,
-        config: &Config,
-    ) -> anyhow::Result<()> {
-        self.init_window(config)?;
-        self.notification_queue.extend(notifications);
-        self.process_notification_queue(config)
+    pub(crate) fn create_notification(&mut self, notification: Box<Notification>) {
+        self.notification_queue.push_back(*notification);
+    }
+
+    pub(crate) fn close_notification(&mut self, notification_id: u32) {
+        self.close_notifications.push(notification_id);
+    }
+
+    pub(crate) fn show_window(&mut self, config: &Config) -> anyhow::Result<()> {
+        let mut notifications_limit = config.general().limit as usize;
+        if notifications_limit == 0 {
+            notifications_limit = usize::MAX;
+        }
+
+        if self
+            .window
+            .as_ref()
+            .is_none_or(|window| window.total_banners() < notifications_limit)
+            && !self.notification_queue.is_empty()
+        {
+            self.init_window(config)?;
+            self.process_notification_queue(config)?;
+        }
+
+        Ok(())
     }
 
     fn process_notification_queue(&mut self, config: &Config) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
-            let notifications_limit = config.general().limit as usize;
+            let mut notifications_limit = config.general().limit as usize;
 
             if notifications_limit == 0 {
-                return self.display_all_notifications(config);
+                notifications_limit = usize::MAX
             }
 
             window.replace_by_indices(&mut self.notification_queue, config, &self.cached_layouts);
 
-            let current_notifications_count = window.get_current_notifications_count();
-            let available_slots = notifications_limit.saturating_sub(current_notifications_count);
-
-            let notifications_to_display: Vec<Notification> = self
+            let available_slots = notifications_limit.saturating_sub(window.total_banners());
+            let notifications_to_display: Vec<_> = self
                 .notification_queue
                 .drain(..available_slots.min(self.notification_queue.len()))
                 .collect();
@@ -138,29 +155,12 @@ impl WindowManager {
         Ok(())
     }
 
-    fn display_all_notifications(&mut self, config: &Config) -> anyhow::Result<()> {
-        if let Some(window) = self.window.as_mut() {
-            window.replace_by_indices(&mut self.notification_queue, config, &self.cached_layouts);
+    pub(crate) fn handle_close_notifications(&mut self, config: &Config) -> anyhow::Result<()> {
+        if self.window.as_ref().is_some() && !self.close_notifications.is_empty() {
+            let window = self.window.as_mut().unwrap();
 
-            let notifications_to_display: Vec<Notification> =
-                self.notification_queue.drain(..).collect();
-
-            window.update_banners(notifications_to_display, config, &self.cached_layouts);
-
-            self.update_window(config)?;
-            self.roundtrip_event_queue()?;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn close_notifications(
-        &mut self,
-        indices: &[u32],
-        config: &Config,
-    ) -> anyhow::Result<()> {
-        if let Some(window) = self.window.as_mut() {
-            let notifications = window.remove_banners_by_id(indices);
+            let notifications = window.remove_banners_by_id(&self.close_notifications);
+            self.close_notifications.clear();
 
             if notifications.is_empty() {
                 return Ok(());
@@ -170,8 +170,8 @@ impl WindowManager {
                 .into_iter()
                 .map(|notification| notification.id)
                 .for_each(|id| {
-                    self.events.push(BackendMessage::ClosedNotification {
-                        id,
+                    self.signals.push(Signal::NotificationClosed {
+                        notification_id: id,
                         reason: dbus::actions::ClosingReason::CallCloseNotification,
                     })
                 });
@@ -191,8 +191,8 @@ impl WindowManager {
             }
 
             notifications.into_iter().for_each(|notification| {
-                self.events.push(BackendMessage::ClosedNotification {
-                    id: notification.id,
+                self.signals.push(Signal::NotificationClosed {
+                    notification_id: notification.id,
                     reason: dbus::actions::ClosingReason::Expired,
                 })
             });
@@ -203,8 +203,8 @@ impl WindowManager {
         Ok(())
     }
 
-    pub(crate) fn pop_event(&mut self) -> Option<BackendMessage> {
-        self.events.pop()
+    pub(crate) fn pop_signal(&mut self) -> Option<Signal> {
+        self.signals.pop()
     }
 
     pub(crate) fn handle_actions(&mut self, config: &Config) -> anyhow::Result<()> {
@@ -213,13 +213,12 @@ impl WindowManager {
         if let Some(window) = self.window.as_mut() {
             window.handle_hover(config);
 
-            let messages = window.handle_click(config);
-            if messages.is_empty() {
+            let signals = window.handle_click(config);
+            if signals.is_empty() {
                 return Ok(());
             }
 
-            self.events.extend(messages);
-
+            self.signals.extend(signals);
             self.process_notification_queue(config)?;
         }
 

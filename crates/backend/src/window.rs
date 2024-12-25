@@ -30,9 +30,11 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor},
 };
 
-use super::internal_messages::BackendMessage;
 use config::{self, Config};
-use dbus::notification::{self, Notification};
+use dbus::{
+    actions::Signal,
+    notification::{self, Notification},
+};
 
 use crate::{banner::BannerRect, cache::CachedLayout};
 use render::{font::FontCollection, types::RectSize};
@@ -183,6 +185,10 @@ impl Window {
         }
     }
 
+    pub(super) fn total_banners(&self) -> usize {
+        self.banners.len()
+    }
+
     pub(super) fn configuration_state(&self) -> &ConfigurationState {
         &self.configuration_state
     }
@@ -305,7 +311,7 @@ impl Window {
             .for_each(BannerRect::reset_timeout);
     }
 
-    pub(super) fn handle_click(&mut self, config: &Config) -> Vec<BackendMessage> {
+    pub(super) fn handle_click(&mut self, config: &Config) -> Vec<Signal> {
         if let PrioritiedPressState::Unpressed = self.pointer_state.press_state {
             return vec![];
         }
@@ -322,8 +328,8 @@ impl Window {
             return self
                 .remove_banners_by_id(&[id])
                 .into_iter()
-                .map(|notification| BackendMessage::ClosedNotification {
-                    id: notification.id,
+                .map(|notification| Signal::NotificationClosed {
+                    notification_id: notification.id,
                     reason: dbus::actions::ClosingReason::DismissedByUser,
                 })
                 .collect();
@@ -507,10 +513,6 @@ impl Window {
         surface.commit();
 
         debug!("Window: Commited")
-    }
-
-    pub fn get_current_notifications_count(&self) -> usize {
-        self.banners.len()
     }
 }
 
