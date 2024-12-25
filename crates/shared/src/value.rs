@@ -8,6 +8,17 @@ pub enum Value {
 }
 
 pub trait TryFromValue: Sized + 'static {
+    fn try_from_cloned(value: &Value) -> Result<Self, ConversionError>
+    where
+        Self: Clone,
+    {
+        match value {
+            Value::String(string) => Self::try_from_string(string.clone()),
+            Value::UInt(uint) => Self::try_from_uint(*uint),
+            Value::Any(dyn_value) => dyn_value.try_downcast_ref().cloned(),
+        }
+    }
+
     fn try_from(value: Value) -> Result<Self, ConversionError> {
         match value {
             Value::String(string) => Self::try_from_string(string),
@@ -25,17 +36,25 @@ pub trait TryFromValue: Sized + 'static {
     }
 }
 
-pub trait TryDowncast {
-    fn try_downcast<T: 'static>(self) -> Result<T, ConversionError>;
+pub trait TryDowncast<T: 'static>: Sized {
+    fn try_downcast(self) -> Result<T, ConversionError>;
+    fn try_downcast_ref(&self) -> Result<&T, ConversionError>;
 }
 
-impl TryDowncast for Box<dyn std::any::Any + Send + Sync> {
-    fn try_downcast<T: 'static>(self) -> Result<T, ConversionError> {
+impl<T: 'static> TryDowncast<T> for Box<dyn std::any::Any + Send + Sync> {
+    fn try_downcast(self) -> Result<T, ConversionError> {
         Ok(*self
             .downcast()
             .map_err(|_| ConversionError::AnyDoesntMatchType {
                 concrete_typename: std::any::type_name::<T>(),
             })?)
+    }
+
+    fn try_downcast_ref(&self) -> Result<&T, ConversionError> {
+        self.downcast_ref()
+            .ok_or_else(|| ConversionError::AnyDoesntMatchType {
+                concrete_typename: std::any::type_name::<T>(),
+            })
     }
 }
 
@@ -65,7 +84,7 @@ impl TryFromValue for String {
     }
 }
 
-impl<T: 'static> TryFromValue for Vec<T> {}
+impl<T: 'static + Clone> TryFromValue for Vec<T> {}
 
 macro_rules! impl_try_from_value_for_uint {
     ($($type:path),*) => {

@@ -1,29 +1,51 @@
 use shared::value::{TryFromValue, Value};
 
+#[derive(macros::GenericBuilder, PartialEq, Debug)]
+#[gbuilder(name(GBuilderHomogeneousStruct), constructor)]
+#[allow(unused)]
+struct HomogeneousStruct {
+    field1: usize,
+    field2: usize,
+    field3: usize,
+    field4: usize,
+    field5: usize,
+}
+
+#[test]
+fn homogeneous_struct() {
+    let mut gbuilder = GBuilderHomogeneousStruct::new();
+    gbuilder.constructor(Value::UInt(5)).unwrap();
+    let result = gbuilder.try_build().unwrap();
+
+    assert_eq!(
+        result,
+        HomogeneousStruct {
+            field1: 5,
+            field2: 5,
+            field3: 5,
+            field4: 5,
+            field5: 5
+        }
+    )
+}
+
 #[derive(macros::GenericBuilder, Eq, PartialEq, Debug)]
 #[gbuilder(name(GBuilderTest))]
 struct Test {
+    #[gbuilder(aliases(field4))]
     field1: usize,
+    #[gbuilder(aliases(field4), default)]
+    field5: usize,
     field2: String,
     #[gbuilder(hidden, default)]
     field3: Option<u32>,
 }
 
 #[test]
-fn check_availability_of_fields() {
-    let gbuilder = GBuilderTest::new();
-
-    assert!(gbuilder.contains_field("field1"));
-    assert!(gbuilder.contains_field("field2"));
-    assert!(!gbuilder.contains_field("field3"));
-    assert!(!gbuilder.contains_field("field4"));
-}
-
-#[test]
 fn build_struct() -> Result<(), Box<dyn std::error::Error>> {
     let mut gbuilder = GBuilderTest::new();
 
-    gbuilder.set_value("field1", Value::UInt(3))?;
+    gbuilder.set_value("field4", Value::UInt(3))?;
     gbuilder.set_value("field2", Value::String("hell".to_string()))?;
 
     let failure_assignment = gbuilder.set_value("field3", Value::UInt(5));
@@ -31,7 +53,8 @@ fn build_struct() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(
         failure_assignment.err().unwrap().to_string(),
         shared::error::ConversionError::UnknownField {
-            field_name: "field3".to_string()
+            field_name: "field3".to_string(),
+            value: Value::UInt(5),
         }
         .to_string()
     );
@@ -42,6 +65,7 @@ fn build_struct() -> Result<(), Box<dyn std::error::Error>> {
         result,
         Test {
             field1: 3,
+            field5: 3,
             field2: "hell".to_string(),
             field3: None
         }
@@ -57,7 +81,7 @@ struct ComplexStructure {
     field3: InnerStructure,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 enum InnerStructure {
     First,
     Second,

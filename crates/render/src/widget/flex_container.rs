@@ -252,9 +252,12 @@ impl Draw for FlexContainer {
 }
 
 #[derive(macros::GenericBuilder, Debug, Default, Clone)]
-#[gbuilder(name(GBuilderAlignment), derive(Clone))]
+#[gbuilder(name(GBuilderAlignment), derive(Clone), constructor)]
 pub struct Alignment {
+    #[gbuilder(aliases(diagonal))]
     pub horizontal: Position,
+
+    #[gbuilder(aliases(diagonal))]
     pub vertical: Position,
 }
 

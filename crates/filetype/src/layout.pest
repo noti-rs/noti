@@ -49,7 +49,7 @@ PropertyValue = { TypeValue | UInt | Literal }
 
 TypeValue = {
   Identifier ~ OpeningParenthesis
-    ~ Properties?
+    ~ (Properties | PropertyValue)?
   ~ ClosingParenthesis }
 
 Literal = ${ Hashtag? ~ ASCII_ALPHANUMERIC ~ (ASCII_ALPHANUMERIC | "_"  | "-")* }
