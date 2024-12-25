@@ -17,7 +17,8 @@ members = [
   "crates/macros",
   "crates/render",
   "crates/filetype",
-  "crates/shared"
+  "crates/shared",
+  "crates/systemhub"
 ]
 
 [workspace.package]
@@ -38,11 +39,14 @@ render.path = "crates/render"
 dbus.path = "crates/dbus"
 shared.path = "crates/shared"
 macros.path = "crates/macros"
+client.path = "crates/client"
+systemhub.path = "crates/systemhub"
 
 [dependencies]
 config.workspace = true
 backend.path = "crates/backend"
 client.path = "crates/client"
+systemhub.path = "crates/systemhub"
 
 anyhow.workspace = true
 tokio.workspace = true

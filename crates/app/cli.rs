@@ -12,6 +12,9 @@ pub enum Args {
     /// Send the notification
     Send(Box<SendCommand>),
 
+    /// Listen system events
+    ListenEvents,
+
     /// Print server information
     ServerInfo,
 }
@@ -191,10 +194,18 @@ impl Args {
             Args::Run { .. } => unreachable!(),
             Args::Send(args) => send(noti, *args).await?,
             Args::ServerInfo => server_info(noti).await?,
+            Args::ListenEvents => listen_events(noti).await?,
         }
 
         Ok(())
     }
+}
+
+async fn listen_events(noti: client::NotiClient<'_>) -> anyhow::Result<()> {
+    let mut hub = systemhub::SystemHub::init(noti)?;
+    hub.run().await?;
+
+    Ok(())
 }
 
 async fn run(args: &RunCommand) -> anyhow::Result<()> {
