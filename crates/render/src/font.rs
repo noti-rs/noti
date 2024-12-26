@@ -1,11 +1,11 @@
 use ab_glyph::{point, Font as AbGlyphFont, OutlinedGlyph, ScaleFont};
 use derive_more::Display;
-use log::{debug, info, warn};
-use owned_ttf_parser::{AsFaceRef, OwnedFace};
-use rayon::prelude::*;
+use log::{debug, error, info, warn};
 use std::{
     collections::HashMap,
+    ffi::c_void,
     ops::{Add, AddAssign, Sub, SubAssign},
+    os::fd::AsRawFd,
     process::Command,
 };
 
@@ -22,8 +22,9 @@ use super::{
 
 pub struct FontCollection {
     font_name: String,
-    map: HashMap<FontStyle, Font>,
-    pub emoji: Option<OwnedFace>,
+    font_map: HashMap<FontStyle, Font>,
+    math_font: Option<MathFont>,
+    emoji_font: Option<EmojiFont>,
 }
 
 impl FontCollection {
@@ -42,18 +43,18 @@ impl FontCollection {
     pub fn load_by_font_name(font_name: &str) -> anyhow::Result<Self> {
         debug!("Font: Trying load font by name {font_name}");
 
-        let process_result = Command::new("fc-list")
+        let output: String = Command::new("fc-list")
             .args([font_name, "--format", "%{file}:%{style}\n"])
-            .output()?;
-
-        let output: String = process_result
+            .output()?
             .stdout
             .into_iter()
             .map(|data| data as char)
             .collect();
 
-        let map = output
-            .par_split('\n')
+        let mut font_map = HashMap::new();
+
+        for (filepath, styles) in output
+            .split('\n')
             .filter(|line| !line.is_empty())
             .map(|line| {
                 line.split_once(':')
@@ -63,64 +64,65 @@ impl FontCollection {
                 Self::ACCEPTED_STYLES
                     .contains(&style.split_once(' ').map(|(lhs, _)| lhs).unwrap_or(style))
             })
-            .fold(HashMap::new, |mut acc, (filepath, styles)| {
-                let font = Font::try_read(filepath, styles).expect("Can't read the font file");
-                acc.insert(font.style.clone(), font);
-                acc
-            })
-            .reduce(HashMap::new, |mut lhs, rhs| {
-                lhs.extend(rhs);
-                lhs
-            });
+        {
+            let font = match Font::try_read(filepath, styles) {
+                Ok(font) => font,
+                Err(err) => {
+                    error!("Failed to read or parse font at {filepath}. Error: {err}");
+                    continue;
+                }
+            };
+
+            font_map.insert(font.style.clone(), font);
+        }
 
         info!("Font: Loaded fonts by name {font_name}");
 
-        let emoji = OwnedFace::from_vec(
-            std::fs::read(
-                Command::new("fc-list")
-                    .args(["NotoColorEmoji", "--format", "%{file}"])
-                    .output()?
-                    .stdout
-                    .into_iter()
-                    .map(|byte| byte as char)
-                    .collect::<String>(),
-            )?,
-            0,
-        )
-        .ok();
+        let math_font = match MathFont::try_create() {
+            Ok(emoji) => Some(emoji),
+            Err(err) => {
+                warn!("Font: Not found the 'NotoSansMath' font, math symbols will not be displayed. Error: {err}");
+                None
+            }
+        };
 
-        if emoji.is_none() {
-            warn!("Font: Not found the 'NotoColorEmoj' font, emoji will be not displayed");
-        }
+        let emoji_font = match EmojiFont::try_create() {
+            Ok(emoji) => Some(emoji),
+            Err(err) => {
+                warn!("Font: Not found the 'NotoColorEmoj' font, emoji will not be displayed. Error: {err}");
+                None
+            }
+        };
 
         Ok(Self {
             font_name: font_name.to_owned(),
-            map,
-            emoji,
+            font_map,
+            math_font,
+            emoji_font,
         })
     }
 
     pub fn load_glyph_by_style(&self, font_style: &FontStyle, ch: char, px_size: f32) -> Glyph {
-        let font = self.map.get(font_style).unwrap_or(self.default_font());
-        let glyph = font.load_glyph(ch, px_size);
+        let font = self.font_map.get(font_style).unwrap_or(self.default_font());
 
-        if glyph.is_empty() {
-            self.emoji_image(ch, px_size.round() as u16)
-                .map(Glyph::Image)
-                .unwrap_or(Glyph::Empty)
-        } else {
-            glyph
-        }
-    }
-
-    pub fn emoji_image(&self, ch: char, size: u16) -> Option<Image> {
-        let face = self.emoji.as_ref()?.as_face_ref();
-        let glyph_id = face.glyph_index(ch)?;
-        Image::from_raster_glyph_image(face.glyph_raster_image(glyph_id, size)?, size as u32)
+        font.load_glyph(ch, px_size)
+            .or_else(|| {
+                self.math_font
+                    .as_ref()
+                    .map(|math_font| math_font.load_glyph(ch, px_size))
+                    .unwrap_or_default()
+            })
+            .or_else(|| {
+                self.emoji_font
+                    .as_ref()
+                    .and_then(|emoji| emoji.image(ch, px_size.round() as u16))
+                    .map(Glyph::Image)
+                    .unwrap_or_default()
+            })
     }
 
     pub fn max_height(&self, px_size: f32) -> usize {
-        self.map
+        self.font_map
             .values()
             .map(|font| font.get_height(px_size).round() as usize)
             .max()
@@ -136,7 +138,7 @@ impl FontCollection {
     }
 
     fn default_font(&self) -> &Font {
-        self.map
+        self.font_map
             .get(&FontStyle::Regular)
             .expect("Not found regular font in Font collection")
     }
@@ -145,7 +147,9 @@ impl FontCollection {
 #[derive(Debug)]
 pub struct Font {
     style: FontStyle,
-    data: ab_glyph::FontVec,
+    _buffer: Buffer<u8>,
+    /// WARNING: DON'T CLONE THIS FIELD
+    data: ab_glyph::FontRef<'static>,
 }
 
 impl Font {
@@ -157,10 +161,15 @@ impl Font {
                 .unwrap_or(styles),
         );
 
-        let bytes = std::fs::read(filepath)?;
-        let data = ab_glyph::FontVec::try_from_vec(bytes)?;
+        let file = std::fs::File::open(filepath)?;
+        let buffer = Buffer::from(file);
+        let data = ab_glyph::FontRef::try_from_slice(buffer.as_slice())?;
 
-        Ok(Self { style, data })
+        Ok(Self {
+            style,
+            _buffer: buffer,
+            data,
+        })
     }
 
     pub fn get_height(&self, px_size: f32) -> f32 {
@@ -200,6 +209,119 @@ impl Font {
     }
 }
 
+struct MathFont(Font);
+
+impl MathFont {
+    fn try_create() -> anyhow::Result<Self> {
+        let filepath = Command::new("fc-list")
+            .args(["NotoSansMath", "--format", "%{file}"])
+            .output()?
+            .stdout
+            .into_iter()
+            .map(|byte| byte as char)
+            .collect::<String>();
+
+        Font::try_read(&filepath, "Regular").map(MathFont)
+    }
+}
+
+impl std::ops::Deref for MathFont {
+    type Target = Font;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+struct EmojiFont {
+    _buffer: Buffer<u8>,
+    font_face: ttf_parser::Face<'static>,
+}
+
+impl EmojiFont {
+    fn try_create() -> anyhow::Result<Self> {
+        let filepath = Command::new("fc-list")
+            .args(["NotoColorEmoji", "--format", "%{file}"])
+            .output()?
+            .stdout
+            .into_iter()
+            .map(|byte| byte as char)
+            .collect::<String>();
+        let file = std::fs::File::open(filepath)?;
+        let buffer = Buffer::from(file);
+
+        let font_face = ttf_parser::Face::parse(buffer.as_slice(), 0)?;
+        Ok(Self {
+            _buffer: buffer,
+            font_face,
+        })
+    }
+
+    pub fn image(&self, ch: char, size: u16) -> Option<Image> {
+        let glyph_id = self.font_face.glyph_index(ch)?;
+        Image::from_raster_glyph_image(
+            self.font_face.glyph_raster_image(glyph_id, size)?,
+            size as u32,
+        )
+    }
+}
+
+/// Container of data like Vec<T>.
+///
+/// Because of Rust allocator won't allocate memory if it can be reusable for other application
+/// parts, the memory will grow when the big data allocates. Sometimes it won't be deallocated that
+/// is not good.
+///
+/// The implementation of Buffer<T> uses libc allocator and forces to deallocate when it drops. It
+/// should guarantee that the memory won't be used for other application's parts.
+#[derive(Debug)]
+struct Buffer<T> {
+    ptr: *const c_void,
+    size: usize,
+    _phantom_data: std::marker::PhantomData<[T]>,
+}
+
+impl<T> Buffer<T> {
+    /// Allocates new memory by len in bytes (u8).
+    fn new(size: usize) -> Buffer<T> {
+        unsafe {
+            Self {
+                ptr: libc::malloc(size),
+                size,
+                _phantom_data: std::marker::PhantomData,
+            }
+        }
+    }
+
+    /// Converts the buffer into Rust's slice. Make attention to **'static** lifetime. It made for
+    /// self-referential struct.
+    ///
+    /// **Safety**:
+    ///
+    /// It will be safe if the application WON'T use after buffer's drop. Otherwise the further
+    /// actions will be UB.
+    fn as_slice(&self) -> &'static [T] {
+        unsafe { std::slice::from_raw_parts(self.ptr.cast(), self.size) }
+    }
+}
+
+impl From<std::fs::File> for Buffer<u8> {
+    fn from(file: std::fs::File) -> Self {
+        let buffer = Buffer::new(file.metadata().map(|m| m.len() as usize).ok().unwrap_or(0));
+        unsafe {
+            // INFO: don't mind about buffer read size because the size always fits to buffer
+            let _read_size = libc::read(file.as_raw_fd(), buffer.ptr.cast_mut(), buffer.size);
+        }
+
+        buffer
+    }
+}
+
+impl<T> Drop for Buffer<T> {
+    fn drop(&mut self) {
+        unsafe { libc::free(self.ptr.cast_mut()) }
+    }
+}
+
 #[derive(Default, Clone)]
 pub enum Glyph {
     Image(Image),
@@ -215,6 +337,13 @@ pub enum Glyph {
 impl Glyph {
     pub fn is_empty(&self) -> bool {
         matches!(self, Glyph::Empty)
+    }
+
+    pub fn or_else<F: FnOnce() -> Self>(self, other: F) -> Self {
+        match self {
+            Glyph::Empty => other(),
+            _ => self,
+        }
     }
 
     pub fn set_color(&mut self, new_color: Bgra) {
@@ -400,53 +529,58 @@ impl SubAssign for FontStyle {
     }
 }
 
-#[test]
-fn add_font_styles() {
-    assert_eq!(FontStyle::Bold + FontStyle::Italic, FontStyle::BoldItalic);
-    assert_eq!(
-        FontStyle::Bold + FontStyle::Italic + FontStyle::Regular,
-        FontStyle::BoldItalic
-    );
-    assert_eq!(
-        FontStyle::BoldItalic + FontStyle::Bold,
-        FontStyle::BoldItalic
-    );
-    assert_eq!(FontStyle::Bold + FontStyle::Bold, FontStyle::Bold);
-    assert_eq!(FontStyle::Regular + FontStyle::Bold, FontStyle::Bold);
-    assert_eq!(FontStyle::Regular + FontStyle::Italic, FontStyle::Italic);
-    assert_eq!(
-        FontStyle::Regular + FontStyle::Italic + FontStyle::Bold,
-        FontStyle::BoldItalic
-    );
-    assert_eq!(FontStyle::Regular + FontStyle::Regular, FontStyle::Regular);
-    assert_eq!(FontStyle::Italic + FontStyle::Italic, FontStyle::Italic);
-    assert_eq!(
-        FontStyle::Regular + FontStyle::BoldItalic + FontStyle::BoldItalic,
-        FontStyle::BoldItalic
-    );
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[test]
-fn sub_font_styles() {
-    assert_eq!(FontStyle::BoldItalic - FontStyle::Italic, FontStyle::Bold);
-    assert_eq!(
-        FontStyle::BoldItalic - FontStyle::Italic - FontStyle::Regular,
-        FontStyle::Bold
-    );
-    assert_eq!(FontStyle::Regular - FontStyle::Regular, FontStyle::Regular);
-    assert_eq!(FontStyle::BoldItalic - FontStyle::Bold, FontStyle::Italic);
-    assert_eq!(
-        FontStyle::BoldItalic - FontStyle::Bold - FontStyle::Italic,
-        FontStyle::Regular
-    );
-    assert_eq!(
-        FontStyle::BoldItalic - FontStyle::Regular - FontStyle::Italic,
-        FontStyle::Bold
-    );
-}
+    #[test]
+    fn add_font_styles() {
+        assert_eq!(FontStyle::Bold + FontStyle::Italic, FontStyle::BoldItalic);
+        assert_eq!(
+            FontStyle::Bold + FontStyle::Italic + FontStyle::Regular,
+            FontStyle::BoldItalic
+        );
+        assert_eq!(
+            FontStyle::BoldItalic + FontStyle::Bold,
+            FontStyle::BoldItalic
+        );
+        assert_eq!(FontStyle::Bold + FontStyle::Bold, FontStyle::Bold);
+        assert_eq!(FontStyle::Regular + FontStyle::Bold, FontStyle::Bold);
+        assert_eq!(FontStyle::Regular + FontStyle::Italic, FontStyle::Italic);
+        assert_eq!(
+            FontStyle::Regular + FontStyle::Italic + FontStyle::Bold,
+            FontStyle::BoldItalic
+        );
+        assert_eq!(FontStyle::Regular + FontStyle::Regular, FontStyle::Regular);
+        assert_eq!(FontStyle::Italic + FontStyle::Italic, FontStyle::Italic);
+        assert_eq!(
+            FontStyle::Regular + FontStyle::BoldItalic + FontStyle::BoldItalic,
+            FontStyle::BoldItalic
+        );
+    }
 
-#[test]
-#[should_panic]
-fn panicky_sub_font_style() {
-    let _ = FontStyle::Bold - FontStyle::Italic;
+    #[test]
+    fn sub_font_styles() {
+        assert_eq!(FontStyle::BoldItalic - FontStyle::Italic, FontStyle::Bold);
+        assert_eq!(
+            FontStyle::BoldItalic - FontStyle::Italic - FontStyle::Regular,
+            FontStyle::Bold
+        );
+        assert_eq!(FontStyle::Regular - FontStyle::Regular, FontStyle::Regular);
+        assert_eq!(FontStyle::BoldItalic - FontStyle::Bold, FontStyle::Italic);
+        assert_eq!(
+            FontStyle::BoldItalic - FontStyle::Bold - FontStyle::Italic,
+            FontStyle::Regular
+        );
+        assert_eq!(
+            FontStyle::BoldItalic - FontStyle::Regular - FontStyle::Italic,
+            FontStyle::Bold
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn panicky_sub_font_style() {
+        let _ = FontStyle::Bold - FontStyle::Italic;
+    }
 }
