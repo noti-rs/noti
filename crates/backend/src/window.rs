@@ -134,7 +134,7 @@ impl Window {
             &surface,
             None,
             zwlr_layer_shell_v1::Layer::Overlay,
-            "noti-app".to_string(),
+            "noti".to_string(),
             qhandle,
             (),
         ));
