@@ -4,6 +4,16 @@ authors = [ "noti-rs" ]
 version = "0.1.0"
 edition = "2021"
 
+# Focus on min size of bin
+[profile.release]
+lto = true
+strip = true
+opt-level = "z"
+codegen-units = 1
+panic = "abort"
+debug = "none"
+debug-assertions = false
+
 [[bin]]
 path = "crates/app/main.rs"
 name = "noti"
