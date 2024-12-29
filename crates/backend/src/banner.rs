@@ -8,14 +8,12 @@ use dbus::notification::Notification;
 use log::{debug, trace};
 
 use render::{
-    color::{Bgra, Color},
     drawer::Drawer,
-    font::FontCollection,
     types::RectSize,
     widget::{
         self, Alignment, Draw, FlexContainerBuilder, Position, WImage, WText, WTextKind, Widget,
         WidgetConfiguration,
-    },
+    }, PangoContext,
 };
 use shared::cached_data::CachedData;
 
@@ -75,7 +73,7 @@ impl BannerRect {
 
     pub(crate) fn draw(
         &mut self,
-        font_collection: &FontCollection,
+        pango_context: &PangoContext,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) {
@@ -87,7 +85,8 @@ impl BannerRect {
         );
 
         let display = config.display_by_app(&self.data.app_name);
-        let mut drawer = Drawer::new(Color::Fill(Bgra::new()), rect_size.clone());
+        let mut drawer = Drawer::create(rect_size.clone()).unwrap();
+        // let mut drawer = Drawer::new(Color::Fill(Bgra::new()), rect_size.clone());
 
         let mut layout = match &display.layout {
             config::display::Layout::Default => Self::default_layout(display),
@@ -104,7 +103,7 @@ impl BannerRect {
                 display_config: display,
                 theme: config.theme_by_app(&self.data.app_name),
                 notification: &self.data,
-                font_collection,
+                pango_context,
                 override_properties: display.layout.is_default(),
             },
         );

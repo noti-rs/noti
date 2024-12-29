@@ -37,11 +37,11 @@ use dbus::{
 };
 
 use crate::{banner::BannerRect, cache::CachedLayout};
-use render::{font::FontCollection, types::RectSize};
+use render::{types::RectSize, PangoContext};
 
 pub(super) struct Window {
     banners: IndexMap<u32, BannerRect>,
-    font_collection: Rc<RefCell<FontCollection>>,
+    pango_context: Rc<RefCell<PangoContext>>,
 
     rect_size: RectSize,
     margin: Margin,
@@ -68,12 +68,12 @@ pub(super) enum ConfigurationState {
 }
 
 impl Window {
-    pub(super) fn init(font_collection: Rc<RefCell<FontCollection>>, config: &Config) -> Self {
+    pub(super) fn init(pango_context: Rc<RefCell<PangoContext>>, config: &Config) -> Self {
         debug!("Window: Initialized");
 
         Self {
             banners: indexmap! {},
-            font_collection,
+            pango_context,
 
             rect_size: RectSize::new(
                 config.general().width.into(),
@@ -206,7 +206,7 @@ impl Window {
         self.banners
             .extend(notifications.into_iter().map(|notification| {
                 let mut banner_rect = BannerRect::init(notification);
-                banner_rect.draw(&self.font_collection.borrow(), config, cached_layouts);
+                banner_rect.draw(&self.pango_context.borrow(), config, cached_layouts);
                 (banner_rect.notification().id, banner_rect)
             }));
 
@@ -234,7 +234,7 @@ impl Window {
 
             let rect = &mut self.banners[&notification.id];
             rect.update_data(notification);
-            rect.draw(&self.font_collection.borrow(), config, cached_layouts);
+            rect.draw(&self.pango_context.borrow(), config, cached_layouts);
 
             debug!(
                 "Window: Replaced notification by id {}",
@@ -373,7 +373,7 @@ impl Window {
     ) {
         self.banners
             .values_mut()
-            .for_each(|banner| banner.draw(&self.font_collection.borrow(), config, cached_layouts));
+            .for_each(|banner| banner.draw(&self.pango_context.borrow(), config, cached_layouts));
 
         self.draw(qhandle, config);
 

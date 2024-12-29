@@ -1,6 +1,7 @@
 use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
 
 use log::debug;
+use render::PangoContext;
 use shared::cached_data::CachedData;
 use wayland_client::{Connection, EventQueue, QueueHandle};
 
@@ -11,7 +12,6 @@ use config::Config;
 use dbus::{actions::Signal, notification::Notification};
 
 use super::window::{ConfigurationState, Window};
-use render::font::FontCollection;
 
 pub(crate) struct WindowManager {
     connection: Connection,
@@ -19,7 +19,7 @@ pub(crate) struct WindowManager {
     qhandle: Option<QueueHandle<Window>>,
     window: Option<Window>,
 
-    font_collection: Rc<RefCell<FontCollection>>,
+    pango_context: Rc<RefCell<PangoContext>>,
     cached_layouts: CachedData<PathBuf, CachedLayout>,
 
     signals: Vec<Signal>,
@@ -41,8 +41,8 @@ impl Dispatcher for WindowManager {
 impl WindowManager {
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
         let connection = Connection::connect_to_env()?;
-        let font_collection =
-            Rc::new(FontCollection::load_by_font_name(&config.general().font.name)?.into());
+        let pango_context =
+            Rc::new(PangoContext::from_font_family(&config.general().font.name).into());
         let cached_layouts = config
             .displays()
             .filter_map(|display| match &display.layout {
@@ -57,7 +57,7 @@ impl WindowManager {
             qhandle: None,
             window: None,
 
-            font_collection,
+            pango_context,
             cached_layouts,
 
             signals: vec![],
@@ -85,9 +85,9 @@ impl WindowManager {
                 .collect(),
         );
 
-        self.font_collection
+        self.pango_context
             .borrow_mut()
-            .update_by_font_name(&config.general().font.name)?;
+            .update_font_family(&config.general().font.name);
 
         if let Some(window) = self.window.as_mut() {
             let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
@@ -268,7 +268,7 @@ impl WindowManager {
             let display = self.connection.display();
             display.get_registry(&qhandle, ());
 
-            let mut window = Window::init(self.font_collection.clone(), config);
+            let mut window = Window::init(self.pango_context.clone(), config);
 
             while let ConfigurationState::NotConfiured = window.configuration_state() {
                 event_queue.blocking_dispatch(&mut window)?;

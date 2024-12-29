@@ -1,18 +1,18 @@
 use config::{display::DisplayConfig, theme::Theme};
 use dbus::notification::Notification;
 use log::warn;
+use text::PangoContext;
 
 use crate::drawer::Drawer;
 
 use super::{
     color::Bgra,
-    font::FontCollection,
     types::{Offset, RectSize},
 };
 
 mod flex_container;
 mod image;
-mod text;
+pub(crate) mod text;
 
 pub use flex_container::{
     Alignment, Direction, FlexContainer, FlexContainerBuilder, GBuilderAlignment,
@@ -33,9 +33,9 @@ pub enum DrawColor {
 }
 
 pub trait Draw {
-    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer);
+    fn draw_with_offset(&mut self, offset: &Offset, drawer: &mut Drawer);
 
-    fn draw(&self, drawer: &mut Drawer) {
+    fn draw(&mut self, drawer: &mut Drawer) {
         self.draw_with_offset(&Default::default(), drawer);
     }
 }
@@ -106,7 +106,7 @@ impl Widget {
 }
 
 impl Draw for Widget {
-    fn draw_with_offset(&self, offset: &Offset, output: &mut Drawer) {
+    fn draw_with_offset(&mut self, offset: &Offset, output: &mut Drawer) {
         match self {
             Widget::Image(image) => image.draw_with_offset(offset, output),
             Widget::Text(text) => text.draw_with_offset(offset, output),
@@ -123,7 +123,7 @@ pub enum CompileState {
 
 pub struct WidgetConfiguration<'a> {
     pub notification: &'a Notification,
-    pub font_collection: &'a FontCollection,
+    pub pango_context: &'a PangoContext,
     pub theme: &'a Theme,
     pub display_config: &'a DisplayConfig,
     pub override_properties: bool,

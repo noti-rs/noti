@@ -121,7 +121,7 @@ impl Default for WImage {
 }
 
 impl Draw for WImage {
-    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
+    fn draw_with_offset(&mut self, offset: &Offset, drawer: &mut Drawer) {
         if !self.content.is_exists() {
             return;
         }

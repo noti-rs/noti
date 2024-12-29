@@ -58,10 +58,10 @@ impl TryFromValue for Color {}
 
 #[derive(Clone)]
 pub struct LinearGradient {
-    angle: f32,
-    grad_vector: [f32; 2],
+    pub angle: f32,
+    pub grad_vector: [f32; 2],
     doubled_norm: f32,
-    colors: Vec<Bgra>,
+    pub colors: Vec<Bgra>,
     segment_per_color: f32,
 }
 
