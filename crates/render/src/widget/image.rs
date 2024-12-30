@@ -36,7 +36,7 @@ impl WImage {
 
     pub fn compile(
         &mut self,
-        rect_size: RectSize,
+        rect_size: RectSize<usize>,
         WidgetConfiguration {
             notification,
             display_config,
@@ -121,7 +121,7 @@ impl Default for WImage {
 }
 
 impl Draw for WImage {
-    fn draw_with_offset(&mut self, offset: &Offset, drawer: &mut Drawer) {
+    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) {
         if !self.content.is_exists() {
             return;
         }

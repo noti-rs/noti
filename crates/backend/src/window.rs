@@ -43,7 +43,7 @@ pub(super) struct Window {
     banners: IndexMap<u32, BannerRect>,
     pango_context: Rc<RefCell<PangoContext>>,
 
-    rect_size: RectSize,
+    rect_size: RectSize<usize>,
     margin: Margin,
 
     compositor: Option<wl_compositor::WlCompositor>,
@@ -396,7 +396,7 @@ impl Window {
         self.build_buffer(qhandle);
     }
 
-    fn resize(&mut self, rect_size: RectSize) {
+    fn resize(&mut self, rect_size: RectSize<usize>) {
         self.rect_size = rect_size;
 
         let layer_surface = unsafe { self.layer_surface.as_ref().unwrap_unchecked() };

@@ -1,4 +1,5 @@
 use config::spacing::Spacing;
+use log::warn;
 use shared::{error::ConversionError, value::TryFromValue};
 
 use crate::{
@@ -15,14 +16,14 @@ use super::{CompileState, Draw, Widget, WidgetConfiguration};
 pub struct FlexContainer {
     #[builder(private, setter(skip))]
     #[gbuilder(hidden, default(None))]
-    rect_size: Option<RectSize>,
+    rect_size: Option<RectSize<usize>>,
 
     #[builder(private, default)]
-    #[gbuilder(hidden, default(Bgra::new().into()))]
+    #[gbuilder(hidden, default(Bgra::default().into()))]
     background_color: Color,
 
     #[builder(private, default)]
-    #[gbuilder(hidden, default(Bgra::new().into()))]
+    #[gbuilder(hidden, default(Bgra::default().into()))]
     border_color: Color,
 
     #[builder(default = "false")]
@@ -52,7 +53,7 @@ pub struct FlexContainer {
 impl FlexContainer {
     pub fn compile(
         &mut self,
-        mut rect_size: RectSize,
+        mut rect_size: RectSize<usize>,
         configuration: &WidgetConfiguration,
     ) -> CompileState {
         self.max_width = self.max_width.min(rect_size.width);
@@ -61,7 +62,7 @@ impl FlexContainer {
             width: self.max_width,
             height: self.max_height,
         };
-        self.rect_size = Some(rect_size.clone());
+        self.rect_size = Some(rect_size);
 
         let colors = &configuration
             .theme
@@ -82,16 +83,13 @@ impl FlexContainer {
         });
         self.children.retain(|child| !child.is_unknown());
 
-        // TODO: think about it
-        // if self.children.is_empty() {
-        //     warn!(
-        //         "The flex container is empty! Did you add the widgets? \
-        //         Or check them, maybe they doesn't fit available space."
-        //     );
-        //     CompileState::Failure
-        // } else {
-        //     CompileState::Success
-        // }
+        if self.children.is_empty() {
+            warn!(
+                "The flex container is empty! Did you add the widgets? \
+                Or check them, maybe they doesn't fit available space."
+            );
+        }
+
         CompileState::Success
     }
 
@@ -166,23 +164,23 @@ impl FlexContainer {
         }
     }
 
-    fn rounded_fill(&self, offset: Offset, rect_size: RectSize, drawer: &mut Drawer) {
+    fn rounded_fill(&self, offset: Offset<f64>, rect_size: RectSize<f64>, drawer: &mut Drawer) {
         let radius = self.border.radius as f64 - self.border.size as f64;
         drawer.context.new_sub_path();
-        drawer.make_rounding(offset, rect_size.clone(), self.border.radius as f64, radius);
+        drawer.make_rounding(offset, rect_size, self.border.radius as f64, radius);
         drawer.context.close_path();
 
         drawer.set_source_color(&self.background_color, rect_size);
         drawer.context.fill().unwrap();
     }
 
-    fn outline_border(&self, offset: Offset, rect_size: RectSize, drawer: &mut Drawer) {
+    fn outline_border(&self, offset: Offset<f64>, rect_size: RectSize<f64>, drawer: &mut Drawer) {
         // INFO: if we use half of border size, a visible area between fill and border will be
         // wisible, so need avoid it by making radius slightly nearer (divide by 1.9, not 2.0)
         let radius = self.border.radius as f64 - (self.border.size as f64 / 1.9);
 
         drawer.context.new_sub_path();
-        drawer.make_rounding(offset, rect_size.clone(), self.border.radius as f64, radius);
+        drawer.make_rounding(offset, rect_size, self.border.radius as f64, radius);
         drawer.context.close_path();
 
         drawer.set_source_color(&self.border_color, rect_size);
@@ -192,13 +190,13 @@ impl FlexContainer {
 }
 
 impl Draw for FlexContainer {
-    fn draw_with_offset(&mut self, offset: &Offset, drawer: &mut Drawer) {
+    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) {
         let Some(mut rect_size) = self.rect_size.as_ref().cloned() else {
             panic!(
                 "The rectangle size must be computed by `compile()` method of parent container!"
             );
         };
-        let original_rect_size = rect_size.clone();
+        let original_rect_size = rect_size;
 
         // NOTE: if the background color is transparent or forces to be transparent, no need to use
         // another layer as new Drawer instance. Instead of this use the current Drawer instance.
@@ -206,7 +204,7 @@ impl Draw for FlexContainer {
         let transparent_bg = self.transparent_background || self.background_color.is_transparent();
 
         if !transparent_bg {
-            self.rounded_fill(*offset, rect_size.clone(), drawer);
+            self.rounded_fill((*offset).into(), rect_size.into(), drawer);
         }
 
         rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
@@ -247,7 +245,7 @@ impl Draw for FlexContainer {
             plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
         });
 
-        self.outline_border(*offset, original_rect_size, drawer);
+        self.outline_border((*offset).into(), original_rect_size.into(), drawer);
     }
 }
 
@@ -349,7 +347,7 @@ impl<'a> FlexContainerPlane<'a> {
         RectSize {
             mut width,
             mut height,
-        }: RectSize,
+        }: RectSize<usize>,
         direction: &'a Direction,
     ) -> Self {
         if let Direction::Vertical = direction {
@@ -365,7 +363,7 @@ impl<'a> FlexContainerPlane<'a> {
         }
     }
 
-    fn new_only_offset(Offset { mut x, mut y }: Offset, direction: &'a Direction) -> Self {
+    fn new_only_offset(Offset { mut x, mut y }: Offset<usize>, direction: &'a Direction) -> Self {
         if let Direction::Vertical = direction {
             (x, y) = (y, x);
         }
@@ -379,7 +377,7 @@ impl<'a> FlexContainerPlane<'a> {
         }
     }
 
-    fn relocate(&mut self, Offset { mut x, mut y }: &Offset) {
+    fn relocate(&mut self, Offset { mut x, mut y }: &Offset<usize>) {
         if let Direction::Vertical = self.direction {
             (x, y) = (y, x);
         }
@@ -388,7 +386,7 @@ impl<'a> FlexContainerPlane<'a> {
         self.auxiliary_axis_offset = y;
     }
 
-    fn as_rect_size(&self) -> RectSize {
+    fn as_rect_size(&self) -> RectSize<usize> {
         let (mut width, mut height) = (self.main_len, self.auxiliary_len);
 
         if let Direction::Vertical = self.direction {
@@ -398,7 +396,7 @@ impl<'a> FlexContainerPlane<'a> {
         RectSize::new(width, height)
     }
 
-    fn as_offset(&self) -> Offset {
+    fn as_offset(&self) -> Offset<usize> {
         let (mut x, mut y) = (self.main_axis_offset, self.auxiliary_axis_offset);
 
         if let Direction::Vertical = self.direction {

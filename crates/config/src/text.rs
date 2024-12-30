@@ -14,7 +14,7 @@ public! {
         wrap: bool,
 
         #[gbuilder(default)]
-        ellipsize_at: EllipsizeAt,
+        ellipsize: Ellipsize,
 
         #[gbuilder(default)]
         style: TextStyle,
@@ -23,7 +23,10 @@ public! {
         margin: Spacing,
 
         #[gbuilder(default)]
-        justification: TextJustification,
+        alignment: TextAlignment,
+
+        #[gbuilder(default(false))]
+        jutsify: bool,
 
         #[cfg_prop(default(12))]
         font_size: u8,
@@ -71,7 +74,7 @@ impl TryFromValue for TextStyle {
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
-pub enum TextJustification {
+pub enum TextAlignment {
     #[serde(rename = "center")]
     Center,
     #[default]
@@ -79,19 +82,16 @@ pub enum TextJustification {
     Left,
     #[serde(rename = "right")]
     Right,
-    #[serde(rename = "space-between")]
-    SpaceBetween,
 }
 
-impl TryFromValue for TextJustification {
+impl TryFromValue for TextAlignment {
     fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
         Ok(match value.to_lowercase().as_str() {
-            "center" => TextJustification::Center,
-            "left" => TextJustification::Left,
-            "right" => TextJustification::Right,
-            "space-between" | "space_between" => TextJustification::SpaceBetween,
+            "center" => TextAlignment::Center,
+            "left" => TextAlignment::Left,
+            "right" => TextAlignment::Right,
             _ => Err(shared::error::ConversionError::InvalidValue {
-                expected: "center, left, right, space-between or space_between",
+                expected: "center, left or right",
                 actual: value,
             })?,
         })
@@ -102,26 +102,30 @@ impl TomlTextProperty {
     pub(super) fn default_title() -> Self {
         Self {
             style: Some(TextStyle::Bold),
-            justification: Some(TextJustification::Center),
+            alignment: Some(TextAlignment::Center),
             ..Default::default()
         }
     }
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
-pub enum EllipsizeAt {
+pub enum Ellipsize {
+    #[serde(rename = "start")]
+    Start,
     #[serde(rename = "middle")]
     Middle,
     #[default]
     #[serde(rename = "end")]
     End,
+    #[serde(rename = "none")]
+    None,
 }
 
-impl TryFromValue for EllipsizeAt {
+impl TryFromValue for Ellipsize {
     fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
         Ok(match value.to_lowercase().as_str() {
-            "middle" => EllipsizeAt::Middle,
-            "end" => EllipsizeAt::End,
+            "middle" => Ellipsize::Middle,
+            "end" => Ellipsize::End,
             _ => Err(shared::error::ConversionError::InvalidValue {
                 expected: "middle or end",
                 actual: value,

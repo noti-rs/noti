@@ -10,11 +10,10 @@ use crate::{
 pub struct Drawer {
     surface: ImageSurface,
     pub context: Context,
-    _size: RectSize,
 }
 
 impl Drawer {
-    pub fn create(size: RectSize) -> anyhow::Result<Self> {
+    pub fn create(size: RectSize<usize>) -> anyhow::Result<Self> {
         let surface = ImageSurface::create(
             pangocairo::cairo::Format::ARgb32,
             size.width as i32,
@@ -23,19 +22,15 @@ impl Drawer {
 
         let context = Context::new(&surface)?;
 
-        Ok(Self {
-            surface,
-            context,
-            _size: size,
-        })
+        Ok(Self { surface, context })
     }
 }
 
 pub(crate) trait MakeRounding {
     fn make_rounding(
         &self,
-        offset: Offset,
-        rect_size: RectSize,
+        offset: Offset<f64>,
+        rect_size: RectSize<f64>,
         outer_radius: f64,
         inner_radius: f64,
     );
@@ -44,35 +39,35 @@ pub(crate) trait MakeRounding {
 impl MakeRounding for Drawer {
     fn make_rounding(
         &self,
-        offset: Offset,
-        rect_size: RectSize,
+        offset: Offset<f64>,
+        rect_size: RectSize<f64>,
         outer_radius: f64,
         inner_radius: f64,
     ) {
         self.context.arc(
-            offset.x as f64 + outer_radius,
-            offset.y as f64 + outer_radius,
+            offset.x + outer_radius,
+            offset.y + outer_radius,
             inner_radius,
             PI,
             -FRAC_PI_2,
         );
         self.context.arc(
-            offset.x as f64 + rect_size.width as f64 - outer_radius,
-            offset.y as f64 + outer_radius,
+            offset.x + rect_size.width - outer_radius,
+            offset.y + outer_radius,
             inner_radius,
             -FRAC_PI_2,
             0.0,
         );
         self.context.arc(
-            offset.x as f64 + rect_size.width as f64 - outer_radius,
-            offset.y as f64 + rect_size.height as f64 - outer_radius,
+            offset.x + rect_size.width - outer_radius,
+            offset.y + rect_size.height - outer_radius,
             inner_radius,
             0.0,
             FRAC_PI_2,
         );
         self.context.arc(
-            offset.x as f64 + outer_radius,
-            offset.y as f64 + rect_size.height as f64 - outer_radius,
+            offset.x + outer_radius,
+            offset.y + rect_size.height - outer_radius,
             inner_radius,
             FRAC_PI_2,
             PI,
@@ -81,62 +76,46 @@ impl MakeRounding for Drawer {
 }
 
 pub(crate) trait SetSourceColor {
-    fn set_source_color(&self, color: &Color, frame_size: RectSize);
+    fn set_source_color(&self, color: &Color, frame_size: RectSize<f64>);
 }
 
 impl SetSourceColor for Drawer {
-    fn set_source_color(&self, color: &Color, frame_size: RectSize) {
+    fn set_source_color(&self, color: &Color, frame_size: RectSize<f64>) {
         match color {
             Color::LinearGradient(linear_gradient) => {
-                let (half_width, half_height) = (
-                    frame_size.width as f64 / 2.0,
-                    frame_size.height as f64 / 2.0,
-                );
+                fn dot_product(vec1: [f64; 2], vec2: [f64; 2]) -> f64 {
+                    vec1[0] * vec2[0] + vec1[1] * vec2[1]
+                }
 
-                let aspect_ratio = half_width / half_height;
-                let half_width_ratio = linear_gradient.grad_vector[0] as f64 * half_width
-                    / if linear_gradient.grad_vector[0] < 1.0 {
-                        aspect_ratio
-                    } else {
-                        1.0
-                    };
+                let (half_width, half_height) = (frame_size.width / 2.0, frame_size.height / 2.0);
 
-                let half_height_ratio = linear_gradient.grad_vector[1] as f64
-                    * half_height
-                    * if linear_gradient.grad_vector[1] < 1.0 {
-                        aspect_ratio
-                    } else {
-                        1.0
-                    };
+                // INFO: need to find a factor to multiply the x/y offsets to that distance where
+                // prependicular line hits top left and top right corners. Without it part of area
+                // will be filled by single non-gradientary color that is not acceptable.
+                let x_offset = linear_gradient.grad_vector[0] * half_width;
+                let y_offset = linear_gradient.grad_vector[1] * half_height;
+                let norm = (x_offset * x_offset + y_offset * y_offset).sqrt();
+                let factor = dot_product([x_offset, y_offset], [half_width, half_height]) / (norm * norm);
 
                 let gradient = LinearGradient::new(
-                    half_width - half_width_ratio,
-                    half_height + half_height_ratio,
-                    half_width + half_width_ratio,
-                    half_height - half_height_ratio,
+                    half_width - x_offset * factor,
+                    half_height + y_offset * factor,
+                    half_width + x_offset * factor,
+                    half_height - y_offset * factor,
                 );
 
                 let mut offset = 0.0;
-                let incrementor = 1.0 / (linear_gradient.colors.len() - 1) as f64;
                 for bgra in &linear_gradient.colors {
-                    gradient.add_color_stop_rgba(
-                        offset,
-                        bgra.red as f64,
-                        bgra.green as f64,
-                        bgra.blue as f64,
-                        bgra.alpha as f64,
-                    );
-                    offset += incrementor;
+                    gradient
+                        .add_color_stop_rgba(offset, bgra.red, bgra.green, bgra.blue, bgra.alpha);
+                    offset += linear_gradient.segment_per_color;
                 }
 
                 self.context.set_source(gradient).unwrap();
             }
-            Color::Fill(bgra) => self.context.set_source_rgba(
-                bgra.red as f64,
-                bgra.green as f64,
-                bgra.blue as f64,
-                bgra.alpha as f64,
-            ),
+            Color::Fill(bgra) => self
+                .context
+                .set_source_rgba(bgra.red, bgra.green, bgra.blue, bgra.alpha),
         }
     }
 }

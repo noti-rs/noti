@@ -26,7 +26,7 @@ impl Image {
     pub fn from_image_data(
         image_data: ImageData,
         image_property: &ImageProperty,
-        max_size: &RectSize,
+        max_size: &RectSize<usize>,
     ) -> Self {
         let origin_width = image_data.width as u32;
         let origin_height = image_data.height as u32;
@@ -87,7 +87,7 @@ impl Image {
     pub fn from_path(
         image_path: &std::path::Path,
         image_property: &ImageProperty,
-        max_size: &RectSize,
+        max_size: &RectSize<usize>,
     ) -> Image {
         let data = match std::fs::read(image_path) {
             Ok(data) => data,
@@ -152,7 +152,7 @@ impl Image {
     pub fn from_svg(
         image_path: &std::path::Path,
         image_property: &ImageProperty,
-        max_size: &RectSize,
+        max_size: &RectSize<usize>,
     ) -> Self {
         if !image_path.is_file() {
             return Image::Unknown;
@@ -284,7 +284,7 @@ impl Image {
         mut width: i32,
         mut height: i32,
         image_property: &ImageProperty,
-        max_size: &RectSize,
+        max_size: &RectSize<usize>,
     ) -> Option<(i32, i32)> {
         Self::limit_size(&mut width, &mut height, image_property.max_size);
         let (horizontal_spacing, vertical_spacing) = {
@@ -325,7 +325,7 @@ impl Image {
 }
 
 impl Draw for Image {
-    fn draw_with_offset(&mut self, offset: &Offset, drawer: &mut Drawer) {
+    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) {
         let Image::Exists {
             data,
             rounding_radius,
@@ -336,8 +336,8 @@ impl Draw for Image {
         debug_assert!(data.has_alpha);
 
         drawer.make_rounding(
-            *offset,
-            RectSize::new(data.width as usize, data.height as usize),
+            (*offset).into(),
+            RectSize::new(data.width as f64, data.height as f64),
             *rounding_radius,
             *rounding_radius,
         );

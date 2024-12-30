@@ -1,28 +1,47 @@
-use std::ops::{Add, AddAssign};
+use std::ops::{Add, AddAssign, Mul};
 
 use config::spacing::Spacing;
 
-#[derive(Debug, Default, Clone)]
-pub struct RectSize {
-    pub width: usize,
-    pub height: usize,
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RectSize<T>
+where
+    T: Default + Copy,
+{
+    pub width: T,
+    pub height: T,
 }
 
-impl RectSize {
-    pub fn new(width: usize, height: usize) -> Self {
+impl<T> RectSize<T>
+where
+    T: Default + Copy,
+{
+    pub fn new(width: T, height: T) -> Self {
         Self { width, height }
     }
 
-    #[allow(dead_code)]
-    pub fn new_width(width: usize) -> Self {
-        Self { width, height: 0 }
+    pub fn new_width(width: T) -> Self {
+        Self {
+            width,
+            ..Default::default()
+        }
     }
 
-    #[allow(dead_code)]
-    pub fn new_height(height: usize) -> Self {
-        Self { width: 0, height }
+    pub fn new_height(height: T) -> Self {
+        Self {
+            height,
+            ..Default::default()
+        }
     }
 
+    pub fn area(&self) -> T
+    where
+        T: Mul<Output = T>,
+    {
+        self.width * self.height
+    }
+}
+
+impl RectSize<usize> {
     pub fn shrink_by(&mut self, spacing: &Spacing) {
         self.width = self
             .width
@@ -31,16 +50,24 @@ impl RectSize {
             .height
             .saturating_sub(spacing.top() as usize + spacing.bottom() as usize);
     }
+}
 
-    pub fn area(&self) -> usize {
-        self.width * self.height
+impl From<RectSize<usize>> for RectSize<f64> {
+    fn from(value: RectSize<usize>) -> Self {
+        Self {
+            width: value.width as f64,
+            height: value.height as f64,
+        }
     }
 }
 
-impl Add<RectSize> for RectSize {
-    type Output = RectSize;
+impl<T> Add<RectSize<T>> for RectSize<T>
+where
+    T: Add<Output = T> + Default + Copy,
+{
+    type Output = RectSize<T>;
 
-    fn add(self, rhs: RectSize) -> Self::Output {
+    fn add(self, rhs: RectSize<T>) -> Self::Output {
         Self {
             width: self.width + rhs.width,
             height: self.height + rhs.height,
@@ -48,41 +75,59 @@ impl Add<RectSize> for RectSize {
     }
 }
 
-impl AddAssign<RectSize> for RectSize {
-    fn add_assign(&mut self, rhs: RectSize) {
+impl<T> AddAssign<RectSize<T>> for RectSize<T>
+where
+    T: AddAssign<T> + Default + Copy,
+{
+    fn add_assign(&mut self, rhs: RectSize<T>) {
         self.width += rhs.width;
         self.height += rhs.height;
     }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct Offset {
-    pub x: usize,
-    pub y: usize,
+pub struct Offset<T>
+where
+    T: Add<Output = T> + Default + Copy,
+{
+    pub x: T,
+    pub y: T,
 }
 
-impl Offset {
-    pub fn new(x: usize, y: usize) -> Self {
-        Offset { x, y }
+impl<T> Offset<T>
+where
+    T: Add<Output = T> + Default + Copy,
+{
+    pub fn new(x: T, y: T) -> Self {
+        Self { x, y }
     }
 
-    pub fn new_x(x: usize) -> Self {
-        Offset { x, y: 0 }
+    pub fn new_x(x: T) -> Self {
+        Self {
+            x,
+            ..Default::default()
+        }
     }
 
-    pub fn new_y(y: usize) -> Self {
-        Offset { x: 0, y }
+    pub fn new_y(y: T) -> Self {
+        Self {
+            y,
+            ..Default::default()
+        }
     }
 
     pub fn no_offset() -> Self {
-        Self { x: 0, y: 0 }
+        Self::default()
     }
 }
 
-impl Add<Offset> for Offset {
-    type Output = Offset;
+impl<T> Add<Offset<T>> for Offset<T>
+where
+    T: Add<Output = T> + Default + Copy,
+{
+    type Output = Offset<T>;
 
-    fn add(self, rhs: Offset) -> Self::Output {
+    fn add(self, rhs: Offset<T>) -> Self::Output {
         Offset {
             x: self.x + rhs.x,
             y: self.y + rhs.y,
@@ -90,14 +135,26 @@ impl Add<Offset> for Offset {
     }
 }
 
-impl AddAssign<Offset> for Offset {
-    fn add_assign(&mut self, rhs: Offset) {
+impl<T> AddAssign<Offset<T>> for Offset<T>
+where
+    T: Add<Output = T> + AddAssign<T> + Default + Copy,
+{
+    fn add_assign(&mut self, rhs: Offset<T>) {
         self.x += rhs.x;
         self.y += rhs.y;
     }
 }
 
-impl From<Spacing> for Offset {
+impl From<Offset<usize>> for Offset<f64> {
+    fn from(value: Offset<usize>) -> Self {
+        Self {
+            x: value.x as f64,
+            y: value.y as f64,
+        }
+    }
+}
+
+impl From<Spacing> for Offset<usize> {
     fn from(value: Spacing) -> Self {
         Offset {
             x: value.left() as usize,
@@ -106,7 +163,7 @@ impl From<Spacing> for Offset {
     }
 }
 
-impl From<&Spacing> for Offset {
+impl From<&Spacing> for Offset<usize> {
     fn from(value: &Spacing) -> Self {
         Offset {
             x: value.left() as usize,

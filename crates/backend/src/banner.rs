@@ -13,7 +13,8 @@ use render::{
     widget::{
         self, Alignment, Draw, FlexContainerBuilder, Position, WImage, WText, WTextKind, Widget,
         WidgetConfiguration,
-    }, PangoContext,
+    },
+    PangoContext,
 };
 use shared::cached_data::CachedData;
 
@@ -85,8 +86,7 @@ impl BannerRect {
         );
 
         let display = config.display_by_app(&self.data.app_name);
-        let mut drawer = Drawer::create(rect_size.clone()).unwrap();
-        // let mut drawer = Drawer::new(Color::Fill(Bgra::new()), rect_size.clone());
+        let mut drawer = Drawer::create(rect_size).unwrap();
 
         let mut layout = match &display.layout {
             config::display::Layout::Default => Self::default_layout(display),
