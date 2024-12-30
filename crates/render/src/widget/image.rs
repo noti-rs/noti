@@ -121,13 +121,13 @@ impl Default for WImage {
 }
 
 impl Draw for WImage {
-    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) {
+    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) -> pangocairo::cairo::Result<()> {
         if !self.content.is_exists() {
-            return;
+            return Ok(());
         }
 
         // INFO: The ImageProperty initializes with Image so we can calmly unwrap
         let offset = Offset::from(&self.property.margin) + *offset;
-        self.content.draw_with_offset(&offset, drawer);
+        self.content.draw_with_offset(&offset, drawer)
     }
 }

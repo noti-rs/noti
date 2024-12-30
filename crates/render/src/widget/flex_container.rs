@@ -164,17 +164,28 @@ impl FlexContainer {
         }
     }
 
-    fn rounded_fill(&self, offset: Offset<f64>, rect_size: RectSize<f64>, drawer: &mut Drawer) {
+    fn rounded_fill(
+        &self,
+        offset: Offset<f64>,
+        rect_size: RectSize<f64>,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
         let radius = self.border.radius as f64 - self.border.size as f64;
         drawer.context.new_sub_path();
         drawer.make_rounding(offset, rect_size, self.border.radius as f64, radius);
         drawer.context.close_path();
 
-        drawer.set_source_color(&self.background_color, rect_size);
-        drawer.context.fill().unwrap();
+        drawer.set_source_color(&self.background_color, rect_size)?;
+        drawer.context.fill()?;
+        Ok(())
     }
 
-    fn outline_border(&self, offset: Offset<f64>, rect_size: RectSize<f64>, drawer: &mut Drawer) {
+    fn outline_border(
+        &self,
+        offset: Offset<f64>,
+        rect_size: RectSize<f64>,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
         // INFO: if we use half of border size, a visible area between fill and border will be
         // wisible, so need avoid it by making radius slightly nearer (divide by 1.9, not 2.0)
         let radius = self.border.radius as f64 - (self.border.size as f64 / 1.9);
@@ -183,14 +194,15 @@ impl FlexContainer {
         drawer.make_rounding(offset, rect_size, self.border.radius as f64, radius);
         drawer.context.close_path();
 
-        drawer.set_source_color(&self.border_color, rect_size);
+        drawer.set_source_color(&self.border_color, rect_size)?;
         drawer.context.set_line_width(self.border.size as f64);
-        drawer.context.stroke().unwrap();
+        drawer.context.stroke()?;
+        Ok(())
     }
 }
 
 impl Draw for FlexContainer {
-    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) {
+    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) -> pangocairo::cairo::Result<()> {
         let Some(mut rect_size) = self.rect_size.as_ref().cloned() else {
             panic!(
                 "The rectangle size must be computed by `compile()` method of parent container!"
@@ -204,7 +216,7 @@ impl Draw for FlexContainer {
         let transparent_bg = self.transparent_background || self.background_color.is_transparent();
 
         if !transparent_bg {
-            self.rounded_fill((*offset).into(), rect_size.into(), drawer);
+            self.rounded_fill((*offset).into(), rect_size.into(), drawer)?;
         }
 
         rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
@@ -233,19 +245,19 @@ impl Draw for FlexContainer {
         };
 
         let auxiliary_axis_alignment = self.auxiliary_axis_alignment().clone();
-        self.children.iter_mut().for_each(|child| {
+        for child in &mut self.children {
             plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset
                 + auxiliary_axis_alignment.compute_initial_pos(
                     plane.auxiliary_len,
                     child.len_by_direction(&self.direction.orthogonalize()),
                 );
 
-            child.draw_with_offset(&(plane.as_offset() + *offset), drawer);
+            child.draw_with_offset(&(plane.as_offset() + *offset), drawer)?;
 
             plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
-        });
+        };
 
-        self.outline_border((*offset).into(), original_rect_size.into(), drawer);
+        self.outline_border((*offset).into(), original_rect_size.into(), drawer)
     }
 }
 

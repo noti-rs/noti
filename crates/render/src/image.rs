@@ -325,15 +325,31 @@ impl Image {
 }
 
 impl Draw for Image {
-    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) {
+    fn draw_with_offset(
+        &mut self,
+        offset: &Offset<usize>,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
         let Image::Exists {
             data,
             rounding_radius,
         } = self
         else {
-            return;
+            return Ok(());
         };
         debug_assert!(data.has_alpha);
+
+        let mut storage_cursor = std::io::Cursor::new(&data.data);
+        let source_surface = match ImageSurface::create_from_png(&mut storage_cursor) {
+            Ok(source_surface) => source_surface,
+            Err(err) => match err {
+                cairo::IoError::Cairo(error) => Err(error)?,
+                cairo::IoError::Io(error) => {
+                    error!("Happened something wrong with IO opertaion during image rendering. Error: {error}");
+                    return Ok(());
+                }
+            },
+        };
 
         drawer.make_rounding(
             (*offset).into(),
@@ -341,16 +357,12 @@ impl Draw for Image {
             *rounding_radius,
             *rounding_radius,
         );
-
-        let mut storage_cursor = std::io::Cursor::new(&data.data);
-        let source_surface = ImageSurface::create_from_png(&mut storage_cursor).unwrap();
-
         drawer
             .context
-            .set_source_surface(source_surface, offset.x as f64, offset.y as f64)
-            .unwrap();
+            .set_source_surface(source_surface, offset.x as f64, offset.y as f64)?;
 
-        drawer.context.fill().unwrap();
+        drawer.context.fill()?;
+        Ok(())
     }
 }
 

@@ -235,7 +235,11 @@ impl WText {
 }
 
 impl Draw for WText {
-    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) {
+    fn draw_with_offset(
+        &mut self,
+        offset: &Offset<usize>,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
         if let Some(layout) = self.layout.as_ref() {
             let layout = layout.lock().unwrap();
             //TODO: try to inject here pango context for better result
@@ -245,6 +249,7 @@ impl Draw for WText {
             );
             pangocairo::functions::show_layout(&drawer.context, &layout);
         }
+        Ok(())
     }
 }
 

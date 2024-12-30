@@ -108,8 +108,18 @@ impl BannerRect {
             },
         );
 
-        layout.draw(&mut drawer);
-        self.framebuffer = drawer.into();
+        if let Err(err) = layout.draw(&mut drawer) {
+            todo!("Add info about err")
+        }
+
+        self.framebuffer = match drawer.try_into() {
+            Ok(val) => val,
+            Err(err) => {
+                //TODO: store infomation about failed trawing
+                // error!();
+                todo!()
+            },
+        };
 
         debug!("Banner (id={}): Complete draw", self.data.id);
     }

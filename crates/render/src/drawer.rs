@@ -41,9 +41,14 @@ impl MakeRounding for Drawer {
         &self,
         offset: Offset<f64>,
         rect_size: RectSize<f64>,
-        outer_radius: f64,
-        inner_radius: f64,
+        mut outer_radius: f64,
+        mut inner_radius: f64,
     ) {
+        debug_assert!(outer_radius >= inner_radius);
+        let minimal_threshold = (rect_size.height / 2.0).min(rect_size.width / 2.0);
+        inner_radius = inner_radius.min(minimal_threshold);
+        outer_radius = outer_radius.min(minimal_threshold);
+
         self.context.arc(
             offset.x + outer_radius,
             offset.y + outer_radius,
@@ -76,11 +81,19 @@ impl MakeRounding for Drawer {
 }
 
 pub(crate) trait SetSourceColor {
-    fn set_source_color(&self, color: &Color, frame_size: RectSize<f64>);
+    fn set_source_color(
+        &self,
+        color: &Color,
+        frame_size: RectSize<f64>,
+    ) -> pangocairo::cairo::Result<()>;
 }
 
 impl SetSourceColor for Drawer {
-    fn set_source_color(&self, color: &Color, frame_size: RectSize<f64>) {
+    fn set_source_color(
+        &self,
+        color: &Color,
+        frame_size: RectSize<f64>,
+    ) -> pangocairo::cairo::Result<()> {
         match color {
             Color::LinearGradient(linear_gradient) => {
                 fn dot_product(vec1: [f64; 2], vec2: [f64; 2]) -> f64 {
@@ -95,7 +108,8 @@ impl SetSourceColor for Drawer {
                 let x_offset = linear_gradient.grad_vector[0] * half_width;
                 let y_offset = linear_gradient.grad_vector[1] * half_height;
                 let norm = (x_offset * x_offset + y_offset * y_offset).sqrt();
-                let factor = dot_product([x_offset, y_offset], [half_width, half_height]) / (norm * norm);
+                let factor =
+                    dot_product([x_offset, y_offset], [half_width, half_height]) / (norm * norm);
 
                 let gradient = LinearGradient::new(
                     half_width - x_offset * factor,
@@ -111,21 +125,25 @@ impl SetSourceColor for Drawer {
                     offset += linear_gradient.segment_per_color;
                 }
 
-                self.context.set_source(gradient).unwrap();
+                self.context.set_source(gradient)?;
             }
             Color::Fill(bgra) => self
                 .context
                 .set_source_rgba(bgra.red, bgra.green, bgra.blue, bgra.alpha),
         }
+
+        Ok(())
     }
 }
 
-impl From<Drawer> for Vec<u8> {
-    fn from(value: Drawer) -> Self {
+impl TryFrom<Drawer> for Vec<u8> {
+    type Error = pangocairo::cairo::BorrowError;
+
+    fn try_from(value: Drawer) -> Result<Self, Self::Error> {
         let Drawer {
             surface, context, ..
         } = value;
         drop(context);
-        surface.take_data().unwrap().to_vec()
+        Ok(surface.take_data()?.to_vec())
     }
 }

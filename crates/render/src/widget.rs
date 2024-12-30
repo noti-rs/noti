@@ -19,10 +19,14 @@ pub use image::{GBuilderWImage, WImage};
 pub use text::{GBuilderWText, WText, WTextKind};
 
 pub trait Draw {
-    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer);
+    fn draw_with_offset(
+        &mut self,
+        offset: &Offset<usize>,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()>;
 
-    fn draw(&mut self, drawer: &mut Drawer) {
-        self.draw_with_offset(&Default::default(), drawer);
+    fn draw(&mut self, drawer: &mut Drawer) -> pangocairo::cairo::Result<()> {
+        self.draw_with_offset(&Default::default(), drawer)
     }
 }
 
@@ -92,12 +96,16 @@ impl Widget {
 }
 
 impl Draw for Widget {
-    fn draw_with_offset(&mut self, offset: &Offset<usize>, output: &mut Drawer) {
+    fn draw_with_offset(
+        &mut self,
+        offset: &Offset<usize>,
+        output: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
         match self {
             Widget::Image(image) => image.draw_with_offset(offset, output),
             Widget::Text(text) => text.draw_with_offset(offset, output),
             Widget::FlexContainer(container) => container.draw_with_offset(offset, output),
-            Widget::Unknown => (),
+            Widget::Unknown => Ok(()),
         }
     }
 }
