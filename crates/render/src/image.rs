@@ -326,7 +326,7 @@ impl Image {
 
 impl Draw for Image {
     fn draw_with_offset(
-        &mut self,
+        &self,
         offset: &Offset<usize>,
         drawer: &mut Drawer,
     ) -> pangocairo::cairo::Result<()> {
@@ -351,7 +351,7 @@ impl Draw for Image {
             },
         };
 
-        drawer.make_rounding(
+        drawer.context.make_rounding(
             (*offset).into(),
             RectSize::new(data.width as f64, data.height as f64),
             *rounding_radius,

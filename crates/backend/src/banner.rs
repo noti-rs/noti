@@ -5,7 +5,7 @@ use config::{
     Config,
 };
 use dbus::notification::Notification;
-use log::{debug, trace};
+use log::{debug, error, trace};
 
 use render::{
     drawer::Drawer,
@@ -22,6 +22,7 @@ use crate::cache::CachedLayout;
 
 pub struct BannerRect {
     data: Notification,
+    layout: Option<Widget>,
     created_at: time::Instant,
 
     framebuffer: Vec<u8>,
@@ -33,6 +34,7 @@ impl BannerRect {
 
         Self {
             data: notification,
+            layout: None,
             created_at: time::Instant::now(),
 
             framebuffer: vec![],
@@ -67,6 +69,22 @@ impl BannerRect {
         );
     }
 
+    // TODO: use it for resize
+    #[allow(unused)]
+    pub(crate) fn width(&self) -> usize {
+        self.layout
+            .as_ref()
+            .map(|layout| layout.width())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn height(&self) -> usize {
+        self.layout
+            .as_ref()
+            .map(|layout| layout.height())
+            .unwrap_or_default()
+    }
+
     #[inline]
     pub(crate) fn framebuffer(&self) -> &[u8] {
         &self.framebuffer
@@ -77,7 +95,7 @@ impl BannerRect {
         pango_context: &PangoContext,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) {
+    ) ->  anyhow::Result<()> {
         debug!("Banner (id={}): Beginning of draw", self.data.id);
 
         let rect_size = RectSize::new(
@@ -86,7 +104,13 @@ impl BannerRect {
         );
 
         let display = config.display_by_app(&self.data.app_name);
-        let mut drawer = Drawer::create(rect_size).unwrap();
+        let mut drawer = match Drawer::create(rect_size) {
+            Ok(drawer) => drawer,
+            Err(err) => {
+                error!("Failed to create drawer for Banner(id={}), avoided to draw banner.", self.data.id);
+                return Err(err)?;
+            }
+        };
 
         let mut layout = match &display.layout {
             config::display::Layout::Default => Self::default_layout(display),
@@ -109,19 +133,27 @@ impl BannerRect {
         );
 
         if let Err(err) = layout.draw(&mut drawer) {
-            todo!("Add info about err")
+            error!(
+                "Failed to draw banner Banner(id={}).",
+                self.data.id
+            );
+            return Err(err)?;
         }
 
+        self.layout = Some(layout);
         self.framebuffer = match drawer.try_into() {
             Ok(val) => val,
             Err(err) => {
-                //TODO: store infomation about failed trawing
-                // error!();
-                todo!()
-            },
+                error!(
+                    "Failed to get data after drawing Banner(id={}).",
+                    self.data.id
+                );
+                return Err(err)?;
+            }
         };
 
         debug!("Banner (id={}): Complete draw", self.data.id);
+        Ok(())
     }
 
     fn default_layout(display_config: &DisplayConfig) -> Widget {

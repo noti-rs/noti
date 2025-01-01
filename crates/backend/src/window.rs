@@ -193,6 +193,13 @@ impl Window {
         &self.configuration_state
     }
 
+    pub(super) fn total_renderable_banners(&self) -> usize {
+        self.banners
+            .values()
+            .filter(|banner| banner.height() > 0)
+            .count()
+    }
+
     pub(super) fn is_empty(&self) -> bool {
         self.banners.is_empty()
     }
@@ -202,19 +209,19 @@ impl Window {
         notifications: Vec<Notification>,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) {
-        self.banners
-            .extend(notifications.into_iter().map(|notification| {
-                let mut banner_rect = BannerRect::init(notification);
-                banner_rect.draw(&self.pango_context.borrow(), config, cached_layouts);
-                (banner_rect.notification().id, banner_rect)
-            }));
+    ) -> anyhow::Result<()> {
+        for notification in notifications {
+            let mut banner_rect = BannerRect::init(notification);
+            banner_rect.draw(&self.pango_context.borrow(), config, cached_layouts)?;
+            self.banners.insert(banner_rect.notification().id, banner_rect);
+        }
 
         self.banners
             .sort_by_values(config.general().sorting.get_cmp::<BannerRect>());
         debug!("Window: Sorted the notification banners");
 
-        debug!("Window: Completed update the notification banners")
+        debug!("Window: Completed update the notification banners");
+        Ok(())
     }
 
     pub(super) fn replace_by_indices(
@@ -222,7 +229,7 @@ impl Window {
         notifications: &mut VecDeque<Notification>,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) {
+    ) -> anyhow::Result<()> {
         let matching_indices: Vec<usize> = notifications
             .iter()
             .enumerate()
@@ -234,13 +241,15 @@ impl Window {
 
             let rect = &mut self.banners[&notification.id];
             rect.update_data(notification);
-            rect.draw(&self.pango_context.borrow(), config, cached_layouts);
+            rect.draw(&self.pango_context.borrow(), config, cached_layouts)?;
 
             debug!(
                 "Window: Replaced notification by id {}",
                 rect.notification().id
             );
         }
+
+        Ok(())
     }
 
     pub(super) fn remove_banners_by_id(
@@ -320,7 +329,7 @@ impl Window {
         if let Some(id) = self.get_hovered_banner(config) {
             if config.general().anchor.is_bottom() {
                 self.pointer_state.y -=
-                    config.general().height as f64 + config.general().gap as f64;
+                    self.banners[&id].height() as f64 + config.general().gap as f64;
             }
 
             debug!("Window: Clicked to notification banner with id {id}");
@@ -343,25 +352,44 @@ impl Window {
             return None;
         }
 
-        let rect_height = config.general().height as usize;
-        let gap = config.general().gap as usize;
+        let mut offset = 0.0;
+        let gap = config.general().gap as f64;
 
-        let region_iter = (0..self.rect_size.height).step_by(rect_height + gap);
-        let finder = |(banner, rect_top): (&BannerRect, usize)| {
-            let rect_bottom = rect_top + rect_height;
-            (rect_top as f64..rect_bottom as f64)
-                .contains(&(self.pointer_state.y))
-                .then(|| banner.notification().id)
+        let finder = |banner: &BannerRect| {
+            if banner.height() == 0 {
+                return None;
+            }
+
+            let banner_height = banner.height() as f64;
+            let bottom = offset + banner_height;
+            if (offset..bottom).contains(&self.pointer_state.y) {
+                Some(banner.notification().id)
+            } else {
+                offset += banner_height + gap;
+                None
+            }
         };
 
         if config.general().anchor.is_top() {
-            self.banners
-                .values()
-                .rev()
-                .zip(region_iter)
-                .find_map(finder)
+            self.banners.values().rev().find_map(finder)
         } else {
-            self.banners.values().zip(region_iter).find_map(finder)
+            self.banners.values().find_map(finder)
+        }
+    }
+
+    // TODO: remove this method
+    pub(super) fn remove_incorrect_banners(&mut self) -> Vec<Notification> {
+        let incorrect_banners: Vec<u32> = self
+            .banners
+            .values()
+            .filter_map(|banner| (banner.height() == 0).then_some(banner.notification().id))
+            .collect();
+
+        if !incorrect_banners.is_empty() {
+            debug!("Remove incorrect banners by id: {incorrect_banners:?}");
+            self.remove_banners_by_id(&incorrect_banners)
+        } else {
+            vec![]
         }
     }
 
@@ -370,24 +398,31 @@ impl Window {
         qhandle: &QueueHandle<Window>,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) {
-        self.banners
-            .values_mut()
-            .for_each(|banner| banner.draw(&self.pango_context.borrow(), config, cached_layouts));
+    ) -> anyhow::Result<()> {
+        for banner in self.banners.values_mut() {
+            banner.draw(&self.pango_context.borrow(), config, cached_layouts)?;
+        }
 
         self.draw(qhandle, config);
 
         debug!("Window: Redrawed banners");
+        Ok(())
     }
 
     pub(super) fn draw(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
         let gap = config.general().gap;
 
-        self.resize(RectSize::new(
-            config.general().width.into(),
-            self.banners.len() * config.general().height as usize
-                + self.banners.len().saturating_sub(1) * gap as usize,
-        ));
+        let renderable_banners = self.total_renderable_banners();
+        if renderable_banners > 0 {
+            self.resize(RectSize::new(
+                config.general().width.into(),
+                self.banners
+                    .values()
+                    .map(|banner| banner.height())
+                    .sum::<usize>()
+                    + renderable_banners.saturating_sub(1) * gap as usize,
+            ));
+        }
 
         let gap_buffer = self.allocate_gap_buffer(gap);
 
@@ -419,26 +454,33 @@ impl Window {
             unsafe { buffer.unwrap_unchecked() }.push(data);
         }
 
-        let writer = |(i, rect): (usize, &BannerRect)| {
-            write(self.buffer.as_mut(), rect.framebuffer());
+        let threshold = self.total_renderable_banners().saturating_sub(1);
+        let mut total = 0;
+        let writer = |banner: &BannerRect| {
+            if banner.height() == 0 {
+                return;
+            }
 
-            if i < self.banners.len().saturating_sub(1) {
+            write(self.buffer.as_mut(), banner.framebuffer());
+
+            if total < threshold {
                 write(self.buffer.as_mut(), gap_buffer);
             }
+
+            total += 1;
         };
 
         if anchor.is_top() {
-            self.banners.values().rev().enumerate().for_each(writer)
+            self.banners.values().rev().for_each(writer)
         } else {
-            self.banners.values().enumerate().for_each(writer)
+            self.banners.values().for_each(writer)
         }
 
         debug!("Window: Writed banners to buffer");
     }
 
     fn create_buffer(&mut self, qhandle: &QueueHandle<Window>) {
-        if self.buffer.is_some() {
-            let buffer = unsafe { self.buffer.as_mut().unwrap_unchecked() };
+        if let Some(buffer) = self.buffer.as_mut() {
             buffer.reset();
             return;
         }
@@ -478,7 +520,9 @@ impl Window {
             self.buffer
                 .as_ref()
                 .is_some_and(|buffer| buffer.size() >= self.rect_size.area() * 4),
-            "Buffer size must be greater or equal to window size!"
+            "Buffer size must be greater or equal to window size. Buffer size: {}. Window area: {}.",
+            self.buffer.as_ref().map(|buffer| buffer.size).unwrap_or_default(),
+            self.rect_size.area()
         );
 
         let shm_pool = unsafe { self.shm_pool.as_ref().unwrap_unchecked() };
@@ -543,6 +587,9 @@ impl Buffer {
     }
 
     fn reset(&mut self) {
+        self.file
+            .write_all_at(&vec![0; self.cursor as usize + 1], 0)
+            .expect("Must be possibility to write into file");
         self.cursor = 0;
         debug!("Buffer: Reset");
     }
@@ -550,7 +597,7 @@ impl Buffer {
     fn push(&mut self, data: &[u8]) {
         self.file
             .write_all_at(data, self.cursor)
-            .expect("Must be possibility to write into file!");
+            .expect("Must be possibility to write into file");
         self.cursor += data.len() as u64;
 
         self.size = std::cmp::max(self.size, self.cursor as usize);

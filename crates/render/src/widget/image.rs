@@ -121,7 +121,7 @@ impl Default for WImage {
 }
 
 impl Draw for WImage {
-    fn draw_with_offset(&mut self, offset: &Offset<usize>, drawer: &mut Drawer) -> pangocairo::cairo::Result<()> {
+    fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer) -> pangocairo::cairo::Result<()> {
         if !self.content.is_exists() {
             return Ok(());
         }

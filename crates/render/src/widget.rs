@@ -20,12 +20,12 @@ pub use text::{GBuilderWText, WText, WTextKind};
 
 pub trait Draw {
     fn draw_with_offset(
-        &mut self,
+        &self,
         offset: &Offset<usize>,
         drawer: &mut Drawer,
     ) -> pangocairo::cairo::Result<()>;
 
-    fn draw(&mut self, drawer: &mut Drawer) -> pangocairo::cairo::Result<()> {
+    fn draw(&self, drawer: &mut Drawer) -> pangocairo::cairo::Result<()> {
         self.draw_with_offset(&Default::default(), drawer)
     }
 }
@@ -97,7 +97,7 @@ impl Widget {
 
 impl Draw for Widget {
     fn draw_with_offset(
-        &mut self,
+        &self,
         offset: &Offset<usize>,
         output: &mut Drawer,
     ) -> pangocairo::cairo::Result<()> {

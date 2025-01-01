@@ -7,7 +7,7 @@ use config::{
 };
 use log::warn;
 use pest::iterators::{Pair, Pairs};
-use render::widget::{Alignment, GBuilderAlignment, GBuilderFlexContainer, GBuilderWText, Widget};
+use render::widget::{Alignment, GBuilderAlignment, GBuilderFlexContainer, GBuilderWImage, GBuilderWText, Widget};
 use shared::{
     error::ConversionError,
     value::{TryDowncast, Value},
@@ -245,7 +245,7 @@ fn convert_type_value<'a>(
 #[derive(Clone)]
 enum GBuilder {
     FlexContainer(GBuilderFlexContainer),
-    // WImage(GBuilderWImage),
+    WImage(GBuilderWImage),
     WText(GBuilderWText),
 
     Spacing(GBuilderSpacing),
@@ -279,7 +279,7 @@ impl GBuilder {
 
         if let Some(err) = implement_variants!(
             FlexContainer,
-            // WImage,
+            WImage,
             WText,
             Spacing,
             Alignment,
@@ -304,7 +304,7 @@ impl GBuilder {
 
         implement_variants!(
             FlexContainer,
-            // WImage,
+            WImage,
             WText,
             Spacing,
             Alignment,
@@ -327,7 +327,7 @@ impl GBuilder {
         }
 
         Ok(implement_variants!(
-            // WImage into Widget,
+            WImage into Widget,
             WText into Widget,
             FlexContainer into Widget,
 
@@ -346,7 +346,7 @@ impl TryFrom<(&str, &HashMap<&str, GBuilder>)> for GBuilder {
     ) -> Result<Self, Self::Error> {
         Ok(match identifier {
             "FlexContainer" => GBuilder::FlexContainer(GBuilderFlexContainer::new()),
-            // "Image" => GBuilder::WImage(GBuilderWImage::new()),
+            "Image" => GBuilder::WImage(GBuilderWImage::new()),
             "Text" => GBuilder::WText(GBuilderWText::new()),
             "Spacing" => GBuilder::Spacing(GBuilderSpacing::new()),
             "Alignment" => GBuilder::Alignment(GBuilderAlignment::new()),

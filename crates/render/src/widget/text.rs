@@ -236,7 +236,7 @@ impl WText {
 
 impl Draw for WText {
     fn draw_with_offset(
-        &mut self,
+        &self,
         offset: &Offset<usize>,
         drawer: &mut Drawer,
     ) -> pangocairo::cairo::Result<()> {

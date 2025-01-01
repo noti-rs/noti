@@ -48,6 +48,7 @@ impl BackendManager {
 
             window_manager.handle_close_notifications(config)?;
             window_manager.remove_expired(config)?;
+            window_manager.remove_incorrect_banners(config)?;
 
             window_manager.handle_actions(config)?;
         }

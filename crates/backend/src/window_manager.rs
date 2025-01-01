@@ -93,7 +93,7 @@ impl WindowManager {
             let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
             window.reconfigure(config);
-            window.redraw(qhandle, config, &self.cached_layouts);
+            window.redraw(qhandle, config, &self.cached_layouts)?;
             window.frame(qhandle);
             window.commit();
         }
@@ -138,7 +138,7 @@ impl WindowManager {
                 notifications_limit = usize::MAX
             }
 
-            window.replace_by_indices(&mut self.notification_queue, config, &self.cached_layouts);
+            window.replace_by_indices(&mut self.notification_queue, config, &self.cached_layouts)?;
 
             let available_slots = notifications_limit.saturating_sub(window.total_banners());
             let notifications_to_display: Vec<_> = self
@@ -146,7 +146,7 @@ impl WindowManager {
                 .drain(..available_slots.min(self.notification_queue.len()))
                 .collect();
 
-            window.update_banners(notifications_to_display, config, &self.cached_layouts);
+            window.update_banners(notifications_to_display, config, &self.cached_layouts)?;
 
             self.update_window(config)?;
             self.roundtrip_event_queue()?;
@@ -196,6 +196,23 @@ impl WindowManager {
                     reason: dbus::actions::ClosingReason::Expired,
                 })
             });
+
+            self.process_notification_queue(config)?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn remove_incorrect_banners(&mut self, config: &Config) -> anyhow::Result<()> {
+        if let Some(window) = self.window.as_mut() {
+            let notifications = window.remove_incorrect_banners();
+
+            if notifications.is_empty() {
+                return Ok(());
+            }
+
+            // INFO: we don't need to store information about incorrect notifications. Only need to
+            // drop them.
 
             self.process_notification_queue(config)?;
         }

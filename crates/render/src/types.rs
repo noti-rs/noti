@@ -19,6 +19,13 @@ where
         Self { width, height }
     }
 
+    pub fn new_square(side: T) -> Self {
+        Self {
+            width: side,
+            height: side,
+        }
+    }
+
     pub fn new_width(width: T) -> Self {
         Self {
             width,
@@ -57,6 +64,15 @@ impl From<RectSize<usize>> for RectSize<f64> {
         Self {
             width: value.width as f64,
             height: value.height as f64,
+        }
+    }
+}
+
+impl From<RectSize<f64>> for RectSize<usize> {
+    fn from(value: RectSize<f64>) -> Self {
+        Self {
+            width: value.width.round() as usize,
+            height: value.height.round() as usize,
         }
     }
 }

@@ -8,12 +8,12 @@ use crate::{
 };
 
 pub struct Drawer {
-    surface: ImageSurface,
-    pub context: Context,
+    pub(crate) surface: ImageSurface,
+    pub(crate) context: Context,
 }
 
 impl Drawer {
-    pub fn create(size: RectSize<usize>) -> anyhow::Result<Self> {
+    pub fn create(size: RectSize<usize>) -> pangocairo::cairo::Result<Self> {
         let surface = ImageSurface::create(
             pangocairo::cairo::Format::ARgb32,
             size.width as i32,
@@ -36,7 +36,7 @@ pub(crate) trait MakeRounding {
     );
 }
 
-impl MakeRounding for Drawer {
+impl MakeRounding for Context {
     fn make_rounding(
         &self,
         offset: Offset<f64>,
@@ -49,28 +49,28 @@ impl MakeRounding for Drawer {
         inner_radius = inner_radius.min(minimal_threshold);
         outer_radius = outer_radius.min(minimal_threshold);
 
-        self.context.arc(
+        self.arc(
             offset.x + outer_radius,
             offset.y + outer_radius,
             inner_radius,
             PI,
             -FRAC_PI_2,
         );
-        self.context.arc(
+        self.arc(
             offset.x + rect_size.width - outer_radius,
             offset.y + outer_radius,
             inner_radius,
             -FRAC_PI_2,
             0.0,
         );
-        self.context.arc(
+        self.arc(
             offset.x + rect_size.width - outer_radius,
             offset.y + rect_size.height - outer_radius,
             inner_radius,
             0.0,
             FRAC_PI_2,
         );
-        self.context.arc(
+        self.arc(
             offset.x + outer_radius,
             offset.y + rect_size.height - outer_radius,
             inner_radius,
