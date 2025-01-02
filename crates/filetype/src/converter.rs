@@ -7,7 +7,9 @@ use config::{
 };
 use log::warn;
 use pest::iterators::{Pair, Pairs};
-use render::widget::{Alignment, GBuilderAlignment, GBuilderFlexContainer, GBuilderWImage, GBuilderWText, Widget};
+use render::widget::{
+    Alignment, GBuilderAlignment, GBuilderFlexContainer, GBuilderWImage, GBuilderWText, Widget,
+};
 use shared::{
     error::ConversionError,
     value::{TryDowncast, Value},
@@ -280,14 +282,9 @@ impl GBuilder {
             };
         }
 
-        if let Some(err) = implement_variants!(
-            FlexContainer,
-            WImage,
-            WText,
-            Spacing,
-            Alignment,
-            Border
-        ) {
+        if let Some(err) =
+            implement_variants!(FlexContainer, WImage, WText, Spacing, Alignment, Border)
+        {
             warn!("Failed to call constructor of {self_name}, trying to defaulting. Error: {err}");
         }
     }
@@ -305,14 +302,7 @@ impl GBuilder {
             };
         }
 
-        implement_variants!(
-            FlexContainer,
-            WImage,
-            WText,
-            Spacing,
-            Alignment,
-            Border
-        );
+        implement_variants!(FlexContainer, WImage, WText, Spacing, Alignment, Border);
         Ok(self)
     }
 

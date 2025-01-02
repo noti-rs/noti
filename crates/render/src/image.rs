@@ -7,7 +7,8 @@ use dbus::image::ImageData;
 
 use crate::{
     drawer::{Drawer, MakeRounding},
-    types::RectSize, PangoContext,
+    types::RectSize,
+    PangoContext,
 };
 
 use super::{types::Offset, widget::Draw};

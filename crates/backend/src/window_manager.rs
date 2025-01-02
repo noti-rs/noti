@@ -153,7 +153,8 @@ impl WindowManager {
                 .drain(..available_slots.min(self.notification_queue.len()))
                 .collect();
 
-            unrendered_notifications = window.update_banners(notifications_to_display, config, &self.cached_layouts);
+            unrendered_notifications =
+                window.update_banners(notifications_to_display, config, &self.cached_layouts);
 
             self.update_window(config)?;
             self.roundtrip_event_queue()?;

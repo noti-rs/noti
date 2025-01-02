@@ -1,5 +1,5 @@
-use crate::{dispatcher::Dispatcher, error::Error};
 use crate::idle_manager::IdleManager;
+use crate::{dispatcher::Dispatcher, error::Error};
 
 use config::Config;
 use dbus::{actions::Signal, notification::Notification};
