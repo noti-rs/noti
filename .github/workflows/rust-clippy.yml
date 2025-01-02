@@ -17,7 +17,7 @@ jobs:
       - name: Update apt-get
         run: sudo apt-get update
       - name: Install pangocairo
-        run: sudo apt-get install libpangocairo-1.0-0
+        run: sudo apt-get install librust-pangocairo-sys-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
