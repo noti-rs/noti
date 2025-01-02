@@ -1,8 +1,3 @@
-use std::{
-    ops::Deref,
-    sync::{Arc, Mutex},
-};
-
 use config::text::{GBuilderTextProperty, TextProperty};
 use dbus::text::{EntityKind, Text};
 use log::warn;
@@ -28,10 +23,8 @@ use super::{CompileState, Draw, WidgetConfiguration};
 pub struct WText {
     kind: WTextKind,
 
-    // INFO: using here Arc<Mutex<T>> is not mean that drawing is multithreading. It is made for
-    // safe usage when layout creates in filetype crate.
     #[gbuilder(hidden, default(None))]
-    layout: Option<Arc<Mutex<Layout>>>,
+    layout: Option<PangoLayout>,
 
     #[gbuilder(use_gbuilder(GBuilderTextProperty), default)]
     property: TextProperty,
@@ -111,9 +104,7 @@ impl WText {
             }
         };
 
-        let layout = Layout {
-            pango_layout: PangoLayout::new(&pango_context.0),
-        };
+        let layout = PangoLayout::new(&pango_context.0);
 
         let colors = theme.by_urgency(&notification.hints.urgency);
         let foreground: Bgra<f64> = colors.foreground.clone().into();
@@ -157,7 +148,7 @@ impl WText {
             CompileState::Failure
         } else {
             self.inner_size = rect_size;
-            self.layout = Some(Arc::new(Mutex::new(layout)));
+            self.layout = Some(layout);
             CompileState::Success
         }
     }
@@ -227,9 +218,7 @@ impl WText {
     pub fn height(&self) -> usize {
         self.layout
             .as_ref()
-            .map(|layout| {
-                layout.lock().unwrap().pixel_size().1 + self.property.margin.vertical() as i32
-            })
+            .map(|layout| layout.pixel_size().1 + self.property.margin.vertical() as i32)
             .unwrap_or(0) as usize
     }
 }
@@ -242,14 +231,13 @@ impl Draw for WText {
         drawer: &mut Drawer,
     ) -> pangocairo::cairo::Result<()> {
         if let Some(layout) = self.layout.as_ref() {
-            let layout = layout.lock().unwrap();
             drawer.context.move_to(
                 (offset.x + self.property.margin.left() as usize) as f64,
                 (offset.y + self.property.margin.top() as usize) as f64,
             );
             pangocairo::functions::update_context(&drawer.context, &pango_context.0);
             layout.context_changed();
-            pangocairo::functions::show_layout(&drawer.context, &layout);
+            pangocairo::functions::show_layout(&drawer.context, layout);
         }
         Ok(())
     }
@@ -312,23 +300,6 @@ impl<'a> From<&'a str> for NotificationContent<'a> {
 impl<'a> From<&'a Text> for NotificationContent<'a> {
     fn from(value: &'a Text) -> Self {
         NotificationContent::Text(value)
-    }
-}
-
-struct Layout {
-    pango_layout: PangoLayout,
-}
-
-// WARN: unlike there is a Send trait that marks that the object is safe to send into another
-// thread, it is not. And it made for internal purpose - using in Box<dyn Any> for filetype crate.
-// Unfortunately, there yet is no effective way to deal with it.
-unsafe impl Send for Layout {}
-
-impl Deref for Layout {
-    type Target = PangoLayout;
-
-    fn deref(&self) -> &Self::Target {
-        &self.pango_layout
     }
 }
 
