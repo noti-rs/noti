@@ -22,11 +22,16 @@ pub trait Draw {
     fn draw_with_offset(
         &self,
         offset: &Offset<usize>,
+        pango_context: &PangoContext,
         drawer: &mut Drawer,
     ) -> pangocairo::cairo::Result<()>;
 
-    fn draw(&self, drawer: &mut Drawer) -> pangocairo::cairo::Result<()> {
-        self.draw_with_offset(&Default::default(), drawer)
+    fn draw(
+        &self,
+        pango_context: &PangoContext,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
+        self.draw_with_offset(&Default::default(), pango_context, drawer)
     }
 }
 
@@ -99,12 +104,15 @@ impl Draw for Widget {
     fn draw_with_offset(
         &self,
         offset: &Offset<usize>,
+        pango_context: &PangoContext,
         output: &mut Drawer,
     ) -> pangocairo::cairo::Result<()> {
         match self {
-            Widget::Image(image) => image.draw_with_offset(offset, output),
-            Widget::Text(text) => text.draw_with_offset(offset, output),
-            Widget::FlexContainer(container) => container.draw_with_offset(offset, output),
+            Widget::Image(image) => image.draw_with_offset(offset, pango_context, output),
+            Widget::Text(text) => text.draw_with_offset(offset, pango_context, output),
+            Widget::FlexContainer(container) => {
+                container.draw_with_offset(offset, pango_context, output)
+            }
             Widget::Unknown => Ok(()),
         }
     }

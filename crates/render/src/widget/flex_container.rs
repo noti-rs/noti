@@ -6,6 +6,7 @@ use crate::{
     color::{Bgra, Color},
     drawer::{Drawer, MakeRounding, SetSourceColor},
     types::{Offset, RectSize},
+    PangoContext,
 };
 
 use super::{CompileState, Draw, Widget, WidgetConfiguration};
@@ -232,6 +233,7 @@ impl Draw for FlexContainer {
     fn draw_with_offset(
         &self,
         offset: &Offset<usize>,
+        pango_context: &PangoContext,
         drawer: &mut Drawer,
     ) -> pangocairo::cairo::Result<()> {
         let Some(mut rect_size) = self.rect_size.as_ref().cloned() else {
@@ -283,7 +285,7 @@ impl Draw for FlexContainer {
                     child.len_by_direction(&self.direction.orthogonalize()),
                 );
 
-            child.draw_with_offset(&(plane.as_offset() + *offset), drawer)?;
+            child.draw_with_offset(&(plane.as_offset() + *offset), pango_context, drawer)?;
 
             plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
         }

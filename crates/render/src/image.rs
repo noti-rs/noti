@@ -7,7 +7,7 @@ use dbus::image::ImageData;
 
 use crate::{
     drawer::{Drawer, MakeRounding},
-    types::RectSize,
+    types::RectSize, PangoContext,
 };
 
 use super::{types::Offset, widget::Draw};
@@ -328,6 +328,7 @@ impl Draw for Image {
     fn draw_with_offset(
         &self,
         offset: &Offset<usize>,
+        _pango_context: &PangoContext,
         drawer: &mut Drawer,
     ) -> pangocairo::cairo::Result<()> {
         let Image::Exists {

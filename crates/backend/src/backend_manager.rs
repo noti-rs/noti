@@ -1,4 +1,4 @@
-use crate::dispatcher::Dispatcher;
+use crate::{dispatcher::Dispatcher, error::Error};
 use crate::idle_manager::IdleManager;
 
 use config::Config;
@@ -31,7 +31,7 @@ impl BackendManager {
         debug!("Backend Manager: Received notification id {notification_id} to close");
     }
 
-    pub(crate) fn poll(&mut self, config: &Config) -> anyhow::Result<()> {
+    pub(crate) fn poll(&mut self, config: &Config) -> Result<(), Error> {
         let Self {
             idle_manager,
             window_manager,
@@ -48,7 +48,6 @@ impl BackendManager {
 
             window_manager.handle_close_notifications(config)?;
             window_manager.remove_expired(config)?;
-            window_manager.remove_incorrect_banners(config)?;
 
             window_manager.handle_actions(config)?;
         }
@@ -67,7 +66,7 @@ impl BackendManager {
         self.window_manager.pop_signal()
     }
 
-    pub(crate) fn update_config(&mut self, config: &Config) -> anyhow::Result<()> {
+    pub(crate) fn update_config(&mut self, config: &Config) -> Result<(), Error> {
         let Self {
             window_manager,
             idle_manager,

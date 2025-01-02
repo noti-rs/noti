@@ -238,15 +238,17 @@ impl Draw for WText {
     fn draw_with_offset(
         &self,
         offset: &Offset<usize>,
+        pango_context: &PangoContext,
         drawer: &mut Drawer,
     ) -> pangocairo::cairo::Result<()> {
         if let Some(layout) = self.layout.as_ref() {
             let layout = layout.lock().unwrap();
-            //TODO: try to inject here pango context for better result
             drawer.context.move_to(
                 (offset.x + self.property.margin.left() as usize) as f64,
                 (offset.y + self.property.margin.top() as usize) as f64,
             );
+            pangocairo::functions::update_context(&drawer.context, &pango_context.0);
+            layout.context_changed();
             pangocairo::functions::show_layout(&drawer.context, &layout);
         }
         Ok(())

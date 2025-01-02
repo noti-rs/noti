@@ -20,7 +20,7 @@ use shared::cached_data::CachedData;
 
 use crate::cache::CachedLayout;
 
-pub struct BannerRect {
+pub struct Banner {
     data: Notification,
     layout: Option<Widget>,
     created_at: time::Instant,
@@ -28,7 +28,7 @@ pub struct BannerRect {
     framebuffer: Vec<u8>,
 }
 
-impl BannerRect {
+impl Banner {
     pub(crate) fn init(notification: Notification) -> Self {
         debug!("Banner (id={}): Created", notification.id);
 
@@ -95,7 +95,7 @@ impl BannerRect {
         pango_context: &PangoContext,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) ->  anyhow::Result<()> {
+    ) -> DrawState {
         debug!("Banner (id={}): Beginning of draw", self.data.id);
 
         let rect_size = RectSize::new(
@@ -107,8 +107,8 @@ impl BannerRect {
         let mut drawer = match Drawer::create(rect_size) {
             Ok(drawer) => drawer,
             Err(err) => {
-                error!("Failed to create drawer for Banner(id={}), avoided to draw banner.", self.data.id);
-                return Err(err)?;
+                error!("Failed to create drawer for Banner(id={}), avoided to draw banner. Error: {err}", self.data.id);
+                return DrawState::Failure;
             }
         };
 
@@ -132,12 +132,12 @@ impl BannerRect {
             },
         );
 
-        if let Err(err) = layout.draw(&mut drawer) {
+        if let Err(err) = layout.draw(pango_context, &mut drawer) {
             error!(
-                "Failed to draw banner Banner(id={}).",
+                "Failed to draw banner Banner(id={}). Error: {err}",
                 self.data.id
             );
-            return Err(err)?;
+            return DrawState::Failure;
         }
 
         self.layout = Some(layout);
@@ -145,15 +145,15 @@ impl BannerRect {
             Ok(val) => val,
             Err(err) => {
                 error!(
-                    "Failed to get data after drawing Banner(id={}).",
+                    "Failed to get data after drawing Banner(id={}). Error: {err}",
                     self.data.id
                 );
-                return Err(err)?;
+                return DrawState::Failure;
             }
         };
 
         debug!("Banner (id={}): Complete draw", self.data.id);
-        Ok(())
+        DrawState::Success
     }
 
     fn default_layout(display_config: &DisplayConfig) -> Widget {
@@ -184,8 +184,13 @@ impl BannerRect {
     }
 }
 
-impl<'a> From<&'a BannerRect> for &'a Notification {
-    fn from(value: &'a BannerRect) -> Self {
+impl<'a> From<&'a Banner> for &'a Notification {
+    fn from(value: &'a Banner) -> Self {
         &value.data
     }
+}
+
+pub(crate) enum DrawState {
+    Success,
+    Failure,
 }
