@@ -14,6 +14,9 @@ public! {
         wrap: bool,
 
         #[gbuilder(default)]
+        wrap_mode: WrapMode,
+
+        #[gbuilder(default)]
         ellipsize: Ellipsize,
 
         #[gbuilder(default)]
@@ -44,6 +47,32 @@ impl Default for TextProperty {
 }
 
 impl TryFromValue for TextProperty {}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub enum WrapMode {
+    #[serde(rename = "word")]
+    Word,
+    #[serde(rename = "word-char")]
+    #[default]
+    WordChar,
+    #[serde(rename = "char")]
+    Char,
+}
+
+impl TryFromValue for WrapMode {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "word" => WrapMode::Word,
+            "char" => WrapMode::Char,
+            "word-char" | "word_char" => WrapMode::WordChar,
+            _ => Err(shared::error::ConversionError::InvalidValue {
+                expected: "word, char, word-char or word_char",
+                actual: value,
+            })?,
+        })
+        
+    }
+}
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub enum TextStyle {

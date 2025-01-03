@@ -189,6 +189,13 @@ impl WText {
             layout.set_height(0);
         }
 
+        let wrap_mode = match &self.property.wrap_mode {
+            config::text::WrapMode::Word => pangocairo::pango::WrapMode::Word,
+            config::text::WrapMode::WordChar => pangocairo::pango::WrapMode::WordChar,
+            config::text::WrapMode::Char => pangocairo::pango::WrapMode::Char,
+        };
+        layout.set_wrap(wrap_mode);
+
         let ellipsize = match self.property.ellipsize {
             config::text::Ellipsize::Start => pangocairo::pango::EllipsizeMode::Start,
             config::text::Ellipsize::Middle => pangocairo::pango::EllipsizeMode::Middle,
