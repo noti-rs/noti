@@ -1,17 +1,17 @@
 use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
 
 use log::debug;
+use render::PangoContext;
 use shared::cached_data::CachedData;
 use wayland_client::{Connection, EventQueue, QueueHandle};
 
-use crate::cache::CachedLayout;
 use crate::dispatcher::Dispatcher;
+use crate::{cache::CachedLayout, error::Error};
 
 use config::Config;
 use dbus::{actions::Signal, notification::Notification};
 
 use super::window::{ConfigurationState, Window};
-use render::font::FontCollection;
 
 pub(crate) struct WindowManager {
     connection: Connection,
@@ -19,7 +19,7 @@ pub(crate) struct WindowManager {
     qhandle: Option<QueueHandle<Window>>,
     window: Option<Window>,
 
-    font_collection: Rc<RefCell<FontCollection>>,
+    pango_context: Rc<RefCell<PangoContext>>,
     cached_layouts: CachedData<PathBuf, CachedLayout>,
 
     signals: Vec<Signal>,
@@ -41,8 +41,8 @@ impl Dispatcher for WindowManager {
 impl WindowManager {
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
         let connection = Connection::connect_to_env()?;
-        let font_collection =
-            Rc::new(FontCollection::load_by_font_name(&config.general().font.name)?.into());
+        let pango_context =
+            Rc::new(PangoContext::from_font_family(&config.general().font.name).into());
         let cached_layouts = config
             .displays()
             .filter_map(|display| match &display.layout {
@@ -57,7 +57,7 @@ impl WindowManager {
             qhandle: None,
             window: None,
 
-            font_collection,
+            pango_context,
             cached_layouts,
 
             signals: vec![],
@@ -74,7 +74,7 @@ impl WindowManager {
         self.cached_layouts.update()
     }
 
-    pub(crate) fn update_by_config(&mut self, config: &Config) -> anyhow::Result<()> {
+    pub(crate) fn update_by_config(&mut self, config: &Config) -> Result<(), Error> {
         self.cached_layouts.extend_by_keys(
             config
                 .displays()
@@ -85,22 +85,24 @@ impl WindowManager {
                 .collect(),
         );
 
-        self.font_collection
+        self.pango_context
             .borrow_mut()
-            .update_by_font_name(&config.general().font.name)?;
+            .update_font_family(&config.general().font.name);
 
+        let mut unrendered_notifcations = Ok(());
         if let Some(window) = self.window.as_mut() {
             let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
 
             window.reconfigure(config);
-            window.redraw(qhandle, config, &self.cached_layouts);
+            unrendered_notifcations = window.redraw(qhandle, config, &self.cached_layouts);
             window.frame(qhandle);
             window.commit();
         }
 
         debug!("Window Manager: Updated the windows by updated config");
 
-        self.roundtrip_event_queue()
+        self.roundtrip_event_queue()?;
+        Ok(unrendered_notifcations?)
     }
 
     pub(crate) fn create_notification(&mut self, notification: Box<Notification>) {
@@ -111,7 +113,7 @@ impl WindowManager {
         self.close_notifications.push(notification_id);
     }
 
-    pub(crate) fn show_window(&mut self, config: &Config) -> anyhow::Result<()> {
+    pub(crate) fn show_window(&mut self, config: &Config) -> Result<(), Error> {
         let mut notifications_limit = config.general().limit as usize;
         if notifications_limit == 0 {
             notifications_limit = usize::MAX;
@@ -130,7 +132,8 @@ impl WindowManager {
         Ok(())
     }
 
-    fn process_notification_queue(&mut self, config: &Config) -> anyhow::Result<()> {
+    fn process_notification_queue(&mut self, config: &Config) -> Result<(), Error> {
+        let mut unrendered_notifications = Ok(());
         if let Some(window) = self.window.as_mut() {
             let mut notifications_limit = config.general().limit as usize;
 
@@ -138,7 +141,11 @@ impl WindowManager {
                 notifications_limit = usize::MAX
             }
 
-            window.replace_by_indices(&mut self.notification_queue, config, &self.cached_layouts);
+            window.replace_by_indices(
+                &mut self.notification_queue,
+                config,
+                &self.cached_layouts,
+            )?;
 
             let available_slots = notifications_limit.saturating_sub(window.total_banners());
             let notifications_to_display: Vec<_> = self
@@ -146,16 +153,17 @@ impl WindowManager {
                 .drain(..available_slots.min(self.notification_queue.len()))
                 .collect();
 
-            window.update_banners(notifications_to_display, config, &self.cached_layouts);
+            unrendered_notifications =
+                window.update_banners(notifications_to_display, config, &self.cached_layouts);
 
             self.update_window(config)?;
             self.roundtrip_event_queue()?;
         }
 
-        Ok(())
+        Ok(unrendered_notifications?)
     }
 
-    pub(crate) fn handle_close_notifications(&mut self, config: &Config) -> anyhow::Result<()> {
+    pub(crate) fn handle_close_notifications(&mut self, config: &Config) -> Result<(), Error> {
         if self.window.as_ref().is_some() && !self.close_notifications.is_empty() {
             let window = self.window.as_mut().unwrap();
 
@@ -182,7 +190,7 @@ impl WindowManager {
         Ok(())
     }
 
-    pub(crate) fn remove_expired(&mut self, config: &Config) -> anyhow::Result<()> {
+    pub(crate) fn remove_expired(&mut self, config: &Config) -> Result<(), Error> {
         if let Some(window) = self.window.as_mut() {
             let notifications = window.remove_expired_banners(config);
 
@@ -207,7 +215,7 @@ impl WindowManager {
         self.signals.pop()
     }
 
-    pub(crate) fn handle_actions(&mut self, config: &Config) -> anyhow::Result<()> {
+    pub(crate) fn handle_actions(&mut self, config: &Config) -> Result<(), Error> {
         //TODO: change it to actions which defines in config file
 
         if let Some(window) = self.window.as_mut() {
@@ -268,7 +276,7 @@ impl WindowManager {
             let display = self.connection.display();
             display.get_registry(&qhandle, ());
 
-            let mut window = Window::init(self.font_collection.clone(), config);
+            let mut window = Window::init(self.pango_context.clone(), config);
 
             while let ConfigurationState::NotConfiured = window.configuration_state() {
                 event_queue.blocking_dispatch(&mut window)?;

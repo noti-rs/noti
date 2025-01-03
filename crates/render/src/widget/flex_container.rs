@@ -3,10 +3,10 @@ use log::warn;
 use shared::{error::ConversionError, value::TryFromValue};
 
 use crate::{
-    border::{Border, BorderBuilder},
     color::{Bgra, Color},
-    drawer::Drawer,
+    drawer::{Drawer, MakeRounding, SetSourceColor},
     types::{Offset, RectSize},
+    PangoContext,
 };
 
 use super::{CompileState, Draw, Widget, WidgetConfiguration};
@@ -17,11 +17,15 @@ use super::{CompileState, Draw, Widget, WidgetConfiguration};
 pub struct FlexContainer {
     #[builder(private, setter(skip))]
     #[gbuilder(hidden, default(None))]
-    rect_size: Option<RectSize>,
+    rect_size: Option<RectSize<usize>>,
 
     #[builder(private, default)]
-    #[gbuilder(hidden, default(Bgra::new().into()))]
+    #[gbuilder(hidden, default(Bgra::default().into()))]
     background_color: Color,
+
+    #[builder(private, default)]
+    #[gbuilder(hidden, default(Bgra::default().into()))]
+    border_color: Color,
 
     #[builder(default = "false")]
     #[gbuilder(default(false))]
@@ -41,10 +45,6 @@ pub struct FlexContainer {
     #[gbuilder(default)]
     border: config::display::Border,
 
-    #[builder(private, setter(skip))]
-    #[gbuilder(hidden, default)]
-    compiled_border: Option<Border>,
-
     direction: Direction,
     alignment: Alignment,
 
@@ -54,7 +54,7 @@ pub struct FlexContainer {
 impl FlexContainer {
     pub fn compile(
         &mut self,
-        mut rect_size: RectSize,
+        mut rect_size: RectSize<usize>,
         configuration: &WidgetConfiguration,
     ) -> CompileState {
         self.max_width = self.max_width.min(rect_size.width);
@@ -63,23 +63,14 @@ impl FlexContainer {
             width: self.max_width,
             height: self.max_height,
         };
-        self.rect_size = Some(rect_size.clone());
+        self.rect_size = Some(rect_size);
 
         let colors = &configuration
             .theme
             .by_urgency(&configuration.notification.hints.urgency);
 
         self.background_color = colors.background.clone().into();
-        self.compiled_border = Some(
-            BorderBuilder::default()
-                .color(colors.border.clone().into())
-                .frame_width(rect_size.width)
-                .frame_height(rect_size.height)
-                .size(self.border.size)
-                .radius(self.border.radius)
-                .compile()
-                .expect("Border should be have possibility to compile"),
-        );
+        self.border_color = colors.border.clone().into();
 
         rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
         let mut container_axes = FlexContainerPlane::new(rect_size, &self.direction);
@@ -98,10 +89,9 @@ impl FlexContainer {
                 "The flex container is empty! Did you add the widgets? \
                 Or check them, maybe they doesn't fit available space."
             );
-            CompileState::Failure
-        } else {
-            CompileState::Success
         }
+
+        CompileState::Success
     }
 
     pub(super) fn max_width(&self) -> usize {
@@ -174,31 +164,93 @@ impl FlexContainer {
             Direction::Vertical => &self.alignment.horizontal,
         }
     }
+
+    fn rounded_fill(
+        &self,
+        offset: Offset<f64>,
+        rect_size: RectSize<f64>,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
+        let outer_radius = (self.border.radius as f64)
+            .min(rect_size.width / 2.0)
+            .min(rect_size.height / 2.0);
+        let inner_radius = (outer_radius - self.border.size as f64).max(0.0);
+
+        drawer.context.new_sub_path();
+        drawer
+            .context
+            .make_rounding(offset, rect_size, outer_radius, inner_radius);
+        drawer.context.close_path();
+
+        drawer.set_source_color(&self.background_color, rect_size)?;
+        drawer.context.fill()
+    }
+
+    fn outline_border(
+        &self,
+        offset: Offset<f64>,
+        rect_size: RectSize<f64>,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
+        if self.border.radius == 0 || self.border.size == 0 {
+            return Ok(());
+        }
+
+        let outer_radius = (self.border.radius as f64)
+            .min(rect_size.width / 2.0)
+            .min(rect_size.height / 2.0);
+        let inner_radius = outer_radius - self.border.size as f64;
+
+        drawer.context.new_sub_path();
+        drawer
+            .context
+            .make_rounding(offset, rect_size, outer_radius, outer_radius);
+        drawer.context.close_path();
+        drawer.set_source_color(&self.border_color, rect_size)?;
+
+        if inner_radius <= 0.0 {
+            let border_size = self.border.size as f64;
+            drawer.context.rectangle(
+                border_size,
+                border_size,
+                rect_size.width - border_size * 2.0,
+                rect_size.height - border_size * 2.0,
+            );
+        } else {
+            drawer.context.new_sub_path();
+            drawer
+                .context
+                .make_rounding(offset, rect_size, outer_radius, inner_radius);
+            drawer.context.close_path();
+        }
+
+        drawer.context.set_fill_rule(cairo::FillRule::EvenOdd);
+        drawer.context.fill()
+    }
 }
 
 impl Draw for FlexContainer {
-    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
+    fn draw_with_offset(
+        &self,
+        offset: &Offset<usize>,
+        pango_context: &PangoContext,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
         let Some(mut rect_size) = self.rect_size.as_ref().cloned() else {
             panic!(
                 "The rectangle size must be computed by `compile()` method of parent container!"
             );
         };
+        let original_rect_size = rect_size;
 
         // NOTE: if the background color is transparent or forces to be transparent, no need to use
         // another layer as new Drawer instance. Instead of this use the current Drawer instance.
         // It will avoid to use costly methods `draw_area` and `draw_with_offset`.
         let transparent_bg = self.transparent_background || self.background_color.is_transparent();
-        let mut subdrawer = if transparent_bg {
-            Drawer::new(Bgra::new().into(), RectSize::new(0, 0))
-        } else {
-            Drawer::new(self.background_color.clone(), rect_size.clone())
-        };
 
-        let (picked_drawer, base_offset) = if transparent_bg {
-            (&mut *drawer, *offset)
-        } else {
-            (&mut subdrawer, Offset::no_offset())
-        };
+        if !transparent_bg {
+            self.rounded_fill((*offset).into(), rect_size.into(), drawer)?;
+        }
 
         rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
         let mut plane = FlexContainerPlane::new(rect_size, &self.direction);
@@ -225,29 +277,20 @@ impl Draw for FlexContainer {
             }
         };
 
-        self.children.iter().for_each(|child| {
+        let auxiliary_axis_alignment = self.auxiliary_axis_alignment().clone();
+        for child in &self.children {
             plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset
-                + self.auxiliary_axis_alignment().compute_initial_pos(
+                + auxiliary_axis_alignment.compute_initial_pos(
                     plane.auxiliary_len,
                     child.len_by_direction(&self.direction.orthogonalize()),
                 );
 
-            child.draw_with_offset(&(plane.as_offset() + base_offset), picked_drawer);
+            child.draw_with_offset(&(plane.as_offset() + *offset), pango_context, drawer)?;
 
             plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
-            plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset;
-        });
-
-        if let Some(compiled_border) = self.compiled_border.as_ref() {
-            compiled_border.draw_with_offset(&base_offset, picked_drawer);
         }
 
-        if !transparent_bg {
-            match &self.background_color {
-                Color::Fill(_) => drawer.draw_area_optimized(offset, subdrawer),
-                Color::LinearGradient(_) => drawer.draw_area(offset, subdrawer),
-            }
-        }
+        self.outline_border((*offset).into(), original_rect_size.into(), drawer)
     }
 }
 
@@ -349,7 +392,7 @@ impl<'a> FlexContainerPlane<'a> {
         RectSize {
             mut width,
             mut height,
-        }: RectSize,
+        }: RectSize<usize>,
         direction: &'a Direction,
     ) -> Self {
         if let Direction::Vertical = direction {
@@ -365,7 +408,7 @@ impl<'a> FlexContainerPlane<'a> {
         }
     }
 
-    fn new_only_offset(Offset { mut x, mut y }: Offset, direction: &'a Direction) -> Self {
+    fn new_only_offset(Offset { mut x, mut y }: Offset<usize>, direction: &'a Direction) -> Self {
         if let Direction::Vertical = direction {
             (x, y) = (y, x);
         }
@@ -379,7 +422,7 @@ impl<'a> FlexContainerPlane<'a> {
         }
     }
 
-    fn relocate(&mut self, Offset { mut x, mut y }: &Offset) {
+    fn relocate(&mut self, Offset { mut x, mut y }: &Offset<usize>) {
         if let Direction::Vertical = self.direction {
             (x, y) = (y, x);
         }
@@ -388,7 +431,7 @@ impl<'a> FlexContainerPlane<'a> {
         self.auxiliary_axis_offset = y;
     }
 
-    fn as_rect_size(&self) -> RectSize {
+    fn as_rect_size(&self) -> RectSize<usize> {
         let (mut width, mut height) = (self.main_len, self.auxiliary_len);
 
         if let Direction::Vertical = self.direction {
@@ -398,7 +441,7 @@ impl<'a> FlexContainerPlane<'a> {
         RectSize::new(width, height)
     }
 
-    fn as_offset(&self) -> Offset {
+    fn as_offset(&self) -> Offset<usize> {
         let (mut x, mut y) = (self.main_axis_offset, self.auxiliary_axis_offset);
 
         if let Direction::Vertical = self.direction {

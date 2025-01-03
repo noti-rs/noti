@@ -1,171 +1,149 @@
+use std::f64::consts::{FRAC_PI_2, PI};
+
+use pangocairo::cairo::{Context, ImageSurface, LinearGradient};
+
 use crate::{
-    color::{Bgra, Color},
+    color::Color,
     types::{Offset, RectSize},
-    widget::{Coverage, DrawColor},
 };
 
 pub struct Drawer {
-    size: RectSize,
-    data: Vec<Bgra>,
+    pub(crate) surface: ImageSurface,
+    pub(crate) context: Context,
 }
 
 impl Drawer {
-    pub fn new(color: Color, size: RectSize) -> Self {
-        let data =
-            match color {
-                Color::Fill(bgra) => vec![bgra; size.area()],
-                Color::LinearGradient(gradient) => {
-                    let mut data = Vec::with_capacity(size.area());
+    pub fn create(size: RectSize<usize>) -> pangocairo::cairo::Result<Self> {
+        let surface = ImageSurface::create(
+            pangocairo::cairo::Format::ARgb32,
+            size.width as i32,
+            size.height as i32,
+        )?;
 
-                    for y in (0..size.height).rev() {
-                        for x in 0..size.width {
-                            data.push(gradient.color_at(
-                                x as f32 / size.width as f32,
-                                y as f32 / size.height as f32,
-                            ))
-                        }
-                    }
+        let context = Context::new(&surface)?;
 
-                    data
-                }
-            };
-
-        Self { data, size }
-    }
-
-    pub fn draw_area(&mut self, offset: &Offset, subdrawer: Drawer) {
-        for x in 0..subdrawer.size.width {
-            for y in 0..subdrawer.size.height {
-                let color = subdrawer.get_color_at(x, y);
-                self.draw_color(
-                    offset.x + x,
-                    offset.y + y,
-                    if color.is_transparent() {
-                        DrawColor::Overlay(*color)
-                    } else {
-                        DrawColor::Replace(*color)
-                    },
-                );
-            }
-        }
-    }
-
-    pub fn draw_area_optimized(&mut self, offset: &Offset, mut subdrawer: Drawer) {
-        // INFO: this is specific code and it may be hard to read because the main goal is
-        // drawing optimization. Previously just single loop was used but after optimization
-        // we reachd x3 drawing speed. So I've [jarkz] decided to only make it more readable
-        // and leave it with descriptoin.
-        //
-        // WARNING: this code may work not correct in custom border drawing and with
-        // semi-transparent gradients!
-        //
-        // Let's pick this table:
-        // +-+-+-+-+-+-+-+-+-+
-        // |T|S|U|U|U|U|U|S|T|
-        // +-+-+-+-+-+-+-+-+-+
-        // |S|U|U|U|U|U|U|U|S|
-        // +-+-+-+-+-+-+-+-+-+
-        // |S|U|U|U|U|U|U|U|S|
-        // +-+-+-+-+-+-+-+-+-+
-        // |T|S|U|U|U|U|U|S|T|
-        // +-+-+-+-+-+-+-+-+-+
-        //
-        // Where T - transparent, S - Semi-transparent, U - untransparent.
-        // The triangles at corner with S and T cells we should draw cell by cell, but for
-        // U cells pick by slices from left to right and PUT them into other table. Sure, we
-        // can't put owned value from slice to slice, so we use `swap_with_slice()` method
-        // from Vec<T>.
-        if let Some(untransparent_pos) = subdrawer
-            .data
-            .iter()
-            .position(|color| !color.is_transparent())
-        {
-            let start_y = untransparent_pos / subdrawer.size.width;
-            let start_x = untransparent_pos - subdrawer.size.width * start_y;
-
-            let end_x = subdrawer.size.width - start_x;
-            let end_y = subdrawer.size.height - start_y;
-
-            for y in start_y..end_y {
-                let is_corner =
-                    start_x.saturating_sub(y) > 0 || start_x.saturating_sub(end_y - y) > 0;
-                if is_corner {
-                    let start_range = subdrawer.abs_pos_at(0, y)..subdrawer.abs_pos_at(start_x, y);
-                    let end_range = subdrawer.abs_pos_at(end_x, y)
-                        ..subdrawer.abs_pos_at(subdrawer.size.width, y);
-                    subdrawer.data[start_range]
-                        .iter()
-                        .zip(0..start_x)
-                        .chain(
-                            subdrawer.data[end_range]
-                                .iter()
-                                .zip(end_x..subdrawer.size.width),
-                        )
-                        .for_each(|(color, x)| {
-                            self.draw_color(
-                                offset.x + x,
-                                offset.y + y,
-                                if color.is_transparent() {
-                                    DrawColor::Overlay(*color)
-                                } else {
-                                    DrawColor::Replace(*color)
-                                },
-                            )
-                        });
-
-                    let line_in_parent = self.abs_pos_at(offset.x + start_x, offset.y + y)
-                        ..self.abs_pos_at(offset.x + end_x, offset.y + y);
-                    let line_in_child =
-                        subdrawer.abs_pos_at(start_x, y)..subdrawer.abs_pos_at(end_x, y);
-                    self.data[line_in_parent].swap_with_slice(&mut subdrawer.data[line_in_child]);
-                } else {
-                    let line_in_parent = self.abs_pos_at(offset.x, offset.y + y)
-                        ..self.abs_pos_at(offset.x + subdrawer.size.width, offset.y + y);
-                    let line_in_child =
-                        subdrawer.abs_pos_at(0, y)..subdrawer.abs_pos_at(subdrawer.size.width, y);
-
-                    self.data[line_in_parent].swap_with_slice(&mut subdrawer.data[line_in_child]);
-                }
-            }
-        }
-    }
-
-    pub fn draw_color(&mut self, x: usize, y: usize, color: DrawColor) {
-        self.put_color_at(x, y, Self::convert_color(color, self.get_color_at(x, y)));
-    }
-
-    fn convert_color(color: DrawColor, background: &Bgra) -> Bgra {
-        match color {
-            DrawColor::Replace(color) => color,
-            DrawColor::Overlay(foreground) => foreground.overlay_on(background),
-            DrawColor::OverlayWithCoverage(foreground, Coverage(factor)) => {
-                foreground.linearly_interpolate(background, factor)
-            }
-            DrawColor::Transparent(Coverage(factor)) => *background * factor,
-        }
-    }
-
-    fn get_color_at(&self, x: usize, y: usize) -> &Bgra {
-        &self.data[self.abs_pos_at(x, y)]
-    }
-
-    fn put_color_at(&mut self, x: usize, y: usize, color: Bgra) {
-        let pos = self.abs_pos_at(x, y);
-        self.data[pos] = color;
-    }
-
-    #[inline(always = true)]
-    fn abs_pos_at(&self, x: usize, y: usize) -> usize {
-        self.size.width * y + x
+        Ok(Self { surface, context })
     }
 }
 
-impl From<Drawer> for Vec<u8> {
-    fn from(drawer: Drawer) -> Self {
-        drawer
-            .data
-            .into_iter()
-            .flat_map(|color| color.into_slice())
-            .collect()
+pub(crate) trait MakeRounding {
+    fn make_rounding(
+        &self,
+        offset: Offset<f64>,
+        rect_size: RectSize<f64>,
+        outer_radius: f64,
+        inner_radius: f64,
+    );
+}
+
+impl MakeRounding for Context {
+    fn make_rounding(
+        &self,
+        offset: Offset<f64>,
+        rect_size: RectSize<f64>,
+        mut outer_radius: f64,
+        mut inner_radius: f64,
+    ) {
+        debug_assert!(outer_radius >= inner_radius);
+        let minimal_threshold = (rect_size.height / 2.0).min(rect_size.width / 2.0);
+        inner_radius = inner_radius.min(minimal_threshold);
+        outer_radius = outer_radius.min(minimal_threshold);
+
+        self.arc(
+            offset.x + outer_radius,
+            offset.y + outer_radius,
+            inner_radius,
+            PI,
+            -FRAC_PI_2,
+        );
+        self.arc(
+            offset.x + rect_size.width - outer_radius,
+            offset.y + outer_radius,
+            inner_radius,
+            -FRAC_PI_2,
+            0.0,
+        );
+        self.arc(
+            offset.x + rect_size.width - outer_radius,
+            offset.y + rect_size.height - outer_radius,
+            inner_radius,
+            0.0,
+            FRAC_PI_2,
+        );
+        self.arc(
+            offset.x + outer_radius,
+            offset.y + rect_size.height - outer_radius,
+            inner_radius,
+            FRAC_PI_2,
+            PI,
+        );
+    }
+}
+
+pub(crate) trait SetSourceColor {
+    fn set_source_color(
+        &self,
+        color: &Color,
+        frame_size: RectSize<f64>,
+    ) -> pangocairo::cairo::Result<()>;
+}
+
+impl SetSourceColor for Drawer {
+    fn set_source_color(
+        &self,
+        color: &Color,
+        frame_size: RectSize<f64>,
+    ) -> pangocairo::cairo::Result<()> {
+        match color {
+            Color::LinearGradient(linear_gradient) => {
+                fn dot_product(vec1: [f64; 2], vec2: [f64; 2]) -> f64 {
+                    vec1[0] * vec2[0] + vec1[1] * vec2[1]
+                }
+
+                let (half_width, half_height) = (frame_size.width / 2.0, frame_size.height / 2.0);
+
+                // INFO: need to find a factor to multiply the x/y offsets to that distance where
+                // prependicular line hits top left and top right corners. Without it part of area
+                // will be filled by single non-gradientary color that is not acceptable.
+                let x_offset = linear_gradient.grad_vector[0] * half_width;
+                let y_offset = linear_gradient.grad_vector[1] * half_height;
+                let norm = (x_offset * x_offset + y_offset * y_offset).sqrt();
+                let factor =
+                    dot_product([x_offset, y_offset], [half_width, half_height]) / (norm * norm);
+
+                let gradient = LinearGradient::new(
+                    half_width - x_offset * factor,
+                    half_height + y_offset * factor,
+                    half_width + x_offset * factor,
+                    half_height - y_offset * factor,
+                );
+
+                let mut offset = 0.0;
+                for bgra in &linear_gradient.colors {
+                    gradient
+                        .add_color_stop_rgba(offset, bgra.red, bgra.green, bgra.blue, bgra.alpha);
+                    offset += linear_gradient.segment_per_color;
+                }
+
+                self.context.set_source(gradient)?;
+            }
+            Color::Fill(bgra) => self
+                .context
+                .set_source_rgba(bgra.red, bgra.green, bgra.blue, bgra.alpha),
+        }
+
+        Ok(())
+    }
+}
+
+impl TryFrom<Drawer> for Vec<u8> {
+    type Error = pangocairo::cairo::BorrowError;
+
+    fn try_from(value: Drawer) -> Result<Self, Self::Error> {
+        let Drawer {
+            surface, context, ..
+        } = value;
+        drop(context);
+        Ok(surface.take_data()?.to_vec())
     }
 }

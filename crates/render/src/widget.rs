@@ -1,18 +1,15 @@
 use config::{display::DisplayConfig, theme::Theme};
 use dbus::notification::Notification;
 use log::warn;
+use text::PangoContext;
 
 use crate::drawer::Drawer;
 
-use super::{
-    color::Bgra,
-    font::FontCollection,
-    types::{Offset, RectSize},
-};
+use super::types::{Offset, RectSize};
 
 mod flex_container;
 mod image;
-mod text;
+pub(crate) mod text;
 
 pub use flex_container::{
     Alignment, Direction, FlexContainer, FlexContainerBuilder, GBuilderAlignment,
@@ -21,22 +18,20 @@ pub use flex_container::{
 pub use image::{GBuilderWImage, WImage};
 pub use text::{GBuilderWText, WText, WTextKind};
 
-#[derive(Clone, Copy)]
-pub struct Coverage(pub f32);
-
-#[derive(Clone)]
-pub enum DrawColor {
-    Replace(Bgra),
-    Overlay(Bgra),
-    OverlayWithCoverage(Bgra, Coverage),
-    Transparent(Coverage),
-}
-
 pub trait Draw {
-    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer);
+    fn draw_with_offset(
+        &self,
+        offset: &Offset<usize>,
+        pango_context: &PangoContext,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()>;
 
-    fn draw(&self, drawer: &mut Drawer) {
-        self.draw_with_offset(&Default::default(), drawer);
+    fn draw(
+        &self,
+        pango_context: &PangoContext,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
+        self.draw_with_offset(&Default::default(), pango_context, drawer)
     }
 }
 
@@ -62,7 +57,7 @@ impl Widget {
         }
     }
 
-    pub fn compile(&mut self, rect_size: RectSize, configuration: &WidgetConfiguration) {
+    pub fn compile(&mut self, rect_size: RectSize<usize>, configuration: &WidgetConfiguration) {
         let state = match self {
             Widget::Image(image) => image.compile(rect_size, configuration),
             Widget::Text(text) => text.compile(rect_size, configuration),
@@ -106,12 +101,19 @@ impl Widget {
 }
 
 impl Draw for Widget {
-    fn draw_with_offset(&self, offset: &Offset, output: &mut Drawer) {
+    fn draw_with_offset(
+        &self,
+        offset: &Offset<usize>,
+        pango_context: &PangoContext,
+        output: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
         match self {
-            Widget::Image(image) => image.draw_with_offset(offset, output),
-            Widget::Text(text) => text.draw_with_offset(offset, output),
-            Widget::FlexContainer(container) => container.draw_with_offset(offset, output),
-            Widget::Unknown => (),
+            Widget::Image(image) => image.draw_with_offset(offset, pango_context, output),
+            Widget::Text(text) => text.draw_with_offset(offset, pango_context, output),
+            Widget::FlexContainer(container) => {
+                container.draw_with_offset(offset, pango_context, output)
+            }
+            Widget::Unknown => Ok(()),
         }
     }
 }
@@ -123,7 +125,7 @@ pub enum CompileState {
 
 pub struct WidgetConfiguration<'a> {
     pub notification: &'a Notification,
-    pub font_collection: &'a FontCollection,
+    pub pango_context: &'a PangoContext,
     pub theme: &'a Theme,
     pub display_config: &'a DisplayConfig,
     pub override_properties: bool,

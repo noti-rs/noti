@@ -5,6 +5,7 @@ use crate::{
     drawer::Drawer,
     image::Image,
     types::{Offset, RectSize},
+    PangoContext,
 };
 
 use super::{CompileState, Draw, WidgetConfiguration};
@@ -36,7 +37,7 @@ impl WImage {
 
     pub fn compile(
         &mut self,
-        rect_size: RectSize,
+        rect_size: RectSize<usize>,
         WidgetConfiguration {
             notification,
             display_config,
@@ -121,13 +122,18 @@ impl Default for WImage {
 }
 
 impl Draw for WImage {
-    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
+    fn draw_with_offset(
+        &self,
+        offset: &Offset<usize>,
+        pango_context: &PangoContext,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
         if !self.content.is_exists() {
-            return;
+            return Ok(());
         }
 
-        // INFO: The ImageProperty initializes with Image so we can calmly unwrap
         let offset = Offset::from(&self.property.margin) + *offset;
-        self.content.draw_with_offset(&offset, drawer);
+        self.content
+            .draw_with_offset(&offset, pango_context, drawer)
     }
 }

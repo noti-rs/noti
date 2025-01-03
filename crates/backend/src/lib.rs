@@ -1,4 +1,5 @@
 use config::Config;
+use error::Error;
 use log::{debug, info, warn};
 use scheduler::Scheduler;
 use shared::file_watcher::FileState;
@@ -8,6 +9,7 @@ mod backend_manager;
 mod banner;
 mod cache;
 mod dispatcher;
+mod error;
 mod idle_manager;
 mod idle_notifier;
 mod scheduler;
@@ -68,19 +70,19 @@ pub async fn run(mut config: Config) -> anyhow::Result<()> {
                 );
             });
 
-        backend_manager.poll(&config)?;
+        backend_manager.poll(&config).handle_error()?;
 
         match config.check_updates() {
             FileState::Updated => {
                 partially_default_config = false;
                 config.update();
-                backend_manager.update_config(&config)?;
+                backend_manager.update_config(&config).handle_error()?;
                 info!("Renderer: Detected changes of config files and updated")
             }
             FileState::NotFound if !partially_default_config => {
                 partially_default_config = true;
                 config.update();
-                backend_manager.update_config(&config)?;
+                backend_manager.update_config(&config).handle_error()?;
                 info!("The main or imported configuration file is not found, reverting this part to default values.");
             }
             FileState::NotFound | FileState::NothingChanged => (),
@@ -101,6 +103,25 @@ pub async fn run(mut config: Config) -> anyhow::Result<()> {
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         std::hint::spin_loop();
+    }
+}
+
+trait HandleError<T> {
+    fn handle_error(self) -> anyhow::Result<T>;
+}
+
+impl<T: Default> HandleError<T> for Result<T, Error> {
+    fn handle_error(self) -> anyhow::Result<T> {
+        match self {
+            Ok(val) => Ok(val),
+            Err(err) => match err {
+                Error::UnrenderedNotifications(_vec) => {
+                    //TODO: handle unrenedered banners
+                    Ok(Default::default())
+                }
+                Error::Fatal(error) => Err(error)?,
+            },
+        }
     }
 }
 
