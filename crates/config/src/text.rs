@@ -26,7 +26,7 @@ public! {
         alignment: TextAlignment,
 
         #[gbuilder(default(false))]
-        jutsify: bool,
+        justify: bool,
 
         #[cfg_prop(default(12))]
         font_size: u8,

@@ -185,8 +185,8 @@ impl WText {
             }
         }
 
-        if self.property.wrap {
-            layout.set_wrap(pangocairo::pango::WrapMode::Word);
+        if !self.property.wrap {
+            layout.set_height(0);
         }
 
         let ellipsize = match self.property.ellipsize {
@@ -203,7 +203,7 @@ impl WText {
             config::text::TextAlignment::Right => pangocairo::pango::Alignment::Right,
         };
         layout.set_alignment(alignment);
-        layout.set_justify(self.property.jutsify);
+        layout.set_justify(self.property.justify);
         layout.set_spacing(self.property.line_spacing as i32 * PANGO_SCALE);
 
         layout.set_attributes(Some(&attributes));
