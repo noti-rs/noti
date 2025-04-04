@@ -117,7 +117,7 @@ impl TryFrom<String> for Rgba {
                 alpha: 255,
             })
         } else {
-            let mut data = value[1..].as_bytes().chunks_exact(2);
+            let mut data = value.as_bytes()[1..].chunks_exact(2);
 
             fn next_slice<'a>(data: &'a mut ChunksExact<u8>) -> Result<&'a str, anyhow::Error> {
                 data.next()

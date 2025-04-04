@@ -125,8 +125,7 @@ impl<'a> Parser<'a> {
                 self.cursor
                     .skip_until(self.input, |grapheme| grapheme == ";");
 
-                if !self.input[begin..self.cursor.cur_cursor()]
-                    .as_bytes()
+                if !self.input.as_bytes()[begin..self.cursor.cur_cursor()]
                     .iter()
                     .all(|byte| byte.is_ascii_alphanumeric())
                 {
@@ -142,8 +141,7 @@ impl<'a> Parser<'a> {
                         self.cursor
                             .skip_until(self.input, |grapheme| grapheme == ";");
 
-                        if !self.input[begin..self.cursor.cur_cursor()]
-                            .as_bytes()
+                        if !self.input.as_bytes()[begin..self.cursor.cur_cursor()]
                             .iter()
                             .all(|byte| byte.is_ascii_digit())
                         {
@@ -155,8 +153,7 @@ impl<'a> Parser<'a> {
                         self.cursor
                             .skip_until(self.input, |grapheme| grapheme == ";");
 
-                        if !self.input[begin..self.cursor.cur_cursor()]
-                            .as_bytes()
+                        if !self.input.as_bytes()[begin..self.cursor.cur_cursor()]
                             .iter()
                             .all(|byte| byte.is_ascii_hexdigit())
                         {
