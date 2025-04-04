@@ -4,10 +4,19 @@
 
 ## :star2: Features
 
-- **Native Wayland Support**: Seamlessly integrated with Wayland
-- **Highly Configurable**: Detailed customization options for appearance and behavior
-- **Per-App Styling**: Unique notification styles for different applications
-- **Modern Design**: Clean, minimalist approach to desktop notifications
+| status | feature               |
+| :----: | :-------------------- |
+|   ✅   | Hot-reload            |
+|   ✅   | CLI                   |
+|   ✅   | Per-App configuration |
+|   ✅   | Themes                |
+|   ✅   | Idle                  |
+|   ✅   | Custom layout         |
+|   ✅   | Gradients             |
+|   🚧   | `Do-Not-Disturb` mode |
+|   🚧   | History               |
+|   🚧   | Actions               |
+|   ❌   | Audio                 |
 
 ## :rocket: Getting Started
 
@@ -73,7 +82,7 @@ radius = 10
 [display.image]
 max_size = 64
 margin = { right = 25 }
-# For old computers you can use simplier resizing method
+# For old computers you can use simpler resizing method
 # resizing_method = "nearest"
 
 [display.text]
@@ -120,7 +129,7 @@ line_spacing = 5
 ### :wrench: Custom layout
 
 Want to change the banner layout?
-The `Noti` application offers a customizable layout using our file format, `.noti`!
+`Noti` offers a customizable layout using our file format, `.noti`!
 
 Example of layout configuration:
 
@@ -157,8 +166,7 @@ FlexContainer(
 }
 ```
 
-To enable this feature, write your own layout in file and in main config file
-write:
+To enable this feature, write your own layout in file and in main config file write:
 
 ```toml
 display.layout = "path/to/your/File.noti"
