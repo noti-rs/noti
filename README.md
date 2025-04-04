@@ -89,7 +89,7 @@ margin = { right = 25 }
 wrap = false
 ellipsize_at = "middle"
 
-[display.title]
+[display.summary]
 style = "bold italic"
 margin = { top = 5 }
 font_size = 18
@@ -152,7 +152,7 @@ FlexContainer(
     ),
 ) {
     Text(
-        kind = title,
+        kind = summary,
         wrap = false,
         ellipsize_at = end,
         justification = center,

@@ -171,7 +171,7 @@ impl Banner {
                     .alignment(Alignment::new(Position::Center, Position::Center))
                     .transparent_background(true)
                     .children(vec![
-                        WText::new(WTextKind::Title).into(),
+                        WText::new(WTextKind::Summary).into(),
                         WText::new(WTextKind::Body).into(),
                     ])
                     .build()

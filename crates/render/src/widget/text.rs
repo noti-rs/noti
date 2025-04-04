@@ -58,8 +58,8 @@ impl Clone for GBuilderWText {
 
 #[derive(Clone, derive_more::Display)]
 pub enum WTextKind {
-    #[display("title")]
-    Title,
+    #[display("summary")]
+    Summary,
     #[display("body")]
     Body,
 }
@@ -67,10 +67,10 @@ pub enum WTextKind {
 impl TryFromValue for WTextKind {
     fn try_from_string(value: String) -> Result<Self, ConversionError> {
         Ok(match value.to_lowercase().as_str() {
-            "title" | "summary" => WTextKind::Title,
+            "summary" => WTextKind::Summary,
             "body" => WTextKind::Body,
             _ => Err(ConversionError::InvalidValue {
-                expected: "title or body",
+                expected: "summary or body",
                 actual: value,
             })?,
         })
@@ -110,8 +110,8 @@ impl WText {
         let foreground: Bgra<f64> = colors.foreground.clone().into();
 
         let notification_content: NotificationContent = match self.kind {
-            WTextKind::Title => {
-                override_if(*override_properties, &display_config.title);
+            WTextKind::Summary => {
+                override_if(*override_properties, &display_config.summary);
                 notification.summary.as_str().into()
             }
             WTextKind::Body => {

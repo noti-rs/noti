@@ -33,10 +33,10 @@ public! {
         #[cfg_prop(
             also_from(name = text, mergeable),
             use_type(TomlTextProperty),
-            default(TomlTextProperty::default_title()),
+            default(TomlTextProperty::default_summary()),
             mergeable
         )]
-        title: TextProperty,
+        summary: TextProperty,
 
         #[cfg_prop(
             also_from(name = text, mergeable),
@@ -256,7 +256,7 @@ where
 Example:
 
 # In milliseconds
-display.timeout = 2000 
+display.timeout = 2000
 
 # or
 
