@@ -20,17 +20,17 @@ fn minimal_type() {
             max_height = 4,
         )*/
 
-        // WText(kind = title)
-        
+        // WText(kind = summary)
+
         alias SizedText = Text(font_size = 20)
         alias DefaultAlignment = Alignment(
             horizontal = start,
             vertical = space_between,
         )
 
-        alias Title = SizedText(kind = title)
+        alias Summary = SizedText(kind = summary)
         alias Row = FlexContainer(direction = horizontal)
-        
+
         Row(
             max_width = 400,
             max_height = 120,
@@ -40,7 +40,7 @@ fn minimal_type() {
             Image(
                 max_size = 86,
             )
-            Title(
+            Summary(
                 wrap = false,
                 line_spacing = 10,
             )

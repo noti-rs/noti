@@ -22,7 +22,7 @@ fn minimal_example() {
                 ),
             ) {
                 Image()
-                Text(kind = title)
+                Summary(kind = summary)
             }
         "#,
     )
@@ -98,7 +98,7 @@ fn test_invalid_alias_definition() {
     LayoutParser::parse(
         Rule::Layout,
         r#"
-            alas Test = Title()
+            alas Test = Summary()
 
             FlexContainer(
                 min_width = 3,

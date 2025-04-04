@@ -127,7 +127,7 @@ impl TryFromValue for TextAlignment {
 }
 
 impl TomlTextProperty {
-    pub(super) fn default_title() -> Self {
+    pub(super) fn default_summary() -> Self {
         Self {
             style: Some(TextStyle::Bold),
             alignment: Some(TextAlignment::Center),

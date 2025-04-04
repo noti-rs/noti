@@ -24,7 +24,7 @@ add the way to merge. Here below we listed possible actions with a bit explanati
 
 - `also_from` - adds another temporary field from which the value can be acheived.
   It can be helpful if you want to provide another way to set value for several fields
-  like temporary 'text' property for 'title' and 'body' together.
+  like temporary 'text' property for 'summary' and 'body' together.
 
 - `mergeable` - marks that field can be merged with the same field from other
   instance of the same structure.
@@ -58,7 +58,7 @@ attribute for each action:
   have the trait `From<OriginFieldType> for SpecificType`.
 
 > [!NOTE]
-> The ConfigProperty macro will try to use default values, even if you didn't attach the 
+> The ConfigProperty macro will try to use default values, even if you didn't attach the
 > `#[cfg_prop(default)]` attribute. It is because need to unwrap `Option<T>` types by
 > default values if there is no stored value.
 
