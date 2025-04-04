@@ -70,7 +70,6 @@ impl TryFromValue for WrapMode {
                 actual: value,
             })?,
         })
-        
     }
 }
 
