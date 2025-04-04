@@ -1,23 +1,24 @@
+use image::codecs::png::PngEncoder;
 use log::{debug, error, warn};
-use ttf_parser::{RasterGlyphImage, RasterImageFormat};
+use pangocairo::cairo::ImageSurface;
 
 use config::display::{ImageProperty, ResizingMethod};
 use dbus::image::ImageData;
 
-use crate::{color::Color, drawer::Drawer, types::RectSize};
-
-use super::{
-    border::{Border, BorderBuilder},
-    color::{Bgra, Rgba},
-    types::Offset,
-    widget::{Coverage, Draw, DrawColor},
+use crate::{
+    drawer::{Drawer, MakeRounding},
+    types::RectSize,
+    PangoContext,
 };
+
+use super::{types::Offset, widget::Draw};
 
 #[derive(Clone)]
 pub enum Image {
     Exists {
+        // INFO: the image storage always store image in png format
         data: ImageData,
-        border: Option<Border>,
+        rounding_radius: f64,
     },
     Unknown,
 }
@@ -26,7 +27,7 @@ impl Image {
     pub fn from_image_data(
         image_data: ImageData,
         image_property: &ImageProperty,
-        max_size: &RectSize,
+        max_size: &RectSize<usize>,
     ) -> Self {
         let origin_width = image_data.width as u32;
         let origin_height = image_data.height as u32;
@@ -55,13 +56,18 @@ impl Image {
                 height as u32,
                 image_property.resizing_method.to_filter_type(),
             )
-            .to_vec()
         });
 
         let Some(resized_image) = resized_image else {
             warn!("Image doesn't fits into its size");
             return Image::Unknown;
         };
+
+        let mut storage = vec![];
+        let cursor = std::io::Cursor::new(&mut storage);
+        resized_image
+            .write_with_encoder(PngEncoder::new(cursor))
+            .unwrap();
 
         debug!("Image: Created from 'image_data'");
 
@@ -73,20 +79,16 @@ impl Image {
                 has_alpha: true,
                 bits_per_sample: image_data.bits_per_sample,
                 channels: 4,
-                data: resized_image,
+                data: storage,
             },
-            border: Some(Self::border_with_rounding(
-                width,
-                height,
-                image_property.rounding,
-            )),
+            rounding_radius: image_property.rounding as f64,
         }
     }
 
     pub fn from_path(
         image_path: &std::path::Path,
         image_property: &ImageProperty,
-        max_size: &RectSize,
+        max_size: &RectSize<usize>,
     ) -> Image {
         let data = match std::fs::read(image_path) {
             Ok(data) => data,
@@ -122,13 +124,17 @@ impl Image {
             return Image::Unknown;
         };
 
-        let resized_image = image::imageops::resize(
+        let mut storage = vec![];
+        let cursor = std::io::Cursor::new(&mut storage);
+
+        image::imageops::resize(
             &image,
             width as u32,
             height as u32,
             image_property.resizing_method.to_filter_type(),
         )
-        .to_vec();
+        .write_with_encoder(PngEncoder::new(cursor))
+        .unwrap();
 
         Image::Exists {
             data: ImageData {
@@ -138,87 +144,16 @@ impl Image {
                 has_alpha: true,
                 bits_per_sample: 8,
                 channels: 4,
-                data: resized_image,
+                data: storage,
             },
-            border: Some(Self::border_with_rounding(
-                width,
-                height,
-                image_property.rounding,
-            )),
+            rounding_radius: image_property.rounding as f64,
         }
-    }
-
-    pub fn from_raster_glyph_image(
-        RasterGlyphImage {
-            width,
-            height,
-            format,
-            data,
-            ..
-        }: RasterGlyphImage,
-        size: u32,
-    ) -> Option<Self> {
-        let rgba_image = match format {
-            RasterImageFormat::PNG => {
-                image::load_from_memory_with_format(data, image::ImageFormat::Png)
-                    .ok()?
-                    .to_rgba8()
-            }
-            RasterImageFormat::BitmapMono
-            | RasterImageFormat::BitmapMonoPacked
-            | RasterImageFormat::BitmapGray2
-            | RasterImageFormat::BitmapGray2Packed
-            | RasterImageFormat::BitmapGray4
-            | RasterImageFormat::BitmapGray4Packed
-            | RasterImageFormat::BitmapGray8 => {
-                image::load_from_memory_with_format(data, image::ImageFormat::Bmp)
-                    .ok()?
-                    .to_rgba8()
-            }
-            RasterImageFormat::BitmapPremulBgra32 => image::RgbaImage::from_vec(
-                width as u32,
-                height as u32,
-                data.chunks_exact(4)
-                    .flat_map(|chunk| {
-                        Bgra::from(
-                            TryInto::<&[u8; 4]>::try_into(chunk)
-                                .expect("The image should have 4 channels"),
-                        )
-                        .into_rgba()
-                        .into_slice()
-                    })
-                    .collect::<Vec<u8>>(),
-            )?,
-        };
-
-        let (mut width, mut height) = (width as i32, height as i32);
-        Self::limit_size(&mut width, &mut height, size as u16);
-
-        let rgba_image = image::imageops::resize(
-            &rgba_image,
-            width as u32,
-            width as u32,
-            image::imageops::FilterType::Gaussian,
-        );
-
-        Some(Image::Exists {
-            data: ImageData {
-                width,
-                height,
-                rowstride: width * 4,
-                has_alpha: true,
-                bits_per_sample: 8,
-                channels: 4,
-                data: rgba_image.to_vec(),
-            },
-            border: None,
-        })
     }
 
     pub fn from_svg(
         image_path: &std::path::Path,
         image_property: &ImageProperty,
-        max_size: &RectSize,
+        max_size: &RectSize<usize>,
     ) -> Self {
         if !image_path.is_file() {
             return Image::Unknown;
@@ -284,7 +219,7 @@ impl Image {
 
         Image::Exists {
             data: ImageData {
-                data: pixmap.data().to_vec(),
+                data: pixmap.encode_png().unwrap(),
                 width,
                 height,
                 rowstride: width * 4,
@@ -292,11 +227,7 @@ impl Image {
                 bits_per_sample: 8,
                 channels: 4,
             },
-            border: Some(Self::border_with_rounding(
-                width,
-                height,
-                image_property.rounding,
-            )),
+            rounding_radius: image_property.rounding as f64,
         }
     }
 
@@ -354,7 +285,7 @@ impl Image {
         mut width: i32,
         mut height: i32,
         image_property: &ImageProperty,
-        max_size: &RectSize,
+        max_size: &RectSize<usize>,
     ) -> Option<(i32, i32)> {
         Self::limit_size(&mut width, &mut height, image_property.max_size);
         let (horizontal_spacing, vertical_spacing) = {
@@ -392,65 +323,48 @@ impl Image {
             std::mem::swap(width, height);
         }
     }
-
-    fn border_with_rounding(width: i32, height: i32, rounding_radius: u16) -> Border {
-        BorderBuilder::default()
-            .color(Color::default())
-            .size(0_usize)
-            .radius(rounding_radius)
-            .frame_width(width as usize)
-            .frame_height(height as usize)
-            .compile()
-            .expect("Create Border for image rounding")
-    }
-
-    fn converter(has_alpha: bool) -> fn(&[u8]) -> Rgba {
-        //SAFETY: it always safe way while the framebuffer have ARGB format and gives the correct
-        //postiton.
-        if has_alpha {
-            |chunk: &[u8]| unsafe {
-                Rgba::from(TryInto::<&[u8; 4]>::try_into(chunk).unwrap_unchecked())
-            }
-        } else {
-            |chunk: &[u8]| unsafe {
-                Rgba::from(TryInto::<&[u8; 3]>::try_into(chunk).unwrap_unchecked())
-            }
-        }
-    }
 }
 
 impl Draw for Image {
-    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
-        let Image::Exists { data, border } = self else {
-            return;
+    fn draw_with_offset(
+        &self,
+        offset: &Offset<usize>,
+        _pango_context: &PangoContext,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
+        let Image::Exists {
+            data,
+            rounding_radius,
+        } = self
+        else {
+            return Ok(());
+        };
+        debug_assert!(data.has_alpha);
+
+        let mut storage_cursor = std::io::Cursor::new(&data.data);
+        let source_surface = match ImageSurface::create_from_png(&mut storage_cursor) {
+            Ok(source_surface) => source_surface,
+            Err(err) => match err {
+                cairo::IoError::Cairo(error) => Err(error)?,
+                cairo::IoError::Io(error) => {
+                    error!("Happened something wrong with IO opertaion during image rendering. Error: {error}");
+                    return Ok(());
+                }
+            },
         };
 
-        let mut chunks = data
-            .data
-            .chunks_exact(data.channels as usize)
-            .map(Self::converter(data.has_alpha));
+        drawer.context.make_rounding(
+            (*offset).into(),
+            RectSize::new(data.width as f64, data.height as f64),
+            *rounding_radius,
+            *rounding_radius,
+        );
+        drawer
+            .context
+            .set_source_surface(source_surface, offset.x as f64, offset.y as f64)?;
 
-        for y in 0..data.height as usize {
-            for x in 0..data.width as usize {
-                let border_coverage =
-                    match border.as_ref().and_then(|border| border.get_color_at(x, y)) {
-                        Some(DrawColor::Transparent(Coverage(factor))) => factor,
-                        None => 1.0,
-                        _ => unreachable!(),
-                    };
-
-                let color = unsafe { chunks.next().unwrap_unchecked() }.into_bgra();
-                drawer.draw_color(
-                    x + offset.x,
-                    y + offset.y,
-                    if border_coverage == 1.0 {
-                        DrawColor::Overlay(color)
-                    } else {
-                        DrawColor::OverlayWithCoverage(color, Coverage(border_coverage))
-                    },
-                );
-            }
-        }
+        drawer.context.fill()?;
+        Ok(())
     }
 }
 

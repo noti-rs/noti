@@ -21,7 +21,7 @@ pub struct NotiClient<'a> {
     dbus_client: dbus::client::Client<'a>,
 }
 
-impl<'a> NotiClient<'a> {
+impl NotiClient<'_> {
     pub async fn init() -> anyhow::Result<Self> {
         let client = dbus::client::Client::init().await?;
         Ok(Self {

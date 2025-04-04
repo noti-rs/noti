@@ -5,35 +5,36 @@ use config::{
     Config,
 };
 use dbus::notification::Notification;
-use log::{debug, trace};
+use log::{debug, error, trace};
 
 use render::{
-    color::{Bgra, Color},
     drawer::Drawer,
-    font::FontCollection,
     types::RectSize,
     widget::{
         self, Alignment, Draw, FlexContainerBuilder, Position, WImage, WText, WTextKind, Widget,
         WidgetConfiguration,
     },
+    PangoContext,
 };
 use shared::cached_data::CachedData;
 
 use crate::cache::CachedLayout;
 
-pub struct BannerRect {
+pub struct Banner {
     data: Notification,
+    layout: Option<Widget>,
     created_at: time::Instant,
 
     framebuffer: Vec<u8>,
 }
 
-impl BannerRect {
+impl Banner {
     pub(crate) fn init(notification: Notification) -> Self {
         debug!("Banner (id={}): Created", notification.id);
 
         Self {
             data: notification,
+            layout: None,
             created_at: time::Instant::now(),
 
             framebuffer: vec![],
@@ -68,6 +69,22 @@ impl BannerRect {
         );
     }
 
+    // TODO: use it for resize
+    #[allow(unused)]
+    pub(crate) fn width(&self) -> usize {
+        self.layout
+            .as_ref()
+            .map(|layout| layout.width())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn height(&self) -> usize {
+        self.layout
+            .as_ref()
+            .map(|layout| layout.height())
+            .unwrap_or_default()
+    }
+
     #[inline]
     pub(crate) fn framebuffer(&self) -> &[u8] {
         &self.framebuffer
@@ -75,10 +92,10 @@ impl BannerRect {
 
     pub(crate) fn draw(
         &mut self,
-        font_collection: &FontCollection,
+        pango_context: &PangoContext,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) {
+    ) -> DrawState {
         debug!("Banner (id={}): Beginning of draw", self.data.id);
 
         let rect_size = RectSize::new(
@@ -87,7 +104,13 @@ impl BannerRect {
         );
 
         let display = config.display_by_app(&self.data.app_name);
-        let mut drawer = Drawer::new(Color::Fill(Bgra::new()), rect_size.clone());
+        let mut drawer = match Drawer::create(rect_size) {
+            Ok(drawer) => drawer,
+            Err(err) => {
+                error!("Failed to create drawer for Banner(id={}), avoided to draw banner. Error: {err}", self.data.id);
+                return DrawState::Failure;
+            }
+        };
 
         let mut layout = match &display.layout {
             config::display::Layout::Default => Self::default_layout(display),
@@ -104,15 +127,33 @@ impl BannerRect {
                 display_config: display,
                 theme: config.theme_by_app(&self.data.app_name),
                 notification: &self.data,
-                font_collection,
+                pango_context,
                 override_properties: display.layout.is_default(),
             },
         );
 
-        layout.draw(&mut drawer);
-        self.framebuffer = drawer.into();
+        if let Err(err) = layout.draw(pango_context, &mut drawer) {
+            error!(
+                "Failed to draw banner Banner(id={}). Error: {err}",
+                self.data.id
+            );
+            return DrawState::Failure;
+        }
+
+        self.layout = Some(layout);
+        self.framebuffer = match drawer.try_into() {
+            Ok(val) => val,
+            Err(err) => {
+                error!(
+                    "Failed to get data after drawing Banner(id={}). Error: {err}",
+                    self.data.id
+                );
+                return DrawState::Failure;
+            }
+        };
 
         debug!("Banner (id={}): Complete draw", self.data.id);
+        DrawState::Success
     }
 
     fn default_layout(display_config: &DisplayConfig) -> Widget {
@@ -143,8 +184,13 @@ impl BannerRect {
     }
 }
 
-impl<'a> From<&'a BannerRect> for &'a Notification {
-    fn from(value: &'a BannerRect) -> Self {
+impl<'a> From<&'a Banner> for &'a Notification {
+    fn from(value: &'a Banner) -> Self {
         &value.data
     }
+}
+
+pub(crate) enum DrawState {
+    Success,
+    Failure,
 }

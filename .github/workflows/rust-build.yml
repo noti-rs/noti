@@ -2,9 +2,9 @@ name: Rust build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,6 +14,10 @@ jobs:
     name: cargo build
     runs-on: ubuntu-latest
     steps:
+      - name: Update apt-get
+        run: sudo apt-get update
+      - name: Install pangocairo
+        run: sudo apt-get install librust-pangocairo-sys-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --all-features

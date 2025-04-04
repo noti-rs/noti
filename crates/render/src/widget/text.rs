@@ -1,12 +1,18 @@
 use config::text::{GBuilderTextProperty, TextProperty};
-use dbus::text::Text;
+use dbus::text::{EntityKind, Text};
 use log::warn;
+use pangocairo::{
+    pango::{
+        ffi::PANGO_SCALE, AttrColor, AttrInt, AttrList, AttrSize, Context, FontDescription,
+        Layout as PangoLayout,
+    },
+    FontMap,
+};
 use shared::{error::ConversionError, value::TryFromValue};
 
 use crate::{
     color::Bgra,
     drawer::Drawer,
-    text::TextRect,
     types::{Offset, RectSize},
 };
 
@@ -16,11 +22,15 @@ use super::{CompileState, Draw, WidgetConfiguration};
 #[gbuilder(name(GBuilderWText))]
 pub struct WText {
     kind: WTextKind,
+
     #[gbuilder(hidden, default(None))]
-    content: Option<TextRect>,
+    layout: Option<PangoLayout>,
 
     #[gbuilder(use_gbuilder(GBuilderTextProperty), default)]
     property: TextProperty,
+
+    #[gbuilder(hidden, default)]
+    inner_size: RectSize<usize>,
 }
 
 impl Clone for WText {
@@ -28,8 +38,9 @@ impl Clone for WText {
         // INFO: we shouldn't clone compiled info about text
         Self {
             kind: self.kind.clone(),
-            content: None,
+            layout: None,
             property: self.property.clone(),
+            inner_size: RectSize::default(),
         }
     }
 }
@@ -38,8 +49,9 @@ impl Clone for GBuilderWText {
     fn clone(&self) -> Self {
         Self {
             kind: self.kind.as_ref().cloned(),
-            content: None,
+            layout: None,
             property: self.property.clone(),
+            inner_size: Some(RectSize::default()),
         }
     }
 }
@@ -69,18 +81,19 @@ impl WText {
     pub fn new(kind: WTextKind) -> Self {
         Self {
             kind,
-            content: None,
+            layout: None,
             property: Default::default(),
+            inner_size: RectSize::default(),
         }
     }
 
     pub fn compile(
         &mut self,
-        rect_size: RectSize,
+        mut rect_size: RectSize<usize>,
         WidgetConfiguration {
             display_config,
             notification,
-            font_collection,
+            pango_context,
             override_properties,
             theme,
         }: &WidgetConfiguration,
@@ -91,8 +104,10 @@ impl WText {
             }
         };
 
+        let layout = PangoLayout::new(&pango_context.0);
+
         let colors = theme.by_urgency(&notification.hints.urgency);
-        let foreground = Bgra::from(&colors.foreground);
+        let foreground: Bgra<f64> = colors.foreground.clone().into();
 
         let notification_content: NotificationContent = match self.kind {
             WTextKind::Title => {
@@ -109,21 +124,22 @@ impl WText {
             }
         };
 
-        let px_size = self.property.font_size as f32;
-        let mut content = match notification_content {
-            NotificationContent::Text(text) => {
-                TextRect::from_text(text, px_size, &self.property.style, font_collection)
-            }
-            NotificationContent::String(str) => {
-                TextRect::from_str(str, px_size, &self.property.style, font_collection)
-            }
-        };
+        rect_size.shrink_by(&self.property.margin);
+        layout.set_width(rect_size.width as i32 * PANGO_SCALE);
+        layout.set_height(rect_size.height as i32 * PANGO_SCALE);
 
-        Self::apply_properties(&mut content, &self.property);
-        Self::apply_color(&mut content, foreground);
+        let (text, attributes) = notification_content.as_str_with_attributes();
+        if text.trim().is_empty() {
+            warn!("The text with kind {} is blank", self.kind);
+            return CompileState::Failure;
+        }
 
-        content.compile(rect_size.clone());
-        if content.is_empty() {
+        layout.set_text(text);
+        Self::apply_colors(&attributes, foreground.into());
+        self.apply_properties(&layout, attributes);
+
+        let (computed_width, computed_height) = layout.pixel_size();
+        if computed_width > rect_size.width as i32 || computed_height > rect_size.height as i32 {
             warn!(
                 "The text with kind {} doesn't fit to available space. \
                 Available space: width={}, height={}.",
@@ -131,49 +147,155 @@ impl WText {
             );
             CompileState::Failure
         } else {
-            self.content = Some(content);
+            self.inner_size = rect_size;
+            self.layout = Some(layout);
             CompileState::Success
         }
     }
 
-    fn apply_properties(element: &mut TextRect, properties: &TextProperty) {
-        element.set_wrap(properties.wrap);
-        element.set_margin(&properties.margin);
-        element.set_line_spacing(properties.line_spacing as usize);
-        element.set_ellipsize_at(&properties.ellipsize_at);
-        element.set_justification(&properties.justification);
+    fn apply_colors(attributes: &AttrList, foreground: Bgra<u16>) {
+        attributes.insert(AttrColor::new_foreground(
+            foreground.red,
+            foreground.green,
+            foreground.blue,
+        ));
+        attributes.insert(AttrInt::new_foreground_alpha(foreground.alpha));
     }
 
-    fn apply_color(element: &mut TextRect, foreground: Bgra) {
-        element.set_foreground(foreground);
+    fn apply_properties(&self, layout: &PangoLayout, attributes: AttrList) {
+        fn from_px_to_pt(px: f32) -> i32 {
+            ((px * 72.0) / 96.0).round() as i32
+        }
+
+        attributes.insert(AttrSize::new_size_absolute(
+            from_px_to_pt(self.property.font_size as f32) * PANGO_SCALE,
+        ));
+
+        match &self.property.style {
+            config::text::TextStyle::Regular => (),
+            config::text::TextStyle::Bold => {
+                attributes.insert(AttrInt::new_weight(pangocairo::pango::Weight::Bold))
+            }
+            config::text::TextStyle::Italic => {
+                attributes.insert(AttrInt::new_style(pangocairo::pango::Style::Italic))
+            }
+            config::text::TextStyle::BoldItalic => {
+                attributes.insert(AttrInt::new_weight(pangocairo::pango::Weight::Bold));
+                attributes.insert(AttrInt::new_style(pangocairo::pango::Style::Italic));
+            }
+        }
+
+        if !self.property.wrap {
+            layout.set_height(0);
+        }
+
+        let wrap_mode = match &self.property.wrap_mode {
+            config::text::WrapMode::Word => pangocairo::pango::WrapMode::Word,
+            config::text::WrapMode::WordChar => pangocairo::pango::WrapMode::WordChar,
+            config::text::WrapMode::Char => pangocairo::pango::WrapMode::Char,
+        };
+        layout.set_wrap(wrap_mode);
+
+        let ellipsize = match self.property.ellipsize {
+            config::text::Ellipsize::Start => pangocairo::pango::EllipsizeMode::Start,
+            config::text::Ellipsize::Middle => pangocairo::pango::EllipsizeMode::Middle,
+            config::text::Ellipsize::End => pangocairo::pango::EllipsizeMode::End,
+            config::text::Ellipsize::None => pangocairo::pango::EllipsizeMode::None,
+        };
+        layout.set_ellipsize(ellipsize);
+
+        let alignment = match self.property.alignment {
+            config::text::TextAlignment::Center => pangocairo::pango::Alignment::Center,
+            config::text::TextAlignment::Left => pangocairo::pango::Alignment::Left,
+            config::text::TextAlignment::Right => pangocairo::pango::Alignment::Right,
+        };
+        layout.set_alignment(alignment);
+        layout.set_justify(self.property.justify);
+        layout.set_spacing(self.property.line_spacing as i32 * PANGO_SCALE);
+
+        layout.set_attributes(Some(&attributes));
     }
 
     pub fn width(&self) -> usize {
-        self.content
-            .as_ref()
-            .map(|content| content.width())
-            .unwrap_or(0)
+        // INFO: the width should get all available width but height should get only renderable
+        // rows.
+        self.inner_size.width + self.property.margin.horizontal() as usize
     }
 
     pub fn height(&self) -> usize {
-        self.content
+        self.layout
             .as_ref()
-            .map(|content| content.height())
-            .unwrap_or(0)
+            .map(|layout| layout.pixel_size().1 + self.property.margin.vertical() as i32)
+            .unwrap_or(0) as usize
     }
 }
 
 impl Draw for WText {
-    fn draw_with_offset(&self, offset: &Offset, drawer: &mut Drawer) {
-        if let Some(content) = self.content.as_ref() {
-            content.draw_with_offset(offset, drawer)
+    fn draw_with_offset(
+        &self,
+        offset: &Offset<usize>,
+        pango_context: &PangoContext,
+        drawer: &mut Drawer,
+    ) -> pangocairo::cairo::Result<()> {
+        if let Some(layout) = self.layout.as_ref() {
+            drawer.context.move_to(
+                (offset.x + self.property.margin.left() as usize) as f64,
+                (offset.y + self.property.margin.top() as usize) as f64,
+            );
+            pangocairo::functions::update_context(&drawer.context, &pango_context.0);
+            layout.context_changed();
+            pangocairo::functions::show_layout(&drawer.context, layout);
         }
+        Ok(())
     }
 }
 
 enum NotificationContent<'a> {
     String(&'a str),
     Text(&'a Text),
+}
+
+impl NotificationContent<'_> {
+    fn as_str_with_attributes(&self) -> (&str, AttrList) {
+        fn get_attribute_style(kind: &EntityKind) -> Option<AttrInt> {
+            Some(match kind {
+                dbus::text::EntityKind::Bold => {
+                    AttrInt::new_weight(pangocairo::pango::Weight::Bold)
+                }
+                dbus::text::EntityKind::Italic => {
+                    AttrInt::new_style(pangocairo::pango::Style::Italic)
+                }
+                dbus::text::EntityKind::Underline => {
+                    AttrInt::new_underline(pangocairo::pango::Underline::SingleLine)
+                }
+                _ => None?, // Images and Links will be ignored because they're useless
+                            // for pango
+            })
+        }
+
+        let string;
+        let attributes = AttrList::new();
+        match self {
+            NotificationContent::Text(text) => {
+                string = &*text.body;
+
+                for entity in &text.entities {
+                    let Some(mut attribute) = get_attribute_style(&entity.kind) else {
+                        continue;
+                    };
+
+                    attribute.set_start_index(entity.offset_in_byte as u32);
+                    attribute.set_end_index((entity.offset_in_byte + entity.length_in_byte) as u32);
+                    attributes.insert(attribute);
+                }
+            }
+            NotificationContent::String(str) => {
+                string = *str;
+            }
+        }
+
+        (string, attributes)
+    }
 }
 
 impl<'a> From<&'a str> for NotificationContent<'a> {
@@ -185,5 +307,23 @@ impl<'a> From<&'a str> for NotificationContent<'a> {
 impl<'a> From<&'a Text> for NotificationContent<'a> {
     fn from(value: &'a Text) -> Self {
         NotificationContent::Text(value)
+    }
+}
+
+pub struct PangoContext(Context);
+
+impl PangoContext {
+    pub fn from_font_family(font_family: &str) -> Self {
+        let context = Context::new();
+        let font_map = FontMap::new();
+        context.set_font_map(Some(&font_map));
+        context.set_font_description(Some(&FontDescription::from_string(font_family)));
+
+        Self(context)
+    }
+
+    pub fn update_font_family(&mut self, font_family: &str) {
+        self.0
+            .set_font_description(Some(&FontDescription::from_string(font_family)));
     }
 }

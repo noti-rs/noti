@@ -20,6 +20,7 @@ struct Parser<'a> {
     entities: Vec<Entity>,
     stack: Vec<ParsedTag>,
     pos: usize,
+    byte_pos: usize,
     cursor: unic_segment::GraphemeCursor,
 }
 
@@ -31,6 +32,7 @@ impl<'a> Parser<'a> {
             entities: Vec::new(),
             stack: Vec::new(),
             pos: 0,
+            byte_pos: 0,
             cursor: unic_segment::GraphemeCursor::new(0, input.len()),
         }
     }
@@ -57,6 +59,8 @@ impl<'a> Parser<'a> {
                         );
 
                         self.pos += unic_segment::Graphemes::new(&decoded_html_entity).count();
+                        self.byte_pos += decoded_html_entity.len();
+
                         self.body.push_str(&decoded_html_entity);
 
                         self.cursor.set_cursor(end_html_entity_pos);
@@ -70,6 +74,7 @@ impl<'a> Parser<'a> {
             }
 
             self.pos += 1;
+            self.byte_pos += self.cursor.cur_cursor() - byte_pos;
             self.body.push_str(grapheme);
 
             byte_pos = self.cursor.cur_cursor();
@@ -120,8 +125,7 @@ impl<'a> Parser<'a> {
                 self.cursor
                     .skip_until(self.input, |grapheme| grapheme == ";");
 
-                if !self.input[begin..self.cursor.cur_cursor()]
-                    .as_bytes()
+                if !self.input.as_bytes()[begin..self.cursor.cur_cursor()]
                     .iter()
                     .all(|byte| byte.is_ascii_alphanumeric())
                 {
@@ -137,8 +141,7 @@ impl<'a> Parser<'a> {
                         self.cursor
                             .skip_until(self.input, |grapheme| grapheme == ";");
 
-                        if !self.input[begin..self.cursor.cur_cursor()]
-                            .as_bytes()
+                        if !self.input.as_bytes()[begin..self.cursor.cur_cursor()]
                             .iter()
                             .all(|byte| byte.is_ascii_digit())
                         {
@@ -150,8 +153,7 @@ impl<'a> Parser<'a> {
                         self.cursor
                             .skip_until(self.input, |grapheme| grapheme == ";");
 
-                        if !self.input[begin..self.cursor.cur_cursor()]
-                            .as_bytes()
+                        if !self.input.as_bytes()[begin..self.cursor.cur_cursor()]
                             .iter()
                             .all(|byte| byte.is_ascii_hexdigit())
                         {
@@ -181,6 +183,7 @@ impl<'a> Parser<'a> {
                 self.stack.push(ParsedTag {
                     tag,
                     begin_position: self.pos,
+                    begin_position_byte: self.byte_pos,
                 });
             }
             TagType::Closing => {
@@ -203,6 +206,7 @@ impl<'a> Parser<'a> {
             let ParsedTag {
                 tag,
                 begin_position,
+                begin_position_byte,
             } = self.stack.pop().unwrap();
 
             let length = self.pos - begin_position;
@@ -214,7 +218,9 @@ impl<'a> Parser<'a> {
             {
                 self.entities.push(Entity {
                     offset: begin_position,
+                    offset_in_byte: begin_position_byte,
                     length,
+                    length_in_byte: self.byte_pos - begin_position_byte,
                     kind: tag.kind,
                 });
             }
@@ -232,7 +238,9 @@ impl<'a> Parser<'a> {
     fn handle_self_closing_tag(&mut self, tag: Tag) {
         self.entities.push(Entity {
             offset: self.pos,
+            offset_in_byte: self.byte_pos,
             length: 0,
+            length_in_byte: 0,
             kind: tag.kind,
         });
     }
@@ -241,6 +249,7 @@ impl<'a> Parser<'a> {
         while let Some(ParsedTag {
             tag,
             begin_position,
+            begin_position_byte,
         }) = self.stack.pop()
         {
             let length = self.pos - begin_position;
@@ -253,7 +262,9 @@ impl<'a> Parser<'a> {
             {
                 self.entities.push(Entity {
                     offset: begin_position,
+                    offset_in_byte: begin_position_byte,
                     length,
+                    length_in_byte: self.byte_pos - begin_position_byte,
                     kind: tag.kind,
                 });
             }
@@ -264,7 +275,9 @@ impl<'a> Parser<'a> {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Entity {
     pub offset: usize,
+    pub offset_in_byte: usize,
     pub length: usize,
+    pub length_in_byte: usize,
     pub kind: EntityKind,
 }
 
@@ -297,6 +310,7 @@ impl EntityKind {
 struct ParsedTag {
     tag: Tag,
     begin_position: usize,
+    begin_position_byte: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -566,7 +580,9 @@ mod tests {
                 body: String::from("coffee ☕️"),
                 entities: vec![Entity {
                     offset: 0,
+                    offset_in_byte: 0,
                     length: 8,
+                    length_in_byte: 13,
                     kind: EntityKind::Bold
                 }]
             }
@@ -598,17 +614,23 @@ mod tests {
                 entities: vec![
                     Entity {
                         offset: 4,
+                        offset_in_byte: 4,
                         length: 4,
+                        length_in_byte: 4,
                         kind: EntityKind::Bold,
                     },
                     Entity {
                         offset: 9,
+                        offset_in_byte: 9,
                         length: 7,
+                        length_in_byte: 7,
                         kind: EntityKind::Italic,
                     },
                     Entity {
                         offset: 16,
+                        offset_in_byte: 16,
                         length: 3,
+                        length_in_byte: 3,
                         kind: EntityKind::Underline,
                     },
                 ],
@@ -626,7 +648,9 @@ mod tests {
                 body: String::from("hello world!!!"),
                 entities: vec![Entity {
                     offset: 6,
+                    offset_in_byte: 6,
                     length: 8,
+                    length_in_byte: 8,
                     kind: EntityKind::Bold,
                 }],
             }
@@ -644,12 +668,16 @@ mod tests {
                 entities: vec![
                     Entity {
                         offset: 0,
+                        offset_in_byte: 0,
                         length: 14,
+                        length_in_byte: 14,
                         kind: EntityKind::Italic,
                     },
                     Entity {
                         offset: 6,
+                        offset_in_byte: 6,
                         length: 8,
+                        length_in_byte: 8,
                         kind: EntityKind::Bold,
                     },
                 ],
@@ -667,7 +695,9 @@ mod tests {
                 body: String::from("hello"),
                 entities: vec![Entity {
                     offset: 0,
+                    offset_in_byte: 0,
                     length: 5,
+                    length_in_byte: 5,
                     kind: EntityKind::Italic,
                 },],
             }
@@ -698,12 +728,16 @@ mod tests {
                 entities: vec![
                     Entity {
                         offset: 6,
+                        offset_in_byte: 6,
                         length: 5,
+                        length_in_byte: 5,
                         kind: EntityKind::Bold,
                     },
                     Entity {
                         offset: 8,
+                        offset_in_byte: 8,
                         length: 3,
+                        length_in_byte: 3,
                         kind: EntityKind::Italic,
                     },
                 ],
@@ -721,7 +755,9 @@ mod tests {
                 body: String::from("hello click!!!"),
                 entities: vec![Entity {
                     offset: 6,
+                    offset_in_byte: 6,
                     length: 5,
+                    length_in_byte: 5,
                     kind: EntityKind::Link {
                         href: Some("link.com".to_string())
                     },
@@ -740,7 +776,9 @@ mod tests {
                 body: String::from("link"),
                 entities: vec![Entity {
                     offset: 0,
+                    offset_in_byte: 0,
                     length: 4,
+                    length_in_byte: 4,
                     kind: EntityKind::Link { href: None },
                 },],
             }
@@ -757,7 +795,9 @@ mod tests {
                 body: String::from("image:"),
                 entities: vec![Entity {
                     offset: 6,
+                    offset_in_byte: 6,
                     length: 0,
+                    length_in_byte: 0,
                     kind: EntityKind::Image {
                         src: Some("/path/to/image.png".to_string()),
                         alt: None
@@ -777,7 +817,9 @@ mod tests {
                 body: String::from("some text"),
                 entities: vec![Entity {
                     offset: 0,
+                    offset_in_byte: 0,
                     length: 0,
+                    length_in_byte: 0,
                     kind: EntityKind::Image {
                         src: Some("/path/to/image.png".to_string()),
                         alt: None
@@ -798,7 +840,9 @@ mod tests {
                 body: String::from("image: !!!"),
                 entities: vec![Entity {
                     offset: 7,
+                    offset_in_byte: 7,
                     length: 0,
+                    length_in_byte: 0,
                     kind: EntityKind::Image {
                         src: Some("/path/to/image.png".to_string()),
                         alt: Some("some cool image".to_string()),
@@ -819,12 +863,16 @@ mod tests {
                 entities: vec![
                     Entity {
                         offset: 0,
+                        offset_in_byte: 0,
                         length: 4,
+                        length_in_byte: 4,
                         kind: EntityKind::Italic
                     },
                     Entity {
                         offset: 0,
+                        offset_in_byte: 0,
                         length: 4,
+                        length_in_byte: 4,
                         kind: EntityKind::Bold
                     },
                 ],
@@ -881,7 +929,9 @@ mod tests {
                 body: String::from("hello\""),
                 entities: vec![Entity {
                     offset: 0,
+                    offset_in_byte: 0,
                     length: 6,
+                    length_in_byte: 6,
                     kind: EntityKind::Bold
                 }]
             }
@@ -898,7 +948,9 @@ mod tests {
                 body: String::from("hello&quot;"),
                 entities: vec![Entity {
                     offset: 0,
+                    offset_in_byte: 0,
                     length: 11,
+                    length_in_byte: 11,
                     kind: EntityKind::Bold
                 }]
             }
@@ -928,7 +980,9 @@ mod tests {
                 body: String::from("<i>penis</i>"),
                 entities: vec![Entity {
                     offset: 0,
+                    offset_in_byte: 0,
                     length: 12,
+                    length_in_byte: 12,
                     kind: EntityKind::Bold
                 }]
             }

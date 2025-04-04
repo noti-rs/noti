@@ -4,7 +4,7 @@ use crate::error::ConversionError;
 pub enum Value {
     UInt(usize),
     String(String),
-    Any(Box<dyn std::any::Any + Send + Sync>),
+    Any(Box<dyn std::any::Any>),
 }
 
 pub trait TryFromValue: Sized + 'static {
@@ -41,7 +41,7 @@ pub trait TryDowncast<T: 'static>: Sized {
     fn try_downcast_ref(&self) -> Result<&T, ConversionError>;
 }
 
-impl<T: 'static> TryDowncast<T> for Box<dyn std::any::Any + Send + Sync> {
+impl<T: 'static> TryDowncast<T> for Box<dyn std::any::Any> {
     fn try_downcast(self) -> Result<T, ConversionError> {
         Ok(*self
             .downcast()

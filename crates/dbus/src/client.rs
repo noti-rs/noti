@@ -27,7 +27,7 @@ pub struct Client<'a> {
     proxy: NotificationsProxy<'a>,
 }
 
-impl<'a> Client<'a> {
+impl Client<'_> {
     pub async fn init() -> anyhow::Result<Self> {
         debug!("D-Bus Client: Initializing");
         let connection = Connection::session().await?;

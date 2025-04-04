@@ -104,7 +104,10 @@ fn convert_node_type<'a>(
         }
     }
 
-    Ok(widget_gbuilder.try_build()?.try_downcast()?)
+    match widget_gbuilder.try_build()?.try_downcast() {
+        Ok(val) => Ok(val),
+        Err(err) => bail!("{err}"),
+    }
 }
 
 fn convert_properties<'a>(
@@ -303,7 +306,7 @@ impl GBuilder {
         Ok(self)
     }
 
-    fn try_build(self) -> anyhow::Result<Box<dyn std::any::Any + Send + Sync>> {
+    fn try_build(self) -> anyhow::Result<Box<dyn std::any::Any>> {
         macro_rules! implement_variants {
             ($($variant:ident into $dest_type:path),*) => {
                 match self {
