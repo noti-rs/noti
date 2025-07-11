@@ -18,6 +18,6 @@ derive_more.workspace = true
 derive_builder = "0.20.0"
 resvg = "0.43.0"
 image = { version = "0.25.2", features = ["png"] }
-freedesktop-icons = "0.2.6"
 pangocairo = "0.20.7"
 cairo-rs = { version = "0.20.7", features = ["png", "svg"] }
+linicon = "2.3.0"
