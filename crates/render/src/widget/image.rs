@@ -1,4 +1,5 @@
 use config::display::{GBuilderImageProperty, ImageProperty};
+use linicon::IconPath;
 use log::warn;
 
 use crate::{
@@ -9,6 +10,8 @@ use crate::{
 };
 
 use super::{CompileState, Draw, WidgetConfiguration};
+
+const DEFAULT_ICON_THEME: &str = "hicolor";
 
 #[derive(macros::GenericBuilder, Clone)]
 #[gbuilder(name(GBuilderWImage), derive(Clone))]
@@ -45,6 +48,15 @@ impl WImage {
             ..
         }: &WidgetConfiguration,
     ) -> CompileState {
+        /// Look's up nearest freedesktop icons.
+        fn lookup_freedesktop_icon(icon_name: &str, theme: &str, size: u16) -> Option<IconPath> {
+            linicon::lookup_icon(icon_name)
+                .from_theme(theme)
+                .with_size(size)
+                .next()
+                .and_then(|icon| icon.ok())
+        }
+
         if *override_properties {
             self.property = display_config.image.clone();
         }
@@ -64,17 +76,29 @@ impl WImage {
                     .map(|svg_path| Image::from_svg(svg_path, &self.property, &rect_size))
             })
             .or_else(|| {
+                if notification.app_icon.is_empty() {
+                    return None;
+                }
+
                 display_config
                     .icons
                     .size
                     .iter()
                     .find_map(|size| {
-                        freedesktop_icons::lookup(&notification.app_icon)
-                            .with_size(*size)
-                            .with_theme(&display_config.theme)
-                            .find()
+                        lookup_freedesktop_icon(
+                            &notification.app_icon,
+                            &display_config.icons.theme,
+                            *size,
+                        )
+                        .or_else(|| {
+                            lookup_freedesktop_icon(
+                                &notification.app_icon,
+                                DEFAULT_ICON_THEME,
+                                *size,
+                            )
+                        })
                     })
-                    .map(|icon_path| Image::from_path(&icon_path, &self.property, &rect_size))
+                    .map(|icon_path| Image::from_path(&icon_path.path, &self.property, &rect_size))
             })
             .unwrap_or(Image::Unknown);
 
