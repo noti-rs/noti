@@ -15,8 +15,8 @@ anyhow.workspace = true
 tokio.workspace = true
 log.workspace = true
 humantime.workspace = true
+tempfile.workspace = true
 
-tempfile = "3.12.0"
 wayland-client = "0.31.5"
 wayland-protocols = { version = "0.32.3", features = ["client", "wayland-client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3.3", features = ["client", "wayland-client"] }

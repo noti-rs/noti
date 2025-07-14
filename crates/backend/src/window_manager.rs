@@ -15,8 +15,8 @@ use super::window::{ConfigurationState, Window};
 
 pub(crate) struct WindowManager {
     connection: Connection,
-    event_queue: Option<EventQueue<Window>>,
-    qhandle: Option<QueueHandle<Window>>,
+    event_queue: EventQueue<Window>,
+    qhandle: QueueHandle<Window>,
     window: Option<Window>,
 
     pango_context: Rc<RefCell<PangoContext>>,
@@ -34,7 +34,7 @@ impl Dispatcher for WindowManager {
     fn get_event_queue_and_state(
         &mut self,
     ) -> Option<(&mut EventQueue<Self::State>, &mut Self::State)> {
-        Some((self.event_queue.as_mut()?, self.window.as_mut()?))
+        Some((&mut self.event_queue, self.window.as_mut()?))
     }
 }
 
@@ -51,10 +51,12 @@ impl WindowManager {
             })
             .collect();
 
+        let event_queue = connection.new_event_queue();
+        let qhandle = event_queue.handle();
         let wm = Self {
             connection,
-            event_queue: None,
-            qhandle: None,
+            event_queue,
+            qhandle,
             window: None,
 
             pango_context,
@@ -91,11 +93,9 @@ impl WindowManager {
 
         let mut unrendered_notifcations = Ok(());
         if let Some(window) = self.window.as_mut() {
-            let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
-
             window.reconfigure(config);
-            unrendered_notifcations = window.redraw(qhandle, config, &self.cached_layouts);
-            window.frame(qhandle);
+            unrendered_notifcations = window.redraw(&self.qhandle, config, &self.cached_layouts);
+            window.frame(&self.qhandle);
             window.commit();
         }
 
@@ -174,15 +174,13 @@ impl WindowManager {
                 return Ok(());
             }
 
-            notifications
-                .into_iter()
-                .map(|notification| notification.id)
-                .for_each(|id| {
-                    self.signals.push(Signal::NotificationClosed {
-                        notification_id: id,
-                        reason: dbus::actions::ClosingReason::CallCloseNotification,
-                    })
-                });
+            notifications.into_iter().for_each(|notification| {
+                let notification_id = notification.id;
+                self.signals.push(Signal::NotificationClosed {
+                    notification_id,
+                    reason: dbus::actions::ClosingReason::CallCloseNotification,
+                })
+            });
 
             self.process_notification_queue(config)?;
         }
@@ -199,8 +197,9 @@ impl WindowManager {
             }
 
             notifications.into_iter().for_each(|notification| {
+                let notification_id = notification.id;
                 self.signals.push(Signal::NotificationClosed {
-                    notification_id: notification.id,
+                    notification_id,
                     reason: dbus::actions::ClosingReason::Expired,
                 })
             });
@@ -247,10 +246,8 @@ impl WindowManager {
                 return self.deinit_window();
             }
 
-            let qhandle = unsafe { self.qhandle.as_ref().unwrap_unchecked() };
-
-            window.draw(qhandle, config);
-            window.frame(qhandle);
+            window.draw(&self.qhandle, config);
+            window.frame(&self.qhandle);
             window.commit();
 
             debug!("Window Manager: Updated the windows");
@@ -260,8 +257,8 @@ impl WindowManager {
     }
 
     fn roundtrip_event_queue(&mut self) -> anyhow::Result<()> {
-        if let Some(event_queue) = self.event_queue.as_mut() {
-            event_queue.roundtrip(unsafe { self.window.as_mut().unwrap_unchecked() })?;
+        if let Some(window) = self.window.as_mut() {
+            self.event_queue.roundtrip(window)?;
 
             debug!("Window Manager: Roundtrip events for the windows");
         }
@@ -271,27 +268,22 @@ impl WindowManager {
 
     fn init_window(&mut self, config: &Config) -> anyhow::Result<bool> {
         if self.window.is_none() {
-            let mut event_queue = self.connection.new_event_queue();
-            let qhandle = event_queue.handle();
             let display = self.connection.display();
-            display.get_registry(&qhandle, ());
+            display.get_registry(&self.qhandle, ());
 
             let mut window = Window::init(self.pango_context.clone(), config);
 
             while let ConfigurationState::NotConfiured = window.configuration_state() {
-                event_queue.blocking_dispatch(&mut window)?;
+                self.event_queue.blocking_dispatch(&mut window)?;
             }
 
-            window.configure(&qhandle, config);
+            window.configure(&self.qhandle, config);
 
             while let ConfigurationState::Ready = window.configuration_state() {
-                event_queue.blocking_dispatch(&mut window)?;
+                self.event_queue.blocking_dispatch(&mut window)?;
             }
 
-            self.event_queue = Some(event_queue);
-            self.qhandle = Some(qhandle);
             self.window = Some(window);
-
             debug!("Window Manager: Created a window");
 
             Ok(true)
@@ -301,19 +293,13 @@ impl WindowManager {
     }
 
     fn deinit_window(&mut self) -> anyhow::Result<()> {
-        unsafe {
-            let window = self.window.as_mut().unwrap_unchecked();
+        if let Some(window) = self.window.as_mut() {
             window.deinit();
-            self.event_queue
-                .as_mut()
-                .unwrap_unchecked()
-                .roundtrip(window)?;
-        }
-        self.window = None;
-        self.event_queue = None;
-        self.qhandle = None;
+            self.event_queue.roundtrip(window)?;
 
-        debug!("Window Manager: Closed window");
+            self.window = None;
+            debug!("Window Manager: Closed window");
+        }
 
         Ok(())
     }

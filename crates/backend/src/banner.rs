@@ -90,6 +90,16 @@ impl Banner {
         &self.framebuffer
     }
 
+    #[inline]
+    pub(crate) fn take_framebuffer(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.framebuffer)
+    }
+
+    #[inline]
+    pub(crate) fn set_framebuffer(&mut self, framebuffer: Vec<u8>) {
+        self.framebuffer = framebuffer
+    }
+
     pub(crate) fn draw(
         &mut self,
         pango_context: &PangoContext,

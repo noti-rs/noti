@@ -748,6 +748,8 @@ dependencies = [
  "derive_more",
  "html-escape",
  "log",
+ "shared",
+ "tempfile",
  "tokio",
  "unic-segment",
  "zbus",
@@ -2276,6 +2278,7 @@ dependencies = [
  "pangocairo",
  "resvg",
  "shared",
+ "tempfile",
 ]
 
 [[package]]

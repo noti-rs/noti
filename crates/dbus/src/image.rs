@@ -1,29 +1,35 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
+use shared::file_descriptor::FileDescriptor;
 use zbus::zvariant::{Array, Structure, Value};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ImageData {
-    // Width of image in pixels
+    /// Width of image in pixels
     pub width: i32,
 
-    // Height of image in pixels
+    /// Height of image in pixels
     pub height: i32,
 
-    // Distance in bytes between row starts
+    /// Distance in bytes between row starts
     pub rowstride: i32,
 
-    // Whether the image has an alpha channel
+    /// Whether the image has an alpha channel
     pub has_alpha: bool,
 
-    // Must always be 8
+    /// Must always be 8
+    ///
+    /// It's because of specification.
     pub bits_per_sample: i32,
 
-    // If has_alpha is TRUE, must be 4, otherwise 3
+    /// If has_alpha is **true**, must be 4, otherwise 3
     pub channels: i32,
 
-    // The image data, in RGB byte order
-    pub data: Vec<u8>,
+    /// The image data, in RGB byte order
+    ///
+    /// To avoid the stroing data in RAM, the image stores in temporary file which will be
+    /// destroyed if there is no handle to this file.
+    pub image_file_descriptor: FileDescriptor,
 }
 
 impl ImageData {
@@ -53,11 +59,6 @@ impl ImageData {
             return None;
         }
 
-        let image_raw = match Array::try_from(get_field(&mut fields, &6)) {
-            Ok(array) => array,
-            Err(_) => return None,
-        };
-
         let width = i32::try_from(get_field(&mut fields, &0)).ok()?;
         let height = i32::try_from(get_field(&mut fields, &1)).ok()?;
         let rowstride = i32::try_from(get_field(&mut fields, &2)).ok()?;
@@ -65,10 +66,27 @@ impl ImageData {
         let bits_per_sample = i32::try_from(get_field(&mut fields, &4)).ok()?;
         let channels = i32::try_from(get_field(&mut fields, &5)).ok()?;
 
-        let data = image_raw
-            .iter()
-            .map(|value| u8::try_from(value).expect("expected u8"))
-            .collect::<Vec<_>>();
+        let file = match Array::try_from(get_field(&mut fields, &6)) {
+            Ok(array) => {
+                const BUF_SIZE_4KB: usize = 4096;
+                let mut file = tempfile::tempfile().expect("The temp file must be created!");
+                array
+                    .chunks(BUF_SIZE_4KB)
+                    .map(|bytes| {
+                        bytes
+                            .iter()
+                            .map(|byte| u8::try_from(byte).expect("Expected u8 byte of image data"))
+                            .collect::<Vec<u8>>()
+                    })
+                    .for_each(|buffer| {
+                        file.write_all(&buffer)
+                            .expect("The temp file must be able to write image.")
+                    });
+
+                file
+            }
+            Err(_) => return None,
+        };
 
         Some(ImageData {
             width,
@@ -77,21 +95,7 @@ impl ImageData {
             has_alpha,
             bits_per_sample,
             channels,
-            data,
+            image_file_descriptor: file.into(),
         })
-    }
-}
-
-impl std::fmt::Debug for ImageData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ImageData")
-            .field("width", &self.width)
-            .field("height", &self.height)
-            .field("rowstride", &self.rowstride)
-            .field("has_alpha", &self.has_alpha)
-            .field("bits_per_sample", &self.bits_per_sample)
-            .field("channels", &self.channels)
-            .field("data", &"Vec<u8> [...]")
-            .finish()
     }
 }

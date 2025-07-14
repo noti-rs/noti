@@ -4,8 +4,9 @@ use shared::cached_data::CachedData;
 use std::{
     cell::RefCell,
     cmp::Ordering,
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     fs::File,
+    hash::Hash,
     os::{
         fd::{AsFd, BorrowedFd},
         unix::fs::FileExt,
@@ -56,7 +57,7 @@ pub(super) struct Window {
 
     shm: Option<wl_shm::WlShm>,
     shm_pool: Option<wl_shm_pool::WlShmPool>,
-    buffer: Option<Buffer>,
+    sloted_buffer: Option<SlotedBuffer<u32>>,
     wl_buffer: Option<wl_buffer::WlBuffer>,
 
     configuration_state: ConfigurationState,
@@ -91,7 +92,7 @@ impl Window {
 
             shm: None,
             shm_pool: None,
-            buffer: None,
+            sloted_buffer: None,
             wl_buffer: None,
 
             configuration_state: ConfigurationState::NotConfiured,
@@ -101,6 +102,10 @@ impl Window {
     }
 
     pub(super) fn deinit(&self) {
+        if let Some(layer_shell) = self.layer_shell.as_ref() {
+            layer_shell.destroy();
+        }
+
         if let Some(layer_surface) = self.layer_surface.as_ref() {
             layer_surface.destroy();
         }
@@ -357,9 +362,12 @@ impl Window {
             return self
                 .remove_banners_by_id(&[id])
                 .into_iter()
-                .map(|notification| Signal::NotificationClosed {
-                    notification_id: notification.id,
-                    reason: dbus::actions::ClosingReason::DismissedByUser,
+                .map(|notification| {
+                    let notification_id = notification.id;
+                    Signal::NotificationClosed {
+                        notification_id,
+                        reason: dbus::actions::ClosingReason::DismissedByUser,
+                    }
                 })
                 .collect();
         }
@@ -443,7 +451,19 @@ impl Window {
 
         let gap_buffer = self.allocate_gap_buffer(gap);
 
-        self.create_buffer(qhandle);
+        self.banners.values_mut().for_each(|banner| {
+            if banner.framebuffer().is_empty() {
+                if let Some(framebuffer) = self
+                    .sloted_buffer
+                    .as_ref()
+                    .and_then(|sb| sb.data_by_slot(&banner.notification().id))
+                {
+                    banner.set_framebuffer(framebuffer);
+                }
+            }
+        });
+
+        self.create_or_reset_buffer(qhandle);
         self.write_banners_to_buffer(&config.general().anchor, &gap_buffer);
         self.build_buffer(qhandle);
     }
@@ -467,38 +487,39 @@ impl Window {
     }
 
     fn write_banners_to_buffer(&mut self, anchor: &config::general::Anchor, gap_buffer: &[u8]) {
-        fn write(buffer: Option<&mut Buffer>, data: &[u8]) {
-            unsafe { buffer.unwrap_unchecked() }.push(data);
-        }
 
         let threshold = self.banners.len().saturating_sub(1);
         let mut total = 0;
-        let writer = |banner: &Banner| {
-            write(self.buffer.as_mut(), banner.framebuffer());
+        let writer = |banner: &mut Banner| {
+            if let Some(sloted_buffer) = self.sloted_buffer.as_mut() {
+                sloted_buffer.push(banner.notification().id, &banner.take_framebuffer())
+            }
 
             if total < threshold {
-                write(self.buffer.as_mut(), gap_buffer);
+                if let Some(sloted_buffer) = self.sloted_buffer.as_mut() {
+                    sloted_buffer.push_without_slot(gap_buffer);
+                }
             }
 
             total += 1;
         };
 
         if anchor.is_top() {
-            self.banners.values().rev().for_each(writer)
+            self.banners.values_mut().rev().for_each(writer)
         } else {
-            self.banners.values().for_each(writer)
+            self.banners.values_mut().for_each(writer)
         }
 
         debug!("Window: Writed banners to buffer");
     }
 
-    fn create_buffer(&mut self, qhandle: &QueueHandle<Window>) {
-        if let Some(buffer) = self.buffer.as_mut() {
-            buffer.reset();
+    fn create_or_reset_buffer(&mut self, qhandle: &QueueHandle<Window>) {
+        if let Some(sloted_buffer) = self.sloted_buffer.as_mut() {
+            sloted_buffer.reset();
             return;
         }
 
-        let buffer = Buffer::new();
+        let sloted_buffer = SlotedBuffer::new();
 
         if self.shm_pool.is_none() {
             self.shm_pool = Some(
@@ -506,7 +527,7 @@ impl Window {
                     .as_ref()
                     .expect("Must be wl_shm protocol to use create wl_shm_pool")
                     .create_pool(
-                        buffer.as_fd(),
+                        sloted_buffer.buffer.as_fd(),
                         self.rect_size.area() as i32 * 4,
                         qhandle,
                         (),
@@ -514,7 +535,7 @@ impl Window {
             );
         }
 
-        self.buffer = Some(buffer);
+        self.sloted_buffer = Some(sloted_buffer);
 
         debug!("Window: Created buffer");
     }
@@ -525,23 +546,27 @@ impl Window {
         }
 
         assert!(
-            self.shm_pool.is_some() && self.buffer.is_some(),
+            self.shm_pool.is_some() && self.sloted_buffer.is_some(),
             "The buffer must be created before build!"
         );
 
         assert!(
-            self.buffer
+            self.sloted_buffer
                 .as_ref()
-                .is_some_and(|buffer| buffer.size() >= self.rect_size.area() * 4),
+                .is_some_and(|sb| sb.buffer.size() >= self.rect_size.area() * 4),
             "Buffer size must be greater or equal to window size. Buffer size: {}. Window area: {}.",
-            self.buffer.as_ref().map(|buffer| buffer.size).unwrap_or_default(),
-            self.rect_size.area()
+            self.sloted_buffer.as_ref().map(|sb| sb.buffer.size()).unwrap_or_default(),
+            self.rect_size.area() * 4
         );
 
         let shm_pool = unsafe { self.shm_pool.as_ref().unwrap_unchecked() };
         //INFO: The Buffer size only growth and it guarantee that shm_pool never shrinks
-        shm_pool
-            .resize(unsafe { self.buffer.as_ref().map(Buffer::size).unwrap_unchecked() } as i32);
+        shm_pool.resize(unsafe {
+            self.sloted_buffer
+                .as_ref()
+                .map(|sb| sb.buffer.size())
+                .unwrap_unchecked()
+        } as i32);
 
         self.wl_buffer = Some(shm_pool.create_buffer(
             0,
@@ -583,6 +608,76 @@ impl<K, V> SortByValues<K, V> for IndexMap<K, V> {
     }
 }
 
+/// The wrapper for Buffer which can deal with Slots. It allows to store data by key for reading
+/// later. Also SlotedBuffer allows write data without key if it's useless to read later.
+struct SlotedBuffer<T>
+where
+    T: Hash + Eq,
+{
+    buffer: Buffer,
+    slots: HashMap<T, Slot>,
+}
+
+struct Slot {
+    offset: usize,
+    len: usize,
+}
+
+impl<T> SlotedBuffer<T>
+where
+    T: Hash + Eq,
+{
+    fn new() -> Self {
+        debug!("SlotedBuffer: Trying to create");
+        let sb = Self {
+            buffer: Buffer::new(),
+            slots: HashMap::new(),
+        };
+        debug!("SlotedBuffer: Created!");
+        sb
+    }
+
+    /// Clears the data of buffers and slots. But the size of buffer remains.
+    fn reset(&mut self) {
+        self.buffer.reset();
+        self.slots.clear();
+        debug!("SlotedBuffer: Reset")
+    }
+
+    /// Pushes the data with creating a slot into buffer.
+    fn push(&mut self, key: T, data: &[u8]) {
+        self.slots.insert(
+            key,
+            Slot {
+                offset: self.buffer.filled_size(),
+                len: data.len(),
+            },
+        );
+        self.buffer.push(data);
+        debug!("SlotedBuffer: Received data to create Slot")
+    }
+
+    /// Pushes the data wihtout creating a slot into buffer.
+    fn push_without_slot(&mut self, data: &[u8]) {
+        self.buffer.push(data);
+        debug!("SlotedBuffer: Received data to write without slot.")
+    }
+
+    /// Retrieves a copy of data using specific slot by key.
+    fn data_by_slot(&self, key: &T) -> Option<Vec<u8>> {
+        self.slots.get(key).and_then(|slot| {
+            let mut buffer = vec![0; slot.len];
+
+            if let Err(err) = self.buffer.file.read_at(&mut buffer, slot.offset as u64) {
+                error!("SlotedBuffer: Failed to read slot from buffer. The error: {err}");
+                return None;
+            }
+
+            Some(buffer)
+        })
+    }
+}
+
 struct Buffer {
     file: File,
     cursor: u64,
@@ -616,6 +711,10 @@ impl Buffer {
         self.size = std::cmp::max(self.size, self.cursor as usize);
 
         debug!("Buffer: Received a data to write")
+    }
+
+    fn filled_size(&self) -> usize {
+        self.cursor as usize
     }
 
     fn size(&self) -> usize {
