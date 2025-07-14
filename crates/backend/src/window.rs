@@ -17,18 +17,24 @@ use std::{
 use wayland_client::{
     delegate_noop,
     protocol::{
-        wl_buffer, wl_callback, wl_compositor,
-        wl_pointer::{self, ButtonState},
-        wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+        wl_buffer::WlBuffer,
+        wl_callback::WlCallback,
+        wl_compositor::WlCompositor,
+        wl_pointer::{self, ButtonState, WlPointer},
+        wl_seat::WlSeat,
+        wl_shm::{self, WlShm},
+        wl_shm_pool::WlShmPool,
+        wl_surface::WlSurface,
     },
-    Dispatch, QueueHandle, WEnum,
+    Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum,
 };
 use wayland_protocols::wp::cursor_shape::v1::client::{
-    wp_cursor_shape_device_v1, wp_cursor_shape_manager_v1,
+    wp_cursor_shape_device_v1::{self, WpCursorShapeDeviceV1},
+    wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{
-    zwlr_layer_shell_v1,
-    zwlr_layer_surface_v1::{self, Anchor},
+    zwlr_layer_shell_v1::{self, ZwlrLayerShellV1},
+    zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
 };
 
 use config::{self, Config};
@@ -40,6 +46,7 @@ use dbus::{
 use crate::{
     banner::{Banner, DrawState},
     cache::CachedLayout,
+    dispatcher::Dispatcher,
 };
 use render::{types::RectSize, PangoContext};
 
@@ -47,120 +54,159 @@ pub(super) struct Window {
     banners: IndexMap<u32, Banner>,
     pango_context: Rc<RefCell<PangoContext>>,
 
+    event_queue: EventQueue<WindowState>,
+    state: WindowState,
+
+    sloted_buffer: SlotedBuffer<u32>,
+    wl_buffer: Option<WlBuffer>,
+}
+
+pub(super) struct WindowState {
     rect_size: RectSize<usize>,
-    margin: Margin,
+    anchored_margin: AnchoredMargin,
 
-    compositor: Option<wl_compositor::WlCompositor>,
-    layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
-    surface: Option<wl_surface::WlSurface>,
-    layer_surface: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
+    surface: WlSurface,
+    layer_surface: ZwlrLayerSurfaceV1,
+    shm_pool: WlShmPool,
 
-    shm: Option<wl_shm::WlShm>,
-    shm_pool: Option<wl_shm_pool::WlShmPool>,
-    sloted_buffer: Option<SlotedBuffer<u32>>,
-    wl_buffer: Option<wl_buffer::WlBuffer>,
+    pointer: WlPointer,
+    cursor_device: WpCursorShapeDeviceV1,
+    pointer_state: PointerState,
 
     configuration_state: ConfigurationState,
-    pointer_state: PointerState,
-    cursor_manager: Option<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1>,
 }
 
 pub(super) enum ConfigurationState {
     NotConfiured,
-    Ready,
     Configured,
 }
 
 impl Window {
-    pub(super) fn init(pango_context: Rc<RefCell<PangoContext>>, config: &Config) -> Self {
+    pub(super) fn init<P>(
+        wayland_connection: &Connection,
+        protocols: &P,
+        pango_context: Rc<RefCell<PangoContext>>,
+        config: &Config,
+    ) -> anyhow::Result<Self>
+    where
+        P: AsRef<WlCompositor>
+            + AsRef<WlShm>
+            + AsRef<WlSeat>
+            + AsRef<WpCursorShapeManagerV1>
+            + AsRef<ZwlrLayerShellV1>,
+    {
+        let mut event_queue = wayland_connection.new_event_queue();
+
+        let rect_size = RectSize::new(
+            config.general().width.into(),
+            config.general().height.into(),
+        );
+
+        let (surface, layer_surface) = Self::make_surface(protocols, &event_queue.handle());
+        let (pointer, cursor_device) = Self::make_pointer(protocols, &event_queue.handle());
+        let (sloted_buffer, shm_pool) =
+            Self::make_buffer(protocols, &event_queue.handle(), &rect_size);
+
+        let anchored_margin = Self::make_anchored_margin(config);
+        anchored_margin.relocate_layer_surface(&layer_surface);
+
+        layer_surface.set_size(rect_size.width as u32, rect_size.height as u32);
+        surface.commit();
+
+        let mut state = WindowState {
+            rect_size,
+            anchored_margin,
+
+            surface,
+            layer_surface,
+            shm_pool,
+
+            pointer_state: Default::default(),
+            cursor_device,
+            pointer,
+
+            configuration_state: ConfigurationState::NotConfiured,
+        };
+
+        while let ConfigurationState::NotConfiured = state.configuration_state {
+            event_queue.blocking_dispatch(&mut state)?;
+        }
+
         debug!("Window: Initialized");
 
-        Self {
+        Ok(Self {
             banners: indexmap! {},
             pango_context,
 
-            rect_size: RectSize::new(
-                config.general().width.into(),
-                config.general().height.into(),
-            ),
-            margin: Margin::new(),
+            event_queue,
+            state,
 
-            compositor: None,
-            layer_shell: None,
-            surface: None,
-            layer_surface: None,
-
-            shm: None,
-            shm_pool: None,
-            sloted_buffer: None,
+            sloted_buffer,
             wl_buffer: None,
-
-            configuration_state: ConfigurationState::NotConfiured,
-            pointer_state: Default::default(),
-            cursor_manager: None,
-        }
+        })
     }
 
-    pub(super) fn deinit(&self) {
-        if let Some(layer_shell) = self.layer_shell.as_ref() {
-            layer_shell.destroy();
-        }
-
-        if let Some(layer_surface) = self.layer_surface.as_ref() {
-            layer_surface.destroy();
-        }
-
-        if let Some(surface) = self.surface.as_ref() {
-            surface.destroy();
-        }
-
-        if let Some(buffer) = self.wl_buffer.as_ref() {
-            buffer.destroy();
-        }
-
-        if let Some(shm_pool) = self.shm_pool.as_ref() {
-            shm_pool.destroy()
-        }
-
-        debug!("Window: Deinitialized");
-    }
-
-    pub(super) fn configure(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
-        let Some(layer_shell) = self.layer_shell.as_ref() else {
-            error!("Tried to configure window when it doesn't have zwlr_layer_shell_v1");
-            return;
-        };
-
-        let surface = self.compositor.as_ref()
-                        .expect(
-                            "The wl_compositor protocol must be before than the zwlr-layer-shell-v1 protocol.\
-                            If it is not correct, please contact to developers with this information"
-                        ).create_surface(qhandle, ());
-        debug!("Window: Created surface");
-
-        self.layer_surface = Some(layer_shell.get_layer_surface(
+    fn make_surface<P>(
+        protocols: &P,
+        qhandle: &QueueHandle<WindowState>,
+    ) -> (WlSurface, ZwlrLayerSurfaceV1)
+    where
+        P: AsRef<WlCompositor> + AsRef<ZwlrLayerShellV1>,
+    {
+        let surface = <P as AsRef<WlCompositor>>::as_ref(protocols).create_surface(qhandle, ());
+        let layer_surface = <P as AsRef<ZwlrLayerShellV1>>::as_ref(protocols).get_layer_surface(
             &surface,
             None,
             zwlr_layer_shell_v1::Layer::Overlay,
             "noti".to_string(),
             qhandle,
             (),
-        ));
-        debug!("Window: Created layer surface");
+        );
+        layer_surface
+            .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
 
-        self.relocate(config.general().offset, &config.general().anchor);
+        (surface, layer_surface)
+    }
 
-        {
-            let layer_surface = unsafe { self.layer_surface.as_ref().unwrap_unchecked() };
-            layer_surface.set_size(self.rect_size.width as u32, self.rect_size.height as u32);
-            layer_surface
-                .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
-        }
-        surface.commit();
+    fn make_anchored_margin(config: &Config) -> AnchoredMargin {
+        let (x_offset, y_offset) = config.general().offset;
+        AnchoredMargin::new(x_offset as i32, y_offset as i32, &config.general().anchor)
+    }
 
-        self.surface = Some(surface);
+    fn make_pointer<P>(
+        protocols: &P,
+        qhandle: &QueueHandle<WindowState>,
+    ) -> (WlPointer, WpCursorShapeDeviceV1)
+    where
+        P: AsRef<WlSeat> + AsRef<WpCursorShapeManagerV1>,
+    {
+        let pointer = <P as AsRef<WlSeat>>::as_ref(protocols).get_pointer(qhandle, ());
+        let cursor_device = <P as AsRef<WpCursorShapeManagerV1>>::as_ref(protocols).get_pointer(
+            &pointer,
+            qhandle,
+            (),
+        );
+        (pointer, cursor_device)
+    }
 
-        debug!("Window: Configured");
+    fn make_buffer<P>(
+        protocols: &P,
+        qhandle: &QueueHandle<WindowState>,
+        rect_size: &RectSize<usize>,
+    ) -> (SlotedBuffer<u32>, WlShmPool)
+    where
+        P: AsRef<WlShm>,
+    {
+        let size = rect_size.area() * 4;
+        let mut sloted_buffer = SlotedBuffer::new();
+        sloted_buffer.push_without_slot(&vec![0; size]);
+        let shm_pool = <P as AsRef<WlShm>>::as_ref(protocols).create_pool(
+            sloted_buffer.buffer.as_fd(),
+            size as i32,
+            qhandle,
+            (),
+        );
+        (sloted_buffer, shm_pool)
     }
 
     pub(super) fn reconfigure(&mut self, config: &Config) {
@@ -173,32 +219,16 @@ impl Window {
     }
 
     fn relocate(&mut self, (x, y): (u8, u8), anchor_cfg: &config::general::Anchor) {
-        if let Some(layer_surface) = self.layer_surface.as_ref() {
-            debug!("Window: Relocate to anchor {anchor_cfg:?} with offsets x - {x} and y - {y}");
-            self.margin = Margin::from_anchor(x as i32, y as i32, anchor_cfg);
-
-            let anchor = match anchor_cfg {
-                config::general::Anchor::Top => Anchor::Top,
-                config::general::Anchor::TopLeft => Anchor::Top.union(Anchor::Left),
-                config::general::Anchor::TopRight => Anchor::Top.union(Anchor::Right),
-                config::general::Anchor::Bottom => Anchor::Bottom,
-                config::general::Anchor::BottomLeft => Anchor::Bottom.union(Anchor::Left),
-                config::general::Anchor::BottomRight => Anchor::Bottom.union(Anchor::Right),
-                config::general::Anchor::Left => Anchor::Left,
-                config::general::Anchor::Right => Anchor::Right,
-            };
-
-            layer_surface.set_anchor(anchor);
-            self.margin.apply(layer_surface);
-        }
+        self.state
+            .anchored_margin
+            .update(x as i32, y as i32, anchor_cfg);
+        self.state
+            .anchored_margin
+            .relocate_layer_surface(&self.state.layer_surface);
     }
 
     pub(super) fn total_banners(&self) -> usize {
         self.banners.len()
-    }
-
-    pub(super) fn configuration_state(&self) -> &ConfigurationState {
-        &self.configuration_state
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -346,14 +376,14 @@ impl Window {
     }
 
     pub(super) fn handle_click(&mut self, config: &Config) -> Vec<Signal> {
-        if let PrioritiedPressState::Unpressed = self.pointer_state.press_state {
+        if let PrioritiedPressState::Unpressed = self.state.pointer_state.press_state {
             return vec![];
         }
-        self.pointer_state.press_state.clear();
+        let _press_state = self.state.pointer_state.press_state.take();
 
         if let Some(id) = self.get_hovered_banner(config) {
             if config.general().anchor.is_bottom() {
-                self.pointer_state.y -=
+                self.state.pointer_state.y -=
                     self.banners[&id].height() as f64 + config.general().gap as f64;
             }
 
@@ -376,7 +406,7 @@ impl Window {
     }
 
     fn get_hovered_banner(&self, config: &Config) -> Option<u32> {
-        if !self.pointer_state.entered {
+        if !self.state.pointer_state.entered {
             return None;
         }
 
@@ -386,7 +416,7 @@ impl Window {
         let finder = |banner: &Banner| {
             let banner_height = banner.height() as f64;
             let bottom = offset + banner_height;
-            if (offset..bottom).contains(&self.pointer_state.y) {
+            if (offset..bottom).contains(&self.state.pointer_state.y) {
                 Some(banner.notification().id)
             } else {
                 offset += banner_height + gap;
@@ -403,7 +433,6 @@ impl Window {
 
     pub(super) fn redraw(
         &mut self,
-        qhandle: &QueueHandle<Window>,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) -> Result<(), Vec<Notification>> {
@@ -426,7 +455,7 @@ impl Window {
             })
             .collect();
 
-        self.draw(qhandle, config);
+        self.draw(config);
 
         debug!("Window: Redrawed banners");
 
@@ -437,7 +466,7 @@ impl Window {
         }
     }
 
-    pub(super) fn draw(&mut self, qhandle: &QueueHandle<Window>, config: &Config) {
+    pub(super) fn draw(&mut self, config: &Config) {
         let gap = config.general().gap;
 
         self.resize(RectSize::new(
@@ -453,52 +482,48 @@ impl Window {
 
         self.banners.values_mut().for_each(|banner| {
             if banner.framebuffer().is_empty() {
-                if let Some(framebuffer) = self
-                    .sloted_buffer
-                    .as_ref()
-                    .and_then(|sb| sb.data_by_slot(&banner.notification().id))
+                if let Some(framebuffer) =
+                    self.sloted_buffer.data_by_slot(&banner.notification().id)
                 {
                     banner.set_framebuffer(framebuffer);
                 }
             }
         });
 
-        self.create_or_reset_buffer(qhandle);
+        self.reset_buffer();
         self.write_banners_to_buffer(&config.general().anchor, &gap_buffer);
-        self.build_buffer(qhandle);
+        self.build_buffer();
     }
 
     fn resize(&mut self, rect_size: RectSize<usize>) {
-        self.rect_size = rect_size;
+        self.state.rect_size = rect_size;
 
-        let layer_surface = unsafe { self.layer_surface.as_ref().unwrap_unchecked() };
-        layer_surface.set_size(self.rect_size.width as u32, self.rect_size.height as u32);
+        self.state.layer_surface.set_size(
+            self.state.rect_size.width as u32,
+            self.state.rect_size.height as u32,
+        );
 
         debug!(
             "Window: Resized to width - {}, height - {}",
-            self.rect_size.width, self.rect_size.height
+            self.state.rect_size.width, self.state.rect_size.height
         );
     }
 
     fn allocate_gap_buffer(&self, gap: u8) -> Vec<u8> {
-        let rowstride = self.rect_size.width * 4;
+        let rowstride = self.state.rect_size.width * 4;
         let gap_size = gap as usize * rowstride;
         vec![0; gap_size]
     }
 
     fn write_banners_to_buffer(&mut self, anchor: &config::general::Anchor, gap_buffer: &[u8]) {
-
         let threshold = self.banners.len().saturating_sub(1);
         let mut total = 0;
         let writer = |banner: &mut Banner| {
-            if let Some(sloted_buffer) = self.sloted_buffer.as_mut() {
-                sloted_buffer.push(banner.notification().id, &banner.take_framebuffer())
-            }
+            self.sloted_buffer
+                .push(banner.notification().id, &banner.take_framebuffer());
 
             if total < threshold {
-                if let Some(sloted_buffer) = self.sloted_buffer.as_mut() {
-                    sloted_buffer.push_without_slot(gap_buffer);
-                }
+                self.sloted_buffer.push_without_slot(gap_buffer);
             }
 
             total += 1;
@@ -513,88 +538,92 @@ impl Window {
         debug!("Window: Writed banners to buffer");
     }
 
-    fn create_or_reset_buffer(&mut self, qhandle: &QueueHandle<Window>) {
-        if let Some(sloted_buffer) = self.sloted_buffer.as_mut() {
-            sloted_buffer.reset();
-            return;
-        }
-
-        let sloted_buffer = SlotedBuffer::new();
-
-        if self.shm_pool.is_none() {
-            self.shm_pool = Some(
-                self.shm
-                    .as_ref()
-                    .expect("Must be wl_shm protocol to use create wl_shm_pool")
-                    .create_pool(
-                        sloted_buffer.buffer.as_fd(),
-                        self.rect_size.area() as i32 * 4,
-                        qhandle,
-                        (),
-                    ),
-            );
-        }
-
-        self.sloted_buffer = Some(sloted_buffer);
-
-        debug!("Window: Created buffer");
+    fn reset_buffer(&mut self) {
+        self.sloted_buffer.reset();
+        debug!("Window: Buffer was reset");
     }
 
-    fn build_buffer(&mut self, qhandle: &QueueHandle<Window>) {
+    fn build_buffer(&mut self) {
         if let Some(wl_buffer) = self.wl_buffer.as_ref() {
             wl_buffer.destroy();
         }
 
         assert!(
-            self.shm_pool.is_some() && self.sloted_buffer.is_some(),
-            "The buffer must be created before build!"
-        );
-
-        assert!(
-            self.sloted_buffer
-                .as_ref()
-                .is_some_and(|sb| sb.buffer.size() >= self.rect_size.area() * 4),
+            self.sloted_buffer.buffer.size() >= self.state.rect_size.area() * 4,
             "Buffer size must be greater or equal to window size. Buffer size: {}. Window area: {}.",
-            self.sloted_buffer.as_ref().map(|sb| sb.buffer.size()).unwrap_or_default(),
-            self.rect_size.area() * 4
+            self.sloted_buffer.buffer.size(),
+            self.state.rect_size.area() * 4
         );
 
-        let shm_pool = unsafe { self.shm_pool.as_ref().unwrap_unchecked() };
         //INFO: The Buffer size only growth and it guarantee that shm_pool never shrinks
-        shm_pool.resize(unsafe {
-            self.sloted_buffer
-                .as_ref()
-                .map(|sb| sb.buffer.size())
-                .unwrap_unchecked()
-        } as i32);
+        self.state
+            .shm_pool
+            .resize(self.sloted_buffer.buffer.size() as i32);
 
-        self.wl_buffer = Some(shm_pool.create_buffer(
+        self.wl_buffer = Some(self.state.shm_pool.create_buffer(
             0,
-            self.rect_size.width as i32,
-            self.rect_size.height as i32,
-            self.rect_size.width as i32 * 4,
+            self.state.rect_size.width as i32,
+            self.state.rect_size.height as i32,
+            self.state.rect_size.width as i32 * 4,
             wl_shm::Format::Argb8888,
-            qhandle,
+            &self.event_queue.handle(),
             (),
         ));
 
         debug!("Window: Builded buffer");
     }
 
-    pub(super) fn frame(&self, qhandle: &QueueHandle<Window>) {
-        let surface = unsafe { self.surface.as_ref().unwrap_unchecked() };
-        surface.damage(0, 0, i32::MAX, i32::MAX);
-        surface.frame(qhandle, ());
-        surface.attach(self.wl_buffer.as_ref(), 0, 0);
+    pub(super) fn frame(&self) {
+        self.state.surface.damage(0, 0, i32::MAX, i32::MAX);
+        self.state.surface.frame(&self.event_queue.handle(), ());
+        self.state.surface.attach(self.wl_buffer.as_ref(), 0, 0);
 
         debug!("Window: Requested a frame to the Wayland compositor");
     }
 
     pub(super) fn commit(&self) {
-        let surface = unsafe { self.surface.as_ref().unwrap_unchecked() };
-        surface.commit();
-
+        self.state.surface.commit();
         debug!("Window: Commited")
+    }
+
+    pub(super) fn sync(&mut self) -> anyhow::Result<()> {
+        self.event_queue.roundtrip(&mut self.state)?;
+        Ok(())
+    }
+}
+
+impl WindowState {
+    fn destroy(&self) {
+        self.layer_surface.destroy();
+        self.surface.destroy();
+        self.shm_pool.destroy();
+        self.cursor_device.destroy();
+        self.pointer.release();
+    }
+}
+
+impl Drop for Window {
+    fn drop(&mut self) {
+        if let Some(buffer) = self.wl_buffer.as_ref() {
+            buffer.destroy();
+        }
+
+        self.state.destroy();
+
+        if let Err(_err) = self.sync() {
+            error!("Window: Failed to sync during deinitialization.")
+        }
+
+        debug!("Window: Deinitialized");
+    }
+}
+
+impl Dispatcher for Window {
+    type State = WindowState;
+    fn get_event_queue_and_state(
+        &mut self,
+    ) -> Option<(&mut EventQueue<Self::State>, &mut Self::State)> {
+        Some((&mut self.event_queue, &mut self.state))
     }
 }
 
@@ -726,6 +755,29 @@ impl Buffer {
     }
 }
 
+struct AnchoredMargin {
+    margin: Margin,
+    anchor: Anchor,
+}
+
+impl AnchoredMargin {
+    fn new(x_offset: i32, y_offset: i32, anchor: &config::general::Anchor) -> Self {
+        Self {
+            margin: Margin::with_anchor(x_offset, y_offset, anchor),
+            anchor: anchor.to_layer_shell_anchor(),
+        }
+    }
+
+    fn update(&mut self, x_offset: i32, y_offset: i32, anchor: &config::general::Anchor) {
+        *self = Self::new(x_offset, y_offset, anchor);
+    }
+
+    fn relocate_layer_surface(&self, layer_surface: &ZwlrLayerSurfaceV1) {
+        layer_surface.set_anchor(self.anchor);
+        self.margin.apply(layer_surface);
+    }
+}
+
 struct Margin {
     left: i32,
     right: i32,
@@ -743,7 +795,7 @@ impl Margin {
         }
     }
 
-    fn from_anchor(x: i32, y: i32, anchor: &config::general::Anchor) -> Self {
+    fn with_anchor(x: i32, y: i32, anchor: &config::general::Anchor) -> Self {
         let mut margin = Margin::new();
 
         if anchor.is_top() {
@@ -778,7 +830,7 @@ struct PointerState {
 
 /// Mouse button press state which have priority (LMB > RMB > MMB) if any is set at least,
 /// otherwise sets the 'unpressed' state.
-#[derive(Default)]
+#[derive(Default, Clone)]
 enum PrioritiedPressState {
     #[default]
     Unpressed,
@@ -804,8 +856,10 @@ impl PrioritiedPressState {
         }
     }
 
-    fn clear(&mut self) {
+    fn take(&mut self) -> Self {
+        let current_state = self.clone();
         *self = PrioritiedPressState::Unpressed;
+        current_state
     }
 }
 
@@ -847,111 +901,20 @@ impl PointerState {
     }
 }
 
-impl Dispatch<wl_registry::WlRegistry, ()> for Window {
+delegate_noop!(WindowState: ignore WlSurface);
+delegate_noop!(WindowState: ignore WlShmPool);
+delegate_noop!(WindowState: ignore WlBuffer);
+delegate_noop!(WindowState: ignore WlCallback);
+delegate_noop!(WindowState: ignore WpCursorShapeDeviceV1);
+
+impl Dispatch<WlPointer, ()> for WindowState {
     fn event(
         state: &mut Self,
-        registry: &wl_registry::WlRegistry,
-        event: <wl_registry::WlRegistry as wayland_client::Proxy>::Event,
+        _pointer: &WlPointer,
+        event: <WlPointer as Proxy>::Event,
         _data: &(),
-        _conn: &wayland_client::Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
-    ) {
-        if let wl_registry::Event::Global {
-            name,
-            interface,
-            version,
-        } = event
-        {
-            match interface.as_ref() {
-                "wl_compositor" => {
-                    state.compositor = Some(registry.bind::<wl_compositor::WlCompositor, _, _>(
-                        name,
-                        version,
-                        qhandle,
-                        (),
-                    ));
-                    debug!("Window: Bound the wl_compositor");
-                }
-                "wl_shm" => {
-                    state.shm =
-                        Some(registry.bind::<wl_shm::WlShm, _, _>(name, version, qhandle, ()));
-                    debug!("Window: Bound the wl_shm");
-                }
-                "wl_seat" => {
-                    registry.bind::<wl_seat::WlSeat, _, _>(name, version, qhandle, ());
-                    debug!("Window: Bound the wl_seat");
-                }
-                "zwlr_layer_shell_v1" => {
-                    state.layer_shell = Some(
-                        registry.bind::<zwlr_layer_shell_v1::ZwlrLayerShellV1, _, _>(
-                            name,
-                            version,
-                            qhandle,
-                            (),
-                        ),
-                    );
-                    debug!("Window: Bound the zwlr_layer_shell_v1");
-
-                    state.configuration_state = ConfigurationState::Ready;
-                    debug!("Window: Ready to configure")
-                }
-                "wp_cursor_shape_manager_v1" => {
-                    state.cursor_manager = Some(
-                        registry.bind::<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1, _, _>(
-                            name,
-                            version,
-                            qhandle,
-                            (),
-                        ),
-                    );
-
-                    debug!("Window: Bound the wp_cursor_shape_manager_v1");
-                }
-                _ => (),
-            }
-        }
-    }
-}
-
-delegate_noop!(Window: ignore wl_compositor::WlCompositor);
-delegate_noop!(Window: ignore wl_surface::WlSurface);
-delegate_noop!(Window: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
-delegate_noop!(Window: ignore wl_shm::WlShm);
-delegate_noop!(Window: ignore wl_shm_pool::WlShmPool);
-delegate_noop!(Window: ignore wl_buffer::WlBuffer);
-delegate_noop!(Window: ignore wl_callback::WlCallback);
-delegate_noop!(Window: ignore wp_cursor_shape_manager_v1::WpCursorShapeManagerV1);
-delegate_noop!(Window: ignore wp_cursor_shape_device_v1::WpCursorShapeDeviceV1);
-
-impl Dispatch<wl_seat::WlSeat, ()> for Window {
-    fn event(
-        _state: &mut Self,
-        seat: &wl_seat::WlSeat,
-        event: <wl_seat::WlSeat as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &wayland_client::Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
-    ) {
-        if let wl_seat::Event::Capabilities {
-            capabilities: WEnum::Value(capability),
-        } = event
-        {
-            if capability.contains(wl_seat::Capability::Pointer) {
-                seat.get_pointer(qhandle, ());
-                debug!("Window: Received a pointer");
-            }
-        }
-    }
-}
-
-impl Dispatch<wl_pointer::WlPointer, ()> for Window {
-    fn event(
-        state: &mut Self,
-        pointer: &wl_pointer::WlPointer,
-        event: <wl_pointer::WlPointer as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &wayland_client::Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
     ) {
         match event {
             wl_pointer::Event::Enter {
@@ -960,14 +923,18 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Window {
                 serial,
                 ..
             } => {
-                if let Some(cursor_manager) = &state.cursor_manager {
-                    let cursor_shape = cursor_manager.get_pointer(pointer, qhandle, ());
-                    cursor_shape.set_shape(serial, wp_cursor_shape_device_v1::Shape::Pointer);
-                }
+                state
+                    .cursor_device
+                    .set_shape(serial, wp_cursor_shape_device_v1::Shape::Pointer);
 
                 state.pointer_state.enter_and_relocate(surface_x, surface_y);
             }
-            wl_pointer::Event::Leave { .. } => state.pointer_state.leave(),
+            wl_pointer::Event::Leave { serial, .. } => {
+                state
+                    .cursor_device
+                    .set_shape(serial, wp_cursor_shape_device_v1::Shape::Default);
+                state.pointer_state.leave()
+            }
             wl_pointer::Event::Motion {
                 surface_x,
                 surface_y,
@@ -983,14 +950,14 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Window {
     }
 }
 
-impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Window {
+impl Dispatch<ZwlrLayerSurfaceV1, ()> for WindowState {
     fn event(
         state: &mut Self,
-        layer_surface: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
-        event: <zwlr_layer_surface_v1::ZwlrLayerSurfaceV1 as wayland_client::Proxy>::Event,
+        layer_surface: &ZwlrLayerSurfaceV1,
+        event: <ZwlrLayerSurfaceV1 as Proxy>::Event,
         _data: &(),
-        _conn: &wayland_client::Connection,
-        _qhandle: &wayland_client::QueueHandle<Self>,
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
     ) {
         if let zwlr_layer_surface_v1::Event::Configure {
             serial,
@@ -1006,7 +973,26 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Window {
             }
 
             state.configuration_state = ConfigurationState::Configured;
-            debug!("Window: Configured layer surface")
+            debug!("WindowState: Configured layer surface")
+        }
+    }
+}
+
+trait ToLayerShellAnchor {
+    fn to_layer_shell_anchor(&self) -> Anchor;
+}
+
+impl ToLayerShellAnchor for config::general::Anchor {
+    fn to_layer_shell_anchor(&self) -> Anchor {
+        match self {
+            config::general::Anchor::Top => Anchor::Top,
+            config::general::Anchor::TopLeft => Anchor::Top.union(Anchor::Left),
+            config::general::Anchor::TopRight => Anchor::Top.union(Anchor::Right),
+            config::general::Anchor::Bottom => Anchor::Bottom,
+            config::general::Anchor::BottomLeft => Anchor::Bottom.union(Anchor::Left),
+            config::general::Anchor::BottomRight => Anchor::Bottom.union(Anchor::Right),
+            config::general::Anchor::Left => Anchor::Left,
+            config::general::Anchor::Right => Anchor::Right,
         }
     }
 }

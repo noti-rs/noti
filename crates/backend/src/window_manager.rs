@@ -3,7 +3,12 @@ use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
 use log::debug;
 use render::PangoContext;
 use shared::cached_data::CachedData;
-use wayland_client::{Connection, EventQueue, QueueHandle};
+use wayland_client::protocol::wl_compositor::WlCompositor;
+use wayland_client::protocol::wl_seat::WlSeat;
+use wayland_client::protocol::wl_shm::WlShm;
+use wayland_client::Connection;
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1;
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 
 use crate::dispatcher::Dispatcher;
 use crate::{cache::CachedLayout, error::Error};
@@ -11,12 +16,9 @@ use crate::{cache::CachedLayout, error::Error};
 use config::Config;
 use dbus::{actions::Signal, notification::Notification};
 
-use super::window::{ConfigurationState, Window};
+use super::window::Window;
 
 pub(crate) struct WindowManager {
-    connection: Connection,
-    event_queue: EventQueue<Window>,
-    qhandle: QueueHandle<Window>,
     window: Option<Window>,
 
     pango_context: Rc<RefCell<PangoContext>>,
@@ -28,19 +30,8 @@ pub(crate) struct WindowManager {
     close_notifications: Vec<u32>,
 }
 
-impl Dispatcher for WindowManager {
-    type State = Window;
-
-    fn get_event_queue_and_state(
-        &mut self,
-    ) -> Option<(&mut EventQueue<Self::State>, &mut Self::State)> {
-        Some((&mut self.event_queue, self.window.as_mut()?))
-    }
-}
-
 impl WindowManager {
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
-        let connection = Connection::connect_to_env()?;
         let pango_context =
             Rc::new(PangoContext::from_font_family(&config.general().font.name).into());
         let cached_layouts = config
@@ -51,12 +42,7 @@ impl WindowManager {
             })
             .collect();
 
-        let event_queue = connection.new_event_queue();
-        let qhandle = event_queue.handle();
         let wm = Self {
-            connection,
-            event_queue,
-            qhandle,
             window: None,
 
             pango_context,
@@ -70,6 +56,14 @@ impl WindowManager {
         debug!("Window Manager: Created");
 
         Ok(wm)
+    }
+
+    pub(crate) fn dispatch(&mut self) -> anyhow::Result<bool> {
+        if let Some(window) = self.window.as_mut() {
+            window.dispatch()?;
+        }
+
+        Ok(false)
     }
 
     pub(crate) fn update_cache(&mut self) -> bool {
@@ -94,14 +88,14 @@ impl WindowManager {
         let mut unrendered_notifcations = Ok(());
         if let Some(window) = self.window.as_mut() {
             window.reconfigure(config);
-            unrendered_notifcations = window.redraw(&self.qhandle, config, &self.cached_layouts);
-            window.frame(&self.qhandle);
+            unrendered_notifcations = window.redraw(config, &self.cached_layouts);
+            window.frame();
             window.commit();
         }
 
         debug!("Window Manager: Updated the windows by updated config");
 
-        self.roundtrip_event_queue()?;
+        self.sync()?;
         Ok(unrendered_notifcations?)
     }
 
@@ -113,7 +107,19 @@ impl WindowManager {
         self.close_notifications.push(notification_id);
     }
 
-    pub(crate) fn show_window(&mut self, config: &Config) -> Result<(), Error> {
+    pub(crate) fn show_window<P>(
+        &mut self,
+        wayland_connection: &Connection,
+        protoctols: &P,
+        config: &Config,
+    ) -> Result<(), Error>
+    where
+        P: AsRef<WlCompositor>
+            + AsRef<WlShm>
+            + AsRef<WlSeat>
+            + AsRef<WpCursorShapeManagerV1>
+            + AsRef<ZwlrLayerShellV1>,
+    {
         let mut notifications_limit = config.general().limit as usize;
         if notifications_limit == 0 {
             notifications_limit = usize::MAX;
@@ -125,7 +131,7 @@ impl WindowManager {
             .is_none_or(|window| window.total_banners() < notifications_limit)
             && !self.notification_queue.is_empty()
         {
-            self.init_window(config)?;
+            self.init_window(wayland_connection, protoctols, config)?;
             self.process_notification_queue(config)?;
         }
 
@@ -157,7 +163,7 @@ impl WindowManager {
                 window.update_banners(notifications_to_display, config, &self.cached_layouts);
 
             self.update_window(config)?;
-            self.roundtrip_event_queue()?;
+            self.sync()?;
         }
 
         Ok(unrendered_notifications?)
@@ -246,8 +252,8 @@ impl WindowManager {
                 return self.deinit_window();
             }
 
-            window.draw(&self.qhandle, config);
-            window.frame(&self.qhandle);
+            window.draw(config);
+            window.frame();
             window.commit();
 
             debug!("Window Manager: Updated the windows");
@@ -256,34 +262,36 @@ impl WindowManager {
         Ok(())
     }
 
-    fn roundtrip_event_queue(&mut self) -> anyhow::Result<()> {
+    fn sync(&mut self) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
-            self.event_queue.roundtrip(window)?;
-
+            window.sync()?;
             debug!("Window Manager: Roundtrip events for the windows");
         }
 
         Ok(())
     }
 
-    fn init_window(&mut self, config: &Config) -> anyhow::Result<bool> {
+    fn init_window<P>(
+        &mut self,
+        wayland_connection: &Connection,
+        protocols: &P,
+        config: &Config,
+    ) -> anyhow::Result<bool>
+    where
+        P: AsRef<WlCompositor>
+            + AsRef<WlShm>
+            + AsRef<WlSeat>
+            + AsRef<WpCursorShapeManagerV1>
+            + AsRef<ZwlrLayerShellV1>,
+    {
         if self.window.is_none() {
-            let display = self.connection.display();
-            display.get_registry(&self.qhandle, ());
+            self.window = Some(Window::init(
+                wayland_connection,
+                protocols,
+                self.pango_context.clone(),
+                config,
+            )?);
 
-            let mut window = Window::init(self.pango_context.clone(), config);
-
-            while let ConfigurationState::NotConfiured = window.configuration_state() {
-                self.event_queue.blocking_dispatch(&mut window)?;
-            }
-
-            window.configure(&self.qhandle, config);
-
-            while let ConfigurationState::Ready = window.configuration_state() {
-                self.event_queue.blocking_dispatch(&mut window)?;
-            }
-
-            self.window = Some(window);
             debug!("Window Manager: Created a window");
 
             Ok(true)
@@ -293,10 +301,7 @@ impl WindowManager {
     }
 
     fn deinit_window(&mut self) -> anyhow::Result<()> {
-        if let Some(window) = self.window.as_mut() {
-            window.deinit();
-            self.event_queue.roundtrip(window)?;
-
+        if self.window.as_mut().is_some() {
             self.window = None;
             debug!("Window Manager: Closed window");
         }

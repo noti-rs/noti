@@ -4,11 +4,11 @@ use crate::{
 };
 use config::Config;
 use log::debug;
-use wayland_client::{Connection, EventQueue, QueueHandle};
+use wayland_client::{protocol::wl_seat::WlSeat, Connection, EventQueue};
+use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
 
 pub struct IdleManager {
     event_queue: EventQueue<IdleNotifier>,
-    qhandle: QueueHandle<IdleNotifier>,
     pub idle_notifier: IdleNotifier,
 }
 
@@ -23,19 +23,19 @@ impl Dispatcher for IdleManager {
 }
 
 impl IdleManager {
-    pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
-        let connection = Connection::connect_to_env()?;
-        let event_queue = connection.new_event_queue();
-        let qhandle = event_queue.handle();
-        let display = connection.display();
-
-        display.get_registry(&qhandle, ());
-
-        let idle_notifier = IdleNotifier::init(config)?;
+    pub(crate) fn init<P>(
+        wayland_connection: &Connection,
+        protocols: &P,
+        config: &Config,
+    ) -> anyhow::Result<Self>
+    where
+        P: AsRef<WlSeat> + AsRef<ExtIdleNotifierV1>,
+    {
+        let event_queue = wayland_connection.new_event_queue();
+        let idle_notifier = IdleNotifier::init(protocols, &event_queue.handle(), config)?;
 
         let idle_manager = Self {
             event_queue,
-            qhandle,
             idle_notifier,
         };
         debug!("Idle Manager: Initialized");
@@ -43,8 +43,12 @@ impl IdleManager {
         Ok(idle_manager)
     }
 
-    pub(crate) fn update_by_config(&mut self, config: &Config) {
-        self.idle_notifier.recreate(&self.qhandle, config);
+    pub(crate) fn update_by_config<P>(&mut self, protocols: &P, config: &Config)
+    where
+        P: AsRef<WlSeat> + AsRef<ExtIdleNotifierV1>,
+    {
+        self.idle_notifier
+            .recreate(protocols, &self.event_queue.handle(), config);
     }
 
     pub(crate) fn reset_idle_state(&mut self) {

@@ -1,21 +1,12 @@
 use config::Config;
 use log::debug;
-use wayland_client::{
-    delegate_noop,
-    protocol::{
-        wl_registry,
-        wl_seat::{self, WlSeat},
-    },
-    Dispatch, QueueHandle,
-};
+use wayland_client::{protocol::wl_seat::WlSeat, Dispatch, QueueHandle};
 use wayland_protocols::ext::idle_notify::v1::client::{
     ext_idle_notification_v1::{self, ExtIdleNotificationV1},
     ext_idle_notifier_v1::ExtIdleNotifierV1,
 };
 
 pub struct IdleNotifier {
-    wl_seat: Option<WlSeat>,
-    notifier: Option<ExtIdleNotifierV1>,
     notification: Option<ExtIdleNotificationV1>,
 
     threshold: u32,
@@ -29,86 +20,67 @@ pub enum IdleState {
 }
 
 impl IdleNotifier {
-    pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
+    pub(crate) fn init<P>(
+        protocotls: &P,
+        qhandle: &QueueHandle<Self>,
+        config: &Config,
+    ) -> anyhow::Result<Self>
+    where
+        P: AsRef<WlSeat> + AsRef<ExtIdleNotifierV1>,
+    {
         let threshold = config.general().idle_threshold.duration;
+
+        let notification = if threshold != 0 {
+            Some(
+                <P as AsRef<ExtIdleNotifierV1>>::as_ref(protocotls).get_idle_notification(
+                    threshold,
+                    <P as AsRef<WlSeat>>::as_ref(protocotls),
+                    qhandle,
+                    (),
+                ),
+            )
+        } else {
+            None
+        };
+
         let idle_notifier = Self {
-            wl_seat: None,
-            notifier: None,
-            notification: None,
+            notification,
 
             idle_state: None,
             threshold,
             was_idled: false,
         };
+
         debug!("Idle Notifier: Initialized");
         Ok(idle_notifier)
     }
 
-    pub(super) fn recreate(&mut self, qh: &QueueHandle<Self>, config: &Config) {
+    pub(super) fn recreate<P>(
+        &mut self,
+        protocotls: &P,
+        qhandle: &QueueHandle<Self>,
+        config: &Config,
+    ) where
+        P: AsRef<WlSeat> + AsRef<ExtIdleNotifierV1>,
+    {
         self.threshold = config.general().idle_threshold.duration;
-
-        if let Some(notifier) = self.notifier.as_ref() {
-            if let Some(notification) = self.notification.take() {
-                self.idle_state = None;
-                self.was_idled = false;
-                notification.destroy();
-                debug!("Idle Notifier: Destroyed")
-            }
-
-            if self.wl_seat.is_some() && self.threshold != 0 {
-                self.notification.replace(notifier.get_idle_notification(
-                    self.threshold,
-                    self.wl_seat.as_ref().unwrap(),
-                    qh,
-                    (),
-                ));
-                debug!("Idle Notifier: Recreated by new idle_threshold value");
-            }
+        if let Some(notification) = self.notification.take() {
+            self.idle_state = None;
+            self.was_idled = false;
+            notification.destroy();
+            debug!("Idle Notifier: Destroyed")
         }
-    }
-}
 
-impl Dispatch<wl_registry::WlRegistry, ()> for IdleNotifier {
-    fn event(
-        state: &mut Self,
-        registry: &wl_registry::WlRegistry,
-        event: <wl_registry::WlRegistry as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &wayland_client::Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
-    ) {
-        if let wl_registry::Event::Global {
-            name,
-            interface,
-            version,
-        } = event
-        {
-            match interface.as_ref() {
-                "wl_seat" => {
-                    state.wl_seat =
-                        Some(registry.bind::<wl_seat::WlSeat, _, _>(name, version, qhandle, ()));
-                    debug!("Idle Notifier: Bound the wl_seat");
-                }
-                "ext_idle_notifier_v1" => {
-                    let idle_notifier =
-                        registry.bind::<ExtIdleNotifierV1, _, _>(name, version, qhandle, ());
-                    debug!("Idle Notifier: Bound the ext_idle_notifier_v1");
-
-                    if state.wl_seat.is_some() && state.threshold != 0 {
-                        state
-                            .notification
-                            .replace(idle_notifier.get_idle_notification(
-                                state.threshold,
-                                state.wl_seat.as_ref().unwrap(),
-                                qhandle,
-                                (),
-                            ));
-                    }
-
-                    state.notifier.replace(idle_notifier);
-                }
-                _ => (),
-            }
+        if self.threshold != 0 {
+            self.notification.replace(
+                <P as AsRef<ExtIdleNotifierV1>>::as_ref(protocotls).get_idle_notification(
+                    self.threshold,
+                    <P as AsRef<WlSeat>>::as_ref(protocotls),
+                    qhandle,
+                    (),
+                ),
+            );
+            debug!("Idle Notifier: Recreated by new idle_threshold value");
         }
     }
 }
@@ -136,6 +108,3 @@ impl Dispatch<ExtIdleNotificationV1, ()> for IdleNotifier {
         }
     }
 }
-
-delegate_noop!(IdleNotifier: ignore WlSeat);
-delegate_noop!(IdleNotifier: ignore ExtIdleNotifierV1);
