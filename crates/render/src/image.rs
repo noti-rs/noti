@@ -1,9 +1,12 @@
+use std::io::{Read, Seek, Write};
+
 use image::codecs::png::PngEncoder;
 use log::{debug, error, warn};
 use pangocairo::cairo::ImageSurface;
 
 use config::display::{ImageProperty, ResizingMethod};
 use dbus::image::ImageData;
+use shared::file_descriptor::FileDescriptor;
 
 use crate::{
     drawer::{Drawer, MakeRounding},
@@ -17,7 +20,10 @@ use super::{types::Offset, widget::Draw};
 pub enum Image {
     Exists {
         // INFO: the image storage always store image in png format
-        data: ImageData,
+        file_descriptor: FileDescriptor,
+        width: i32,
+        height: i32,
+        has_alpha: bool,
         rounding_radius: f64,
     },
     Unknown,
@@ -42,11 +48,21 @@ impl Image {
             return Image::Unknown;
         };
 
+        let image_buffer = {
+            let mut image_buffer = vec![];
+            let mut file = image_data.image_file_descriptor.get_file();
+            file.seek(std::io::SeekFrom::Start(0))
+                .expect("The file must be able to seek");
+            file.read_to_end(&mut image_buffer)
+                .expect("The file must be able to read");
+            image_buffer
+        };
+
         let resized_image = if image_data.has_alpha {
-            image::RgbaImage::from_vec(origin_width, origin_height, image_data.data)
+            image::RgbaImage::from_vec(origin_width, origin_height, image_buffer)
                 .map(image::DynamicImage::from)
         } else {
-            image::RgbImage::from_vec(origin_width, origin_height, image_data.data)
+            image::RgbImage::from_vec(origin_width, origin_height, image_buffer)
                 .map(image::DynamicImage::from)
         }
         .map(|image| {
@@ -63,24 +79,18 @@ impl Image {
             return Image::Unknown;
         };
 
-        let mut storage = vec![];
-        let cursor = std::io::Cursor::new(&mut storage);
+        let mut file = tempfile::tempfile().expect("The temp file must be created");
         resized_image
-            .write_with_encoder(PngEncoder::new(cursor))
+            .write_with_encoder(PngEncoder::new(&mut file))
             .unwrap();
 
         debug!("Image: Created from 'image_data'");
 
         Image::Exists {
-            data: ImageData {
-                width,
-                height,
-                rowstride: width * 4,
-                has_alpha: true,
-                bits_per_sample: image_data.bits_per_sample,
-                channels: 4,
-                data: storage,
-            },
+            file_descriptor: file.into(),
+            width,
+            height,
+            has_alpha: true,
             rounding_radius: image_property.rounding as f64,
         }
     }
@@ -124,28 +134,21 @@ impl Image {
             return Image::Unknown;
         };
 
-        let mut storage = vec![];
-        let cursor = std::io::Cursor::new(&mut storage);
-
+        let mut file = tempfile::tempfile().expect("The temp file must be created");
         image::imageops::resize(
             &image,
             width as u32,
             height as u32,
             image_property.resizing_method.to_filter_type(),
         )
-        .write_with_encoder(PngEncoder::new(cursor))
+        .write_with_encoder(PngEncoder::new(&mut file))
         .unwrap();
 
         Image::Exists {
-            data: ImageData {
-                width,
-                height,
-                rowstride: width * 4,
-                has_alpha: true,
-                bits_per_sample: 8,
-                channels: 4,
-                data: storage,
-            },
+            file_descriptor: file.into(),
+            width,
+            height,
+            has_alpha: true,
             rounding_radius: image_property.rounding as f64,
         }
     }
@@ -217,16 +220,15 @@ impl Image {
 
         debug!("Image: Created image from svg by path {image_path:?}");
 
+        let mut file = tempfile::tempfile().expect("The temp file must be created");
+        file.write_all(&pixmap.encode_png().unwrap())
+            .expect("The temp file must be able to write");
+
         Image::Exists {
-            data: ImageData {
-                data: pixmap.encode_png().unwrap(),
-                width,
-                height,
-                rowstride: width * 4,
-                has_alpha: true,
-                bits_per_sample: 8,
-                channels: 4,
-            },
+            file_descriptor: file.into(),
+            width,
+            height,
+            has_alpha: true,
             rounding_radius: image_property.rounding as f64,
         }
     }
@@ -269,14 +271,14 @@ impl Image {
 
     pub fn width(&self) -> Option<usize> {
         match self {
-            Image::Exists { data, .. } => Some(data.width as usize),
+            Image::Exists { width, .. } => Some(*width as usize),
             Image::Unknown => None,
         }
     }
 
     pub fn height(&self) -> Option<usize> {
         match self {
-            Image::Exists { data, .. } => Some(data.height as usize),
+            Image::Exists { height, .. } => Some(*height as usize),
             Image::Unknown => None,
         }
     }
@@ -333,16 +335,22 @@ impl Draw for Image {
         drawer: &mut Drawer,
     ) -> pangocairo::cairo::Result<()> {
         let Image::Exists {
-            data,
+            file_descriptor,
+            width,
+            height,
+            has_alpha,
             rounding_radius,
+            ..
         } = self
         else {
             return Ok(());
         };
-        debug_assert!(data.has_alpha);
+        debug_assert!(has_alpha);
 
-        let mut storage_cursor = std::io::Cursor::new(&data.data);
-        let source_surface = match ImageSurface::create_from_png(&mut storage_cursor) {
+        let mut file = file_descriptor.get_file();
+        file.seek(std::io::SeekFrom::Start(0))
+            .expect("The temp file should be seekable");
+        let source_surface = match ImageSurface::create_from_png(&mut *file) {
             Ok(source_surface) => source_surface,
             Err(err) => match err {
                 cairo::IoError::Cairo(error) => Err(error)?,
@@ -355,7 +363,7 @@ impl Draw for Image {
 
         drawer.context.make_rounding(
             (*offset).into(),
-            RectSize::new(data.width as f64, data.height as f64),
+            RectSize::new(*width as f64, *height as f64),
             *rounding_radius,
             *rounding_radius,
         );

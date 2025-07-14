@@ -42,6 +42,7 @@ log = "0.4.22"
 zbus = "4.4.0"
 derive_more = { version = "1.0.0", features = ["display"] }
 humantime = "2.1.0"
+tempfile = "3.12.0"
 
 config.path = "crates/config"
 render.path = "crates/render"
@@ -58,3 +59,4 @@ anyhow.workspace = true
 tokio.workspace = true
 clap = { version = "4.5.7", features = ["derive"] }
 env_logger = "0.11.5"
+

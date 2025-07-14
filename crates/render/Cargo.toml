@@ -9,6 +9,7 @@ config.workspace = true
 dbus.workspace = true
 shared.workspace = true
 macros.workspace = true
+tempfile.workspace = true
 
 log.workspace = true
 anyhow.workspace = true
