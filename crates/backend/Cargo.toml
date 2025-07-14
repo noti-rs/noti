@@ -17,8 +17,8 @@ log.workspace = true
 humantime.workspace = true
 tempfile.workspace = true
 
-wayland-client = "0.31.5"
-wayland-protocols = { version = "0.32.3", features = ["client", "wayland-client", "staging", "unstable"] }
-wayland-protocols-wlr = { version = "0.3.3", features = ["client", "wayland-client"] }
+wayland-client = "0.31.10"
+wayland-protocols = { version = "0.32.8", features = ["client", "wayland-client", "staging", "unstable"] }
+wayland-protocols-wlr = { version = "0.3.8", features = ["client", "wayland-client"] }
 indexmap = "2.4.0"
 chrono = "0.4.39"
