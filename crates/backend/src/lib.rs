@@ -113,6 +113,16 @@ pub fn run(mut config: Config) -> anyhow::Result<()> {
             async_io::block_on(server.emit_signal(signal))?;
         }
 
+        // SAFETY: malloc_trim is very safe syscalls and fails only if there is not libc library
+        // and can be turned off with remove feature.
+        //
+        // The main purpose of this allocator is return all memory to OS becasue the application
+        // mostly in idle state and it doesn't need any memory at most of time.
+        #[cfg(feature = "libc_alloc")]
+        unsafe {
+            libc::malloc_trim(0);
+        }
+
         std::thread::sleep(Duration::from_millis(50));
         std::hint::spin_loop();
     }
