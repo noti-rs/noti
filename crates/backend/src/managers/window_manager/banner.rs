@@ -1,12 +1,9 @@
-use std::{path::PathBuf, time};
-
 use config::{
     display::{Border, DisplayConfig},
     Config,
 };
 use dbus::notification::Notification;
 use log::{debug, error, trace};
-
 use render::{
     drawer::Drawer,
     types::RectSize,
@@ -17,10 +14,11 @@ use render::{
     PangoContext,
 };
 use shared::cached_data::CachedData;
+use std::{path::PathBuf, time};
 
-use crate::cache::CachedLayout;
+use super::CachedLayout;
 
-pub struct Banner {
+pub(super) struct Banner {
     data: Notification,
     layout: Option<Widget>,
     created_at: time::Instant,
@@ -29,7 +27,7 @@ pub struct Banner {
 }
 
 impl Banner {
-    pub(crate) fn init(notification: Notification) -> Self {
+    pub(super) fn init(notification: Notification) -> Self {
         debug!("Banner (id={}): Created", notification.id);
 
         Self {
@@ -41,26 +39,26 @@ impl Banner {
         }
     }
 
-    pub(crate) fn notification(&self) -> &Notification {
+    pub(super) fn notification(&self) -> &Notification {
         &self.data
     }
 
-    pub(crate) fn destroy_and_get_notification(self) -> Notification {
+    pub(super) fn destroy_and_get_notification(self) -> Notification {
         debug!("Banner (id={}): Destroyed", self.data.id);
         self.data
     }
 
-    pub(crate) fn created_at(&self) -> &time::Instant {
+    pub(super) fn created_at(&self) -> &time::Instant {
         &self.created_at
     }
 
-    pub(crate) fn reset_timeout(&mut self) {
+    pub(super) fn reset_timeout(&mut self) {
         self.created_at = time::Instant::now();
 
         trace!("Banner (id={}): Timeout reset", self.data.id);
     }
 
-    pub(crate) fn update_data(&mut self, notification: Notification) {
+    pub(super) fn update_data(&mut self, notification: Notification) {
         self.data = notification;
         self.created_at = time::Instant::now();
         debug!(
@@ -71,14 +69,14 @@ impl Banner {
 
     // TODO: use it for resize
     #[allow(unused)]
-    pub(crate) fn width(&self) -> usize {
+    pub(super) fn width(&self) -> usize {
         self.layout
             .as_ref()
             .map(|layout| layout.width())
             .unwrap_or_default()
     }
 
-    pub(crate) fn height(&self) -> usize {
+    pub(super) fn height(&self) -> usize {
         self.layout
             .as_ref()
             .map(|layout| layout.height())
@@ -86,21 +84,21 @@ impl Banner {
     }
 
     #[inline]
-    pub(crate) fn framebuffer(&self) -> &[u8] {
+    pub(super) fn framebuffer(&self) -> &[u8] {
         &self.framebuffer
     }
 
     #[inline]
-    pub(crate) fn take_framebuffer(&mut self) -> Vec<u8> {
+    pub(super) fn take_framebuffer(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.framebuffer)
     }
 
     #[inline]
-    pub(crate) fn set_framebuffer(&mut self, framebuffer: Vec<u8>) {
+    pub(super) fn set_framebuffer(&mut self, framebuffer: Vec<u8>) {
         self.framebuffer = framebuffer
     }
 
-    pub(crate) fn draw(
+    pub(super) fn draw(
         &mut self,
         pango_context: &PangoContext,
         config: &Config,
@@ -200,7 +198,7 @@ impl<'a> From<&'a Banner> for &'a Notification {
     }
 }
 
-pub(crate) enum DrawState {
+pub(super) enum DrawState {
     Success,
     Failure,
 }

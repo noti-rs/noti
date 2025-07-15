@@ -1,22 +1,22 @@
-use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
-
+use crate::{dispatcher::Dispatcher, error::Error};
+use cache::CachedLayout;
+use config::Config;
+use dbus::{actions::Signal, notification::Notification};
 use log::debug;
 use render::PangoContext;
 use shared::cached_data::CachedData;
-use wayland_client::protocol::wl_compositor::WlCompositor;
-use wayland_client::protocol::wl_seat::WlSeat;
-use wayland_client::protocol::wl_shm::WlShm;
-use wayland_client::Connection;
+use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
+use wayland_client::{
+    protocol::{wl_compositor::WlCompositor, wl_seat::WlSeat, wl_shm::WlShm},
+    Connection,
+};
 use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
+use window::Window;
 
-use crate::dispatcher::Dispatcher;
-use crate::{cache::CachedLayout, error::Error};
-
-use config::Config;
-use dbus::{actions::Signal, notification::Notification};
-
-use super::window::Window;
+mod banner;
+mod cache;
+mod window;
 
 pub(crate) struct WindowManager {
     window: Option<Window>,

@@ -1,11 +1,11 @@
-use crate::{
-    dispatcher::Dispatcher,
-    idle_notifier::{IdleNotifier, IdleState},
-};
+use crate::dispatcher::Dispatcher;
 use config::Config;
+use idle_notifier::{IdleNotifier, IdleState};
 use log::debug;
 use wayland_client::{protocol::wl_seat::WlSeat, Connection, EventQueue};
 use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
+
+mod idle_notifier;
 
 pub struct IdleManager {
     event_queue: EventQueue<IdleNotifier>,
