@@ -4,6 +4,10 @@ authors.workspace = true
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["libc_alloc"]
+libc_alloc = ["dep:libc"]
+
 [dependencies]
 dbus.workspace = true
 config.workspace = true
@@ -25,3 +29,4 @@ wayland-protocols = { version = "0.32.8", features = ["client", "wayland-client"
 wayland-protocols-wlr = { version = "0.3.8", features = ["client", "wayland-client"] }
 indexmap = "2.4.0"
 chrono = "0.4.39"
+libc = { version = "0.2.174", optional = true }

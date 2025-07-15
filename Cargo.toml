@@ -14,6 +14,10 @@ panic = "abort"
 debug = "none"
 debug-assertions = false
 
+[features]
+default = ["libc_alloc"]
+libc_alloc = ["dep:libc_alloc"]
+
 [[bin]]
 path = "crates/app/main.rs"
 name = "noti"
@@ -61,4 +65,4 @@ async-io.workspace = true
 async-channel.workspace = true
 clap = { version = "4.5.7", features = ["derive"] }
 env_logger = "0.11.5"
-
+libc_alloc = { version = "1.0.7", optional = true }
