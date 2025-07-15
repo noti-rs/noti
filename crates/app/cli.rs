@@ -180,26 +180,28 @@ pub struct SendCommand {
 }
 
 impl Args {
-    pub async fn process(self) -> anyhow::Result<()> {
+    pub fn process(self) -> anyhow::Result<()> {
         if let Args::Run(ref args) = self {
-            run(args).await?
+            run(args)?
         }
 
-        let noti = client::NotiClient::init().await?;
+        async_io::block_on(async {
+            let noti = client::NotiClient::init().await?;
 
-        match self {
-            Args::Run { .. } => unreachable!(),
-            Args::Send(args) => send(noti, *args).await?,
-            Args::ServerInfo => server_info(noti).await?,
-        }
+            match self {
+                Args::Run { .. } => unreachable!(),
+                Args::Send(args) => send(noti, *args).await?,
+                Args::ServerInfo => server_info(noti).await?,
+            }
 
-        Ok(())
+            Ok::<(), anyhow::Error>(())
+        })
     }
 }
 
-async fn run(args: &RunCommand) -> anyhow::Result<()> {
+fn run(args: &RunCommand) -> anyhow::Result<()> {
     let config = Config::init(args.config.as_deref());
-    backend::run(config).await
+    backend::run(config)
 }
 
 async fn send(noti: client::NotiClient<'_>, args: SendCommand) -> anyhow::Result<()> {

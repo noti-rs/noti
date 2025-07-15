@@ -1,4 +1,5 @@
 use anyhow::bail;
+use async_channel::unbounded;
 use config::Config;
 use dbus::{
     actions::{Action, ClosingReason, Signal},
@@ -12,7 +13,6 @@ use log::{debug, error, info, warn};
 use managers::{idle_manager::IdleManager, window_manager::WindowManager};
 use scheduler::Scheduler;
 use shared::file_watcher::FileState;
-use tokio::sync::mpsc::unbounded_channel;
 use std::time::Duration;
 use wayland_client::{
     delegate_noop,
@@ -32,11 +32,12 @@ mod error;
 mod managers;
 mod scheduler;
 
-pub async fn run(mut config: Config) -> anyhow::Result<()> {
-    let (sender, mut receiver) = unbounded_channel();
+pub fn run(mut config: Config) -> anyhow::Result<()> {
+    let (sender, receiver) = unbounded();
 
-    let server = Server::init(sender).await?;
-    info!("Server: initialized");
+    let server = async_io::block_on(Server::init(sender))?;
+    info!("Backend: Server initialized");
+
     let mut backend = Backend::init(&config)?;
     info!("Backend: initialized");
 
@@ -109,10 +110,10 @@ pub async fn run(mut config: Config) -> anyhow::Result<()> {
                 continue;
             }
             debug_signal(&signal);
-            server.emit_signal(signal).await?;
+            async_io::block_on(server.emit_signal(signal))?;
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        std::thread::sleep(Duration::from_millis(50));
         std::hint::spin_loop();
     }
 }
