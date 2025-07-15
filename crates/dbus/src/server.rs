@@ -10,12 +10,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use async_channel::Sender;
 use log::debug;
 use zbus::{
     connection, fdo::Result, interface, object_server::SignalContext, zvariant::Value, Connection,
 };
-
-use tokio::sync::mpsc::UnboundedSender;
 
 static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -27,7 +26,7 @@ impl Server {
     const NOTIFICATIONS_PATH: &'static str = "/org/freedesktop/Notifications";
     const NOTIFICATIONS_NAME: &'static str = "org.freedesktop.Notifications";
 
-    pub async fn init(sender: UnboundedSender<Action>) -> anyhow::Result<Self> {
+    pub async fn init(sender: Sender<Action>) -> anyhow::Result<Self> {
         debug!("D-Bus Server: Initializing");
 
         let handler = Handler { sender };
@@ -68,7 +67,7 @@ impl Server {
 }
 
 struct Handler {
-    sender: UnboundedSender<Action>,
+    sender: Sender<Action>,
 }
 
 #[interface(name = "org.freedesktop.Notifications")]
@@ -121,9 +120,13 @@ impl Handler {
 
             self.sender
                 .send(Action::Schedule(scheduled_notification))
+                .await
                 .unwrap();
         } else {
-            self.sender.send(Action::Show(notification.into())).unwrap();
+            self.sender
+                .send(Action::Show(notification.into()))
+                .await
+                .unwrap();
         }
 
         Ok(id)
@@ -136,7 +139,7 @@ impl Handler {
     ) -> Result<()> {
         debug!("D-Bus Server: Called method 'CloseNotification' by id {id}");
         Self::notification_closed(&ctxt, id, ClosingReason::CallCloseNotification.into()).await?;
-        self.sender.send(Action::Close(Some(id))).unwrap();
+        self.sender.send(Action::Close(Some(id))).await.unwrap();
 
         Ok(())
     }
@@ -149,7 +152,7 @@ impl Handler {
         debug!("D-Bus Server: Called method 'CloseLastNotification'");
         //WARNING: temporary id value
         Self::notification_closed(&ctxt, 0, ClosingReason::CallCloseNotification.into()).await?;
-        self.sender.send(Action::Close(None)).unwrap();
+        self.sender.send(Action::Close(None)).await.unwrap();
 
         Ok(())
     }

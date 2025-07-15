@@ -21,7 +21,7 @@ mod window;
 pub(crate) struct WindowManager {
     window: Option<Window>,
 
-    pango_context: Rc<RefCell<PangoContext>>,
+    pango_context: Option<Rc<RefCell<PangoContext>>>,
     cached_layouts: CachedData<PathBuf, CachedLayout>,
 
     signals: Vec<Signal>,
@@ -32,8 +32,6 @@ pub(crate) struct WindowManager {
 
 impl WindowManager {
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
-        let pango_context =
-            Rc::new(PangoContext::from_font_family(&config.general().font.name).into());
         let cached_layouts = config
             .displays()
             .filter_map(|display| match &display.layout {
@@ -45,7 +43,7 @@ impl WindowManager {
         let wm = Self {
             window: None,
 
-            pango_context,
+            pango_context: None,
             cached_layouts,
 
             signals: vec![],
@@ -81,9 +79,11 @@ impl WindowManager {
                 .collect(),
         );
 
-        self.pango_context
-            .borrow_mut()
-            .update_font_family(&config.general().font.name);
+        if let Some(pango_context) = self.pango_context.as_ref() {
+            pango_context
+                .borrow_mut()
+                .update_font_family(&config.general().font.name);
+        }
 
         let mut unrendered_notifcations = Ok(());
         if let Some(window) = self.window.as_mut() {
@@ -285,10 +285,14 @@ impl WindowManager {
             + AsRef<ZwlrLayerShellV1>,
     {
         if self.window.is_none() {
+            let pango_context = Rc::new(RefCell::new(PangoContext::from_font_family(
+                &config.general().font.name,
+            )));
+            self.pango_context = Some(pango_context.clone());
             self.window = Some(Window::init(
                 wayland_connection,
                 protocols,
-                self.pango_context.clone(),
+                pango_context,
                 config,
             )?);
 
@@ -302,6 +306,7 @@ impl WindowManager {
 
     fn deinit_window(&mut self) -> anyhow::Result<()> {
         if self.window.as_mut().is_some() {
+            self.pango_context = None;
             self.window = None;
             debug!("Window Manager: Closed window");
         }

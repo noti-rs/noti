@@ -8,6 +8,6 @@ edition.workspace = true
 dbus.workspace = true
 
 anyhow.workspace = true
-tokio.workspace = true
+async-io.workspace = true
 log.workspace = true
 zbus.workspace = true

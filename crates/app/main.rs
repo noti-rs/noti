@@ -4,12 +4,11 @@ use clap::Parser;
 
 use cli::Args;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     setup_logger();
 
     let args = Args::parse();
-    args.process().await
+    args.process()
 }
 
 fn setup_logger() {
