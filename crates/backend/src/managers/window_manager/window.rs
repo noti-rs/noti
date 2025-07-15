@@ -1,5 +1,16 @@
+use super::{
+    banner::{Banner, DrawState},
+    CachedLayout,
+};
+use crate::dispatcher::Dispatcher;
+use config::{self, Config};
+use dbus::{
+    actions::Signal,
+    notification::{self, Notification},
+};
 use indexmap::{indexmap, IndexMap};
 use log::{debug, error, trace};
+use render::{types::RectSize, PangoContext};
 use shared::cached_data::CachedData;
 use std::{
     cell::RefCell,
@@ -36,19 +47,6 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{self, ZwlrLayerShellV1},
     zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
 };
-
-use config::{self, Config};
-use dbus::{
-    actions::Signal,
-    notification::{self, Notification},
-};
-
-use crate::{
-    banner::{Banner, DrawState},
-    cache::CachedLayout,
-    dispatcher::Dispatcher,
-};
-use render::{types::RectSize, PangoContext};
 
 pub(super) struct Window {
     banners: IndexMap<u32, Banner>,
@@ -245,10 +243,10 @@ impl Window {
         for notification in notifications {
             let mut banner = Banner::init(notification);
             match banner.draw(&self.pango_context.borrow(), config, cached_layouts) {
-                crate::banner::DrawState::Success => {
+                DrawState::Success => {
                     self.banners.insert(banner.notification().id, banner);
                 }
-                crate::banner::DrawState::Failure => {
+                DrawState::Failure => {
                     failed_to_draw_banners.push(banner.destroy_and_get_notification());
                 }
             }
