@@ -21,9 +21,8 @@ async-channel.workspace = true
 log.workspace = true
 humantime.workspace = true
 tempfile.workspace = true
+derive_builder.workspace = true
 
-# TODO: maybe use workspace for single version (it's exists for render crate)
-derive_builder = "0.20.0"
 wayland-client = "0.31.10"
 wayland-protocols = { version = "0.32.8", features = ["client", "wayland-client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3.8", features = ["client", "wayland-client"] }

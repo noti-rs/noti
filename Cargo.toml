@@ -42,12 +42,13 @@ edition = "2021"
 [workspace.dependencies]
 anyhow = "1.0.86"
 log = "0.4.22"
-zbus = "4.4.0"
+zbus = "5.8.0"
 async-io = "2.4.1"
 async-channel = "2.5.0"
-derive_more = { version = "1.0.0", features = ["display"] }
+derive_more = { version = "2.0.1", features = ["display"] }
 humantime = "2.1.0"
 tempfile = "3.12.0"
+derive_builder = "0.20.0"
 
 config.path = "crates/config"
 render.path = "crates/render"

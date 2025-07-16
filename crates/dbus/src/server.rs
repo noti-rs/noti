@@ -13,7 +13,7 @@ use std::{
 use async_channel::Sender;
 use log::debug;
 use zbus::{
-    connection, fdo::Result, interface, object_server::SignalContext, zvariant::Value, Connection,
+    connection, fdo::Result, interface, object_server::SignalEmitter, zvariant::Value, Connection,
 };
 
 static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
@@ -45,7 +45,7 @@ impl Server {
     pub async fn emit_signal(&self, signal: Signal) -> zbus::Result<()> {
         debug!("D-Bus Server: Emitting signal {signal}");
 
-        let ctxt = SignalContext::new(&self.connection, Self::NOTIFICATIONS_PATH)?;
+        let ctxt = SignalEmitter::new(&self.connection, Self::NOTIFICATIONS_PATH)?;
         match signal {
             Signal::NotificationClosed {
                 notification_id,
@@ -135,7 +135,7 @@ impl Handler {
     async fn close_notification(
         &self,
         id: u32,
-        #[zbus(signal_context)] ctxt: SignalContext<'_>,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
     ) -> Result<()> {
         debug!("D-Bus Server: Called method 'CloseNotification' by id {id}");
         Self::notification_closed(&ctxt, id, ClosingReason::CallCloseNotification.into()).await?;
@@ -147,7 +147,7 @@ impl Handler {
     // NOTE: temporary
     async fn close_last_notification(
         &self,
-        #[zbus(signal_context)] ctxt: SignalContext<'_>,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
     ) -> Result<()> {
         debug!("D-Bus Server: Called method 'CloseLastNotification'");
         //WARNING: temporary id value
@@ -187,14 +187,14 @@ impl Handler {
 
     #[zbus(signal)]
     async fn action_invoked(
-        ctxt: &SignalContext<'_>,
+        ctxt: &SignalEmitter<'_>,
         id: u32,
         action_key: &str,
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
     async fn notification_closed(
-        ctxt: &SignalContext<'_>,
+        ctxt: &SignalEmitter<'_>,
         id: u32,
         reason: u32,
     ) -> zbus::Result<()>;
