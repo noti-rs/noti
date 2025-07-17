@@ -170,10 +170,7 @@ impl InotifySpecialization for Inotify {
             .watches()
             .add(file_path.as_path(), DEFAULT_MASKS)
             .unwrap_or_else(|_| {
-                panic!(
-                    "Failed to create watch descriptor for config path {:?}",
-                    file_path
-                )
+                panic!("Failed to create watch descriptor for config path {file_path:?}")
             });
 
         FileWd::from_wd(new_wd, file_path.path_buf.clone())

@@ -84,10 +84,7 @@ impl Structure {
                 if *r#type != field.ty.to_token_stream().to_string() {
                     return Err(syn::Error::new(
                         field.ty.span(),
-                        format!(
-                            "Expected the same types of fields with same attribute value 'aliases' - {}!", 
-                            alias
-                        )
+                        format!("Expected the same types of fields with same attribute value 'aliases' - {alias}!")
                     ));
                 }
             }

@@ -175,16 +175,12 @@ impl Image {
             Err(err) => {
                 match err {
                     resvg::usvg::Error::MalformedGZip => {
-                        warn!(
-                            "Malformed gzip format of SVG image in path: {:?}",
-                            image_path
-                        )
+                        warn!("Malformed gzip format of SVG image in path: {image_path:?}")
                     }
                     resvg::usvg::Error::NotAnUtf8Str => warn!(
-                        "The SVG image file contains non-UTF-8 string in path: {:?}",
-                        image_path
+                        "The SVG image file contains non-UTF-8 string in path: {image_path:?}"
                     ),
-                    _ => warn!("Something wrong with SVG image in path: {:?}", image_path),
+                    _ => warn!("Something wrong with SVG image in path: {image_path:?}"),
                 }
                 return Image::Unknown;
             }
@@ -236,16 +232,12 @@ impl Image {
     fn print_readable_fs_error(error: std::io::Error, image_path: &std::path::Path) {
         match error.kind() {
             std::io::ErrorKind::NotFound => {
-                warn!("Not found SVG image in path: {:?}", image_path)
+                warn!("Not found SVG image in path: {image_path:?}")
             }
-            std::io::ErrorKind::PermissionDenied => warn!(
-                "Permission to read SVG image in path is denied: {:?}",
-                image_path
-            ),
-            _ => warn!(
-                "Something wrong happened during reading SVG image in path: {:?}",
-                image_path
-            ),
+            std::io::ErrorKind::PermissionDenied => {
+                warn!("Permission to read SVG image in path is denied: {image_path:?}")
+            }
+            _ => warn!("Something wrong happened during reading SVG image in path: {image_path:?}"),
         }
     }
 
