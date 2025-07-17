@@ -24,7 +24,12 @@ The best way to get started with **Noti** is the [book](https://noti-rs.github.i
 
 ## :inbox_tray: Installation
 
-### 1. Install via Cargo (Recommended)
+### Prerequisites
+
+- Rust and Cargo installed ([rust-lang.org](https://www.rust-lang.org/tools/install))
+- For extended installation: Nightly Rust (`rustup toolchain intall nightly`)
+
+### Basic: Install via Cargo
 
 ```bash
 # Install directly from GitHub
@@ -36,19 +41,14 @@ cd noti
 cargo install --path .
 ```
 
-### 2. Build from Source
+### Extended: Minimal binary size (Nightly Only)
 
 ```bash
-# Clone the repository
-git clone https://github.com/noti-rs/noti.git
-cd noti
-
-# Build in release mode
-cargo build --release
-
-# Install the binary
-cargo install --path .
+RUSTFLAGS="-Zlocation-detail=none -Zfmt-debug=none" cargo +nightly install -Z build-std=std,panic_abort -Z build-std-features="optimize_for_size" --target x86_64-unknown-linux-gnu --git https://github.com/noti-rs/noti
 ```
+
+> [!IMPORTANT]
+> The application uses `libc` allocator as default to minimize heap usage in runtime. You can turn off this option using `--no-default-features` flag.
 
 ## :hammer_and_wrench: Configuration
 
