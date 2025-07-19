@@ -1,4 +1,4 @@
-use crate::{dispatcher::Dispatcher, error::Error};
+use crate::error::Error;
 use cache::CachedLayout;
 use config::Config;
 use dbus::{actions::Signal, notification::Notification};
@@ -14,7 +14,8 @@ use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1:
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 use window::Window;
 
-mod banner;
+mod banner_stack;
+mod buffer;
 mod cache;
 mod window;
 
@@ -85,10 +86,9 @@ impl WindowManager {
                 .update_font_family(&config.general().font.name);
         }
 
-        let mut unrendered_notifcations = Ok(());
         if let Some(window) = self.window.as_mut() {
             window.reconfigure(config);
-            unrendered_notifcations = window.redraw(config, &self.cached_layouts);
+            window.draw(config, &self.cached_layouts)?;
             window.frame();
             window.commit();
         }
@@ -96,7 +96,7 @@ impl WindowManager {
         debug!("Window Manager: Updated the windows by updated config");
 
         self.sync()?;
-        Ok(unrendered_notifcations?)
+        Ok(())
     }
 
     pub(crate) fn create_notification(&mut self, notification: Box<Notification>) {
@@ -139,7 +139,6 @@ impl WindowManager {
     }
 
     fn process_notification_queue(&mut self, config: &Config) -> Result<(), Error> {
-        let mut unrendered_notifications = Ok(());
         if let Some(window) = self.window.as_mut() {
             let mut notifications_limit = config.general().limit as usize;
 
@@ -147,11 +146,7 @@ impl WindowManager {
                 notifications_limit = usize::MAX
             }
 
-            window.replace_by_indices(
-                &mut self.notification_queue,
-                config,
-                &self.cached_layouts,
-            )?;
+            window.replace_by_indices(&mut self.notification_queue, config);
 
             let available_slots = notifications_limit.saturating_sub(window.total_banners());
             let notifications_to_display: Vec<_> = self
@@ -159,14 +154,13 @@ impl WindowManager {
                 .drain(..available_slots.min(self.notification_queue.len()))
                 .collect();
 
-            unrendered_notifications =
-                window.update_banners(notifications_to_display, config, &self.cached_layouts);
+            window.add_banners(notifications_to_display, config);
 
             self.update_window(config)?;
             self.sync()?;
         }
 
-        Ok(unrendered_notifications?)
+        Ok(())
     }
 
     pub(crate) fn handle_close_notifications(&mut self, config: &Config) -> Result<(), Error> {
@@ -226,12 +220,11 @@ impl WindowManager {
         if let Some(window) = self.window.as_mut() {
             window.handle_hover(config);
 
-            let signals = window.handle_click(config);
-            if signals.is_empty() {
+            let Some(signal) = window.handle_click(config) else {
                 return Ok(());
-            }
+            };
 
-            self.signals.extend(signals);
+            self.signals.push(signal);
             self.process_notification_queue(config)?;
         }
 
@@ -246,13 +239,13 @@ impl WindowManager {
         Ok(())
     }
 
-    fn update_window(&mut self, config: &Config) -> anyhow::Result<()> {
+    fn update_window(&mut self, config: &Config) -> Result<(), Error> {
         if let Some(window) = self.window.as_mut() {
             if window.is_empty() {
-                return self.deinit_window();
+                return Ok(self.deinit_window()?);
             }
 
-            window.draw(config);
+            window.draw(config, &self.cached_layouts)?;
             window.frame();
             window.commit();
 
