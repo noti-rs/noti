@@ -21,7 +21,10 @@ impl CachedLayout {
         match filetype::parse_layout(path) {
             Ok(widget) => Some(widget),
             Err(err) => {
-                warn!("The layout by path {path:?} is not valid. Error: {err}");
+                warn!(
+                    "The layout by path {path} is not valid. Error: {err}",
+                    path = path.display()
+                );
                 None
             }
         }

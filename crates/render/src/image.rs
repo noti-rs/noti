@@ -111,7 +111,11 @@ impl Image {
         let format = match image::guess_format(&data) {
             Ok(format) => format,
             Err(err) => {
-                warn!("Cannot guess the format of image at {image_path:?}. Error: {err}. Maybe it's SVG, trying to parse.");
+                warn!(
+                    "Cannot guess the format of image at {image_path}. \
+                    Error: {err}. Maybe it's SVG, trying to parse.",
+                    image_path = image_path.display()
+                );
                 return Self::from_svg(image_path, image_property, max_size);
             }
         };
@@ -119,7 +123,10 @@ impl Image {
         let image = match image::load_from_memory_with_format(&data, format) {
             Ok(image) => image,
             Err(err) => {
-                error!("Cannot laod the image at {image_path:?}. Error: {err}");
+                error!(
+                    "Cannot load the image at {image_path}. Error: {err}",
+                    image_path = image_path.display()
+                );
                 return Image::Unknown;
             }
         };
@@ -173,14 +180,15 @@ impl Image {
         let tree = match resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()) {
             Ok(tree) => tree,
             Err(err) => {
+                let image_path = image_path.display();
                 match err {
                     resvg::usvg::Error::MalformedGZip => {
-                        warn!("Malformed gzip format of SVG image in path: {image_path:?}")
+                        warn!("Malformed gzip format of SVG image in path: {image_path}")
                     }
-                    resvg::usvg::Error::NotAnUtf8Str => warn!(
-                        "The SVG image file contains non-UTF-8 string in path: {image_path:?}"
-                    ),
-                    _ => warn!("Something wrong with SVG image in path: {image_path:?}"),
+                    resvg::usvg::Error::NotAnUtf8Str => {
+                        warn!("The SVG image file contains non-UTF-8 string in path: {image_path}")
+                    }
+                    _ => warn!("Something wrong with SVG image in path: {image_path}"),
                 }
                 return Image::Unknown;
             }
@@ -214,7 +222,10 @@ impl Image {
             &mut pixmap.as_mut(),
         );
 
-        debug!("Image: Created image from svg by path {image_path:?}");
+        debug!(
+            "Image: Created image from svg by path {image_path}",
+            image_path = image_path.display()
+        );
 
         let mut file = tempfile::tempfile().expect("The temp file must be created");
         file.write_all(&pixmap.encode_png().unwrap())
@@ -230,14 +241,16 @@ impl Image {
     }
 
     fn print_readable_fs_error(error: std::io::Error, image_path: &std::path::Path) {
+        let image_path = image_path.display();
+
         match error.kind() {
             std::io::ErrorKind::NotFound => {
-                warn!("Not found SVG image in path: {image_path:?}")
+                warn!("Not found SVG image in path: {image_path}")
             }
             std::io::ErrorKind::PermissionDenied => {
-                warn!("Permission to read SVG image in path is denied: {image_path:?}")
+                warn!("Permission to read SVG image in path is denied: {image_path}")
             }
-            _ => warn!("Something wrong happened during reading SVG image in path: {image_path:?}"),
+            _ => warn!("Something wrong happened during reading SVG image in path: {image_path}"),
         }
     }
 

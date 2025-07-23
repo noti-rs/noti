@@ -227,10 +227,11 @@ impl<'a> Parser<'a> {
         } else {
             let range = closing_tag.byte_pos_begin..closing_tag.byte_pos_end;
             warn!(
-                "Unexpected closing tag {} at {:?} in text: {}",
-                &self.input[range.clone()],
-                range,
-                self.input
+                "Unexpected closing tag {tag} at {start}..{end} in text: {input}",
+                tag = &self.input[range.clone()],
+                start = range.start,
+                end = range.end,
+                input = self.input
             );
         }
     }
