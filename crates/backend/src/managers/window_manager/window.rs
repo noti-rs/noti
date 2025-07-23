@@ -1,30 +1,15 @@
 use super::{
-    banner::{Banner, DrawState},
+    banner_stack::{Banner, BannerStack, DrawState},
+    buffer::DualSlotedBuffer,
     CachedLayout,
 };
-use crate::dispatcher::Dispatcher;
+use crate::{dispatcher::Dispatcher, Error};
 use config::{self, Config};
-use dbus::{
-    actions::Signal,
-    notification::{self, Notification},
-};
-use indexmap::{indexmap, IndexMap};
+use dbus::{actions::Signal, notification::Notification};
 use log::{debug, error, trace};
 use render::{types::RectSize, PangoContext};
 use shared::cached_data::CachedData;
-use std::{
-    cell::RefCell,
-    cmp::Ordering,
-    collections::{HashMap, VecDeque},
-    fs::File,
-    hash::Hash,
-    os::{
-        fd::{AsFd, BorrowedFd},
-        unix::fs::FileExt,
-    },
-    path::PathBuf,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
 use wayland_client::{
     delegate_noop,
     protocol::{
@@ -33,7 +18,7 @@ use wayland_client::{
         wl_compositor::WlCompositor,
         wl_pointer::{self, ButtonState, WlPointer},
         wl_seat::WlSeat,
-        wl_shm::{self, WlShm},
+        wl_shm::WlShm,
         wl_shm_pool::WlShmPool,
         wl_surface::WlSurface,
     },
@@ -49,14 +34,13 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 
 pub(super) struct Window {
-    banners: IndexMap<u32, Banner>,
+    banner_stack: BannerStack<u32>,
     pango_context: Rc<RefCell<PangoContext>>,
 
     event_queue: EventQueue<WindowState>,
     state: WindowState,
 
-    sloted_buffer: SlotedBuffer<u32>,
-    wl_buffer: Option<WlBuffer>,
+    buffers: DualSlotedBuffer<u32>,
 }
 
 pub(super) struct WindowState {
@@ -65,7 +49,6 @@ pub(super) struct WindowState {
 
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
-    shm_pool: WlShmPool,
 
     pointer: WlPointer,
     cursor_device: WpCursorShapeDeviceV1,
@@ -102,8 +85,6 @@ impl Window {
 
         let (surface, layer_surface) = Self::make_surface(protocols, &event_queue.handle());
         let (pointer, cursor_device) = Self::make_pointer(protocols, &event_queue.handle());
-        let (sloted_buffer, shm_pool) =
-            Self::make_buffer(protocols, &event_queue.handle(), &rect_size);
 
         let anchored_margin = Self::make_anchored_margin(config);
         anchored_margin.relocate_layer_surface(&layer_surface);
@@ -117,7 +98,6 @@ impl Window {
 
             surface,
             layer_surface,
-            shm_pool,
 
             pointer_state: Default::default(),
             cursor_device,
@@ -126,6 +106,9 @@ impl Window {
             configuration_state: ConfigurationState::NotConfiured,
         };
 
+        let mut buffers = DualSlotedBuffer::init(protocols, wayland_connection, &rect_size);
+        buffers.dispatch()?;
+
         while let ConfigurationState::NotConfiured = state.configuration_state {
             event_queue.blocking_dispatch(&mut state)?;
         }
@@ -133,14 +116,13 @@ impl Window {
         debug!("Window: Initialized");
 
         Ok(Self {
-            banners: indexmap! {},
+            banner_stack: BannerStack::new(),
             pango_context,
 
             event_queue,
             state,
 
-            sloted_buffer,
-            wl_buffer: None,
+            buffers,
         })
     }
 
@@ -156,7 +138,7 @@ impl Window {
             &surface,
             None,
             zwlr_layer_shell_v1::Layer::Overlay,
-            "noti".to_string(),
+            env!("APP_NAME").to_string(),
             qhandle,
             (),
         );
@@ -187,31 +169,9 @@ impl Window {
         (pointer, cursor_device)
     }
 
-    fn make_buffer<P>(
-        protocols: &P,
-        qhandle: &QueueHandle<WindowState>,
-        rect_size: &RectSize<usize>,
-    ) -> (SlotedBuffer<u32>, WlShmPool)
-    where
-        P: AsRef<WlShm>,
-    {
-        let size = rect_size.area() * 4;
-        let mut sloted_buffer = SlotedBuffer::new();
-        sloted_buffer.push_without_slot(&vec![0; size]);
-        let shm_pool = <P as AsRef<WlShm>>::as_ref(protocols).create_pool(
-            sloted_buffer.buffer.as_fd(),
-            size as i32,
-            qhandle,
-            (),
-        );
-        (sloted_buffer, shm_pool)
-    }
-
     pub(super) fn reconfigure(&mut self, config: &Config) {
         self.relocate(config.general().offset, &config.general().anchor);
-        self.banners
-            .sort_by_values(config.general().sorting.get_cmp::<Banner>());
-        debug!("Window: Re-sorted the notification banners");
+        self.banner_stack.configure(config);
 
         debug!("Window: Reconfigured by updated config");
     }
@@ -226,142 +186,40 @@ impl Window {
     }
 
     pub(super) fn total_banners(&self) -> usize {
-        self.banners.len()
+        self.banner_stack.len()
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.banners.is_empty()
+        self.banner_stack.is_empty()
     }
 
-    pub(super) fn update_banners(
-        &mut self,
-        notifications: Vec<Notification>,
-        config: &Config,
-        cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) -> Result<(), Vec<Notification>> {
-        let mut failed_to_draw_banners = vec![];
-        for notification in notifications {
-            let mut banner = Banner::init(notification);
-            match banner.draw(&self.pango_context.borrow(), config, cached_layouts) {
-                DrawState::Success => {
-                    self.banners.insert(banner.notification().id, banner);
-                }
-                DrawState::Failure => {
-                    failed_to_draw_banners.push(banner.destroy_and_get_notification());
-                }
-            }
-        }
-
-        self.banners
-            .sort_by_values(config.general().sorting.get_cmp::<Banner>());
-        debug!("Window: Sorted the notification banners");
-
-        debug!("Window: Completed update the notification banners");
-
-        if failed_to_draw_banners.is_empty() {
-            Ok(())
-        } else {
-            Err(failed_to_draw_banners)
-        }
+    pub(super) fn add_banners(&mut self, notifications: Vec<Notification>, config: &Config) {
+        self.banner_stack
+            .extend_from(notifications.into_iter(), config);
     }
 
     pub(super) fn replace_by_indices(
         &mut self,
         notifications: &mut VecDeque<Notification>,
         config: &Config,
-        cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) -> Result<(), Vec<Notification>> {
-        let matching_indices: Vec<usize> = notifications
-            .iter()
-            .enumerate()
-            .filter_map(|(i, notification)| self.banners.get(&notification.id).map(|_| i))
-            .collect();
-
-        let mut failed_to_redraw_banners = vec![];
-        for notification_index in matching_indices.into_iter().rev() {
-            let notification = notifications.remove(notification_index).unwrap();
-            let id = notification.id;
-
-            let banner = &mut self.banners[&id];
-            banner.update_data(notification);
-
-            match banner.draw(&self.pango_context.borrow(), config, cached_layouts) {
-                DrawState::Success => {
-                    debug!("Window: Replaced notification by id {id}",);
-                }
-                DrawState::Failure => {
-                    failed_to_redraw_banners.push(
-                        self.banners
-                            .shift_remove(&id)
-                            .expect("There is should be banner")
-                            .destroy_and_get_notification(),
-                    );
-                }
-            }
-        }
-
-        if failed_to_redraw_banners.is_empty() {
-            Ok(())
-        } else {
-            Err(failed_to_redraw_banners)
-        }
+    ) {
+        self.banner_stack.replace_by_keys(notifications, config);
     }
 
     pub(super) fn remove_banners_by_id(
         &mut self,
         notification_indices: &[u32],
     ) -> Vec<Notification> {
-        debug!("Window: Remove banners by id");
-
-        notification_indices
-            .iter()
-            .filter_map(|notification_id| {
-                self.banners
-                    .shift_remove(notification_id)
-                    .map(|banner| banner.destroy_and_get_notification())
-            })
-            .collect()
+        self.banner_stack.remove_by_keys(notification_indices)
     }
 
     pub(super) fn remove_expired_banners(&mut self, config: &Config) -> Vec<Notification> {
-        let indices_to_remove: Vec<u32> = self
-            .banners
-            .values()
-            .filter_map(|rect| match &rect.notification().expire_timeout {
-                notification::Timeout::Millis(millis) => {
-                    if rect.created_at().elapsed().as_millis() > *millis as u128 {
-                        Some(rect.notification().id)
-                    } else {
-                        None
-                    }
-                }
-                notification::Timeout::Never => None,
-                notification::Timeout::Configurable => {
-                    let notification = rect.notification();
-                    let timeout = config
-                        .display_by_app(&notification.app_name)
-                        .timeout
-                        .by_urgency(&notification.hints.urgency);
-                    if timeout != 0 && rect.created_at().elapsed().as_millis() > timeout as u128 {
-                        Some(rect.notification().id)
-                    } else {
-                        None
-                    }
-                }
-            })
-            .collect();
-
-        if indices_to_remove.is_empty() {
-            vec![]
-        } else {
-            debug!("Window: Remove expired banners by indices: {indices_to_remove:?}");
-            self.remove_banners_by_id(&indices_to_remove)
-        }
+        self.banner_stack.remove_expired(config)
     }
 
     pub(super) fn handle_hover(&mut self, config: &Config) {
         if let Some(index) = self.get_hovered_banner(config) {
-            self.banners[&index].reset_timeout();
+            self.banner_stack[&index].reset_timeout();
 
             // INFO: because of every tracking pointer position, it emits very frequently and it's
             // annoying. So moved to 'TRACE' level for specific situations.
@@ -370,37 +228,40 @@ impl Window {
     }
 
     pub(super) fn reset_timeouts(&mut self) {
-        self.banners.values_mut().for_each(Banner::reset_timeout);
+        self.banner_stack
+            .banners_mut()
+            .for_each(Banner::reset_timeout);
     }
 
-    pub(super) fn handle_click(&mut self, config: &Config) -> Vec<Signal> {
+    pub(super) fn handle_click(&mut self, config: &Config) -> Option<Signal> {
         if let PrioritiedPressState::Unpressed = self.state.pointer_state.press_state {
-            return vec![];
+            return None;
         }
         let _press_state = self.state.pointer_state.press_state.take();
 
         if let Some(id) = self.get_hovered_banner(config) {
             if config.general().anchor.is_bottom() {
                 self.state.pointer_state.y -=
-                    self.banners[&id].height() as f64 + config.general().gap as f64;
+                    self.banner_stack[&id].height() as f64 + config.general().gap as f64;
+
+                // INFO: the compositor may wrongly relocate to previous position and it will cause
+                // of incorrect pointer positioning for next click in row. So need to ignore and
+                // left remaining.
+                self.state.pointer_state.ignore_first_relocate();
             }
 
             debug!("Window: Clicked to notification banner with id {id}");
 
-            return self
-                .remove_banners_by_id(&[id])
-                .into_iter()
-                .map(|notification| {
-                    let notification_id = notification.id;
-                    Signal::NotificationClosed {
-                        notification_id,
-                        reason: dbus::actions::ClosingReason::DismissedByUser,
-                    }
-                })
-                .collect();
+            return self.banner_stack.remove(id).map(|notification| {
+                let notification_id = notification.id;
+                Signal::NotificationClosed {
+                    notification_id,
+                    reason: dbus::actions::ClosingReason::DismissedByUser,
+                }
+            });
         }
 
-        vec![]
+        None
     }
 
     fn get_hovered_banner(&self, config: &Config) -> Option<u32> {
@@ -423,74 +284,82 @@ impl Window {
         };
 
         if config.general().anchor.is_top() {
-            self.banners.values().rev().find_map(finder)
+            self.banner_stack.banners().find_map(finder)
         } else {
-            self.banners.values().find_map(finder)
+            self.banner_stack.banners().rev().find_map(finder)
         }
     }
 
-    pub(super) fn redraw(
+    pub(super) fn draw(
         &mut self,
         config: &Config,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) -> Result<(), Vec<Notification>> {
-        let mut failed_to_redraw_banners = vec![];
-        for (id, banner) in &mut self.banners {
-            if let DrawState::Failure =
-                banner.draw(&self.pango_context.borrow(), config, cached_layouts)
-            {
-                failed_to_redraw_banners.push(*id);
-            }
-        }
-
-        let failed_to_redraw_banners: Vec<_> = failed_to_redraw_banners
-            .into_iter()
-            .map(|id| {
-                self.banners
-                    .shift_remove(&id)
-                    .expect("There is should be a banner")
-                    .destroy_and_get_notification()
-            })
-            .collect();
-
-        self.draw(config);
-
-        debug!("Window: Redrawed banners");
-
-        if failed_to_redraw_banners.is_empty() {
-            Ok(())
-        } else {
-            Err(failed_to_redraw_banners)
-        }
-    }
-
-    pub(super) fn draw(&mut self, config: &Config) {
+    ) -> Result<(), Error> {
         let gap = config.general().gap;
-
-        self.resize(RectSize::new(
-            config.general().width.into(),
-            self.banners
-                .values()
-                .map(|banner| banner.height())
-                .sum::<usize>()
-                + self.banners.len().saturating_sub(1) * gap as usize,
-        ));
-
         let gap_buffer = self.allocate_gap_buffer(gap);
 
-        self.banners.values_mut().for_each(|banner| {
-            if banner.framebuffer().is_empty() {
-                if let Some(framebuffer) =
-                    self.sloted_buffer.data_by_slot(&banner.notification().id)
-                {
-                    banner.set_framebuffer(framebuffer);
+        self.buffers.current_mut().reset();
+
+        let threshold = self.banner_stack.len().saturating_sub(1);
+        let mut total = 0;
+        let mut indices_of_unrendered_banners = vec![];
+
+        let writer = |banner: &mut Banner| {
+            if !banner.is_drawn() {
+                match banner.draw(&self.pango_context.borrow(), config, cached_layouts) {
+                    DrawState::Success(framebuffer) => self
+                        .buffers
+                        .current_mut()
+                        .push(banner.notification().id, &framebuffer),
+                    DrawState::Failure => {
+                        indices_of_unrendered_banners.push(banner.notification().id);
+                    }
+                }
+            } else {
+                match self.buffers.other().data_by_slot(&banner.notification().id) {
+                    Some(stored_framebuffer) => self
+                        .buffers
+                        .current_mut()
+                        .push(banner.notification().id, &stored_framebuffer),
+                    None => {
+                        error!("Window: Invalide state! There is no stored framebuffer and it was skipped. The further work of the application may be invalid!");
+                        self.buffers.current_mut().push(
+                            banner.notification().id,
+                            &vec![0; banner.width() * banner.height() * 4],
+                        );
+                    }
                 }
             }
-        });
 
-        self.reset_buffer();
-        self.write_banners_to_buffer(&config.general().anchor, &gap_buffer);
-        self.build_buffer();
+            if total < threshold {
+                self.buffers.current_mut().push_without_slot(&gap_buffer);
+            }
+
+            total += 1;
+        };
+
+        if config.general().anchor.is_top() {
+            self.banner_stack.banners_mut().for_each(writer)
+        } else {
+            self.banner_stack.banners_mut().rev().for_each(writer)
+        }
+
+        let unrendered_banners = self
+            .banner_stack
+            .remove_by_keys(&indices_of_unrendered_banners);
+
+        self.resize(RectSize::new(
+            self.banner_stack.width(),
+            self.banner_stack.total_height_with_gap(gap as usize),
+        ));
+
+        self.buffers.current_mut().build(&self.state.rect_size);
+
+        if unrendered_banners.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::UnrenderedNotifications(unrendered_banners))
+        }
     }
 
     fn resize(&mut self, rect_size: RectSize<usize>) {
@@ -513,68 +382,13 @@ impl Window {
         vec![0; gap_size]
     }
 
-    fn write_banners_to_buffer(&mut self, anchor: &config::general::Anchor, gap_buffer: &[u8]) {
-        let threshold = self.banners.len().saturating_sub(1);
-        let mut total = 0;
-        let writer = |banner: &mut Banner| {
-            self.sloted_buffer
-                .push(banner.notification().id, &banner.take_framebuffer());
-
-            if total < threshold {
-                self.sloted_buffer.push_without_slot(gap_buffer);
-            }
-
-            total += 1;
-        };
-
-        if anchor.is_top() {
-            self.banners.values_mut().rev().for_each(writer)
-        } else {
-            self.banners.values_mut().for_each(writer)
-        }
-
-        debug!("Window: Writed banners to buffer");
-    }
-
-    fn reset_buffer(&mut self) {
-        self.sloted_buffer.reset();
-        debug!("Window: Buffer was reset");
-    }
-
-    fn build_buffer(&mut self) {
-        if let Some(wl_buffer) = self.wl_buffer.as_ref() {
-            wl_buffer.destroy();
-        }
-
-        assert!(
-            self.sloted_buffer.buffer.size() >= self.state.rect_size.area() * 4,
-            "Buffer size must be greater or equal to window size. Buffer size: {}. Window area: {}.",
-            self.sloted_buffer.buffer.size(),
-            self.state.rect_size.area() * 4
-        );
-
-        //INFO: The Buffer size only growth and it guarantee that shm_pool never shrinks
-        self.state
-            .shm_pool
-            .resize(self.sloted_buffer.buffer.size() as i32);
-
-        self.wl_buffer = Some(self.state.shm_pool.create_buffer(
-            0,
-            self.state.rect_size.width as i32,
-            self.state.rect_size.height as i32,
-            self.state.rect_size.width as i32 * 4,
-            wl_shm::Format::Argb8888,
-            &self.event_queue.handle(),
-            (),
-        ));
-
-        debug!("Window: Builded buffer");
-    }
-
-    pub(super) fn frame(&self) {
+    pub(super) fn frame(&mut self) {
         self.state.surface.damage(0, 0, i32::MAX, i32::MAX);
         self.state.surface.frame(&self.event_queue.handle(), ());
-        self.state.surface.attach(self.wl_buffer.as_ref(), 0, 0);
+        self.state
+            .surface
+            .attach(self.buffers.current().wl_buffer().into(), 0, 0);
+        self.buffers.flip();
 
         debug!("Window: Requested a frame to the Wayland compositor");
     }
@@ -588,13 +402,18 @@ impl Window {
         self.event_queue.roundtrip(&mut self.state)?;
         Ok(())
     }
+
+    pub(super) fn dispatch(&mut self) -> anyhow::Result<bool> {
+        let mut is_dispatched = self.buffers.dispatch()?;
+        is_dispatched |= <Self as Dispatcher>::dispatch(self)?;
+        Ok(is_dispatched)
+    }
 }
 
 impl WindowState {
     fn destroy(&self) {
         self.layer_surface.destroy();
         self.surface.destroy();
-        self.shm_pool.destroy();
         self.cursor_device.destroy();
         self.pointer.release();
     }
@@ -602,10 +421,6 @@ impl WindowState {
 
 impl Drop for Window {
     fn drop(&mut self) {
-        if let Some(buffer) = self.wl_buffer.as_ref() {
-            buffer.destroy();
-        }
-
         self.state.destroy();
 
         if let Err(_err) = self.sync() {
@@ -622,134 +437,6 @@ impl Dispatcher for Window {
         &mut self,
     ) -> Option<(&mut EventQueue<Self::State>, &mut Self::State)> {
         Some((&mut self.event_queue, &mut self.state))
-    }
-}
-
-trait SortByValues<K, V> {
-    fn sort_by_values(&mut self, cmp: for<'a> fn(&'a V, &'a V) -> Ordering);
-}
-
-impl<K, V> SortByValues<K, V> for IndexMap<K, V> {
-    fn sort_by_values(&mut self, cmp: for<'a> fn(&'a V, &'a V) -> Ordering) {
-        self.sort_by(|_, lhs, _, rhs| cmp(lhs, rhs));
-    }
-}
-
-/// The wrapper for Buffer which can deal with Slots. It allows to store data by key for reading
-/// later. Also SlotedBuffer allows write data without key if it's useless to read later.
-struct SlotedBuffer<T>
-where
-    T: Hash + Eq,
-{
-    buffer: Buffer,
-    slots: HashMap<T, Slot>,
-}
-
-struct Slot {
-    offset: usize,
-    len: usize,
-}
-
-impl<T> SlotedBuffer<T>
-where
-    T: Hash + Eq,
-{
-    fn new() -> Self {
-        debug!("SlotedBuffer: Trying to create");
-        let sb = Self {
-            buffer: Buffer::new(),
-            slots: HashMap::new(),
-        };
-        debug!("SlotedBuffer: Created!");
-        sb
-    }
-
-    /// Clears the data of buffers and slots. But the size of buffer remains.
-    fn reset(&mut self) {
-        self.buffer.reset();
-        self.slots.clear();
-        debug!("SlotedBuffer: Reset")
-    }
-
-    /// Pushes the data with creating a slot into buffer.
-    fn push(&mut self, key: T, data: &[u8]) {
-        self.slots.insert(
-            key,
-            Slot {
-                offset: self.buffer.filled_size(),
-                len: data.len(),
-            },
-        );
-        self.buffer.push(data);
-        debug!("SlotedBuffer: Received data to create Slot")
-    }
-
-    /// Pushes the data wihtout creating a slot into buffer.
-    fn push_without_slot(&mut self, data: &[u8]) {
-        self.buffer.push(data);
-        debug!("SlotedBuffer: Received data to write without slot.")
-    }
-
-    /// Retrieves a copy of data using specific slot by key.
-    fn data_by_slot(&self, key: &T) -> Option<Vec<u8>> {
-        self.slots.get(key).and_then(|slot| {
-            let mut buffer = vec![0; slot.len];
-
-            if let Err(err) = self.buffer.file.read_at(&mut buffer, slot.offset as u64) {
-                error!("SlotedBuffer: Failed to read slot from buffer. The error: {err}");
-                return None;
-            }
-
-            Some(buffer)
-        })
-    }
-}
-
-struct Buffer {
-    file: File,
-    cursor: u64,
-    size: usize,
-}
-
-impl Buffer {
-    fn new() -> Self {
-        debug!("Buffer: Trying to create");
-        Self {
-            file: tempfile::tempfile().expect("The tempfile must be created"),
-            cursor: 0,
-            size: 0,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.file
-            .write_all_at(&vec![0; self.cursor as usize + 1], 0)
-            .expect("Must be possibility to write into file");
-        self.cursor = 0;
-        debug!("Buffer: Reset");
-    }
-
-    fn push(&mut self, data: &[u8]) {
-        self.file
-            .write_all_at(data, self.cursor)
-            .expect("Must be possibility to write into file");
-        self.cursor += data.len() as u64;
-
-        self.size = std::cmp::max(self.size, self.cursor as usize);
-
-        debug!("Buffer: Received a data to write")
-    }
-
-    fn filled_size(&self) -> usize {
-        self.cursor as usize
-    }
-
-    fn size(&self) -> usize {
-        self.size
-    }
-
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        self.file.as_fd()
     }
 }
 
@@ -823,6 +510,7 @@ struct PointerState {
     y: f64,
 
     entered: bool,
+    ignore_first_relocate: bool,
     press_state: PrioritiedPressState,
 }
 
@@ -866,6 +554,10 @@ impl PointerState {
     const RIGHT_BTN: u32 = 273;
     const MIDDLE_BTN: u32 = 274;
 
+    fn ignore_first_relocate(&mut self) {
+        self.ignore_first_relocate = true;
+    }
+
     fn leave(&mut self) {
         self.entered = false;
 
@@ -880,6 +572,13 @@ impl PointerState {
     }
 
     fn relocate(&mut self, x: f64, y: f64) {
+        if self.ignore_first_relocate {
+            debug!("Pointer: Forced to ignore first relocate.");
+
+            self.ignore_first_relocate = false;
+            return;
+        }
+
         self.x = x;
         self.y = y;
 
