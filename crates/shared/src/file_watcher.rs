@@ -30,7 +30,14 @@ impl FilesWatcher {
         let inotify = Inotify::init()?;
 
         let paths: Vec<FilePath> = paths.into_iter().map(From::from).collect();
-        debug!("Watcher: Received paths - {paths:?}");
+        debug!(
+            "Watcher: Received paths - {paths}",
+            paths = paths
+                .iter()
+                .map(|p| p.path_buf.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
 
         let config_wd = paths
             .iter()
@@ -170,7 +177,10 @@ impl InotifySpecialization for Inotify {
             .watches()
             .add(file_path.as_path(), DEFAULT_MASKS)
             .unwrap_or_else(|_| {
-                panic!("Failed to create watch descriptor for config path {file_path:?}")
+                panic!(
+                    "Failed to create watch descriptor for config path {file_path}",
+                    file_path = file_path.path_buf.display()
+                )
             });
 
         FileWd::from_wd(new_wd, file_path.path_buf.clone())

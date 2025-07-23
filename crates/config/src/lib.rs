@@ -240,7 +240,10 @@ impl TomlConfig {
     ) -> Option<ParsedTomlConfig> {
         let config_path = PathBuf::from(path?);
         if !config_tree_path.insert(config_path.clone()) {
-            error!("Found circular imports! Check the config file {config_path:?}");
+            error!(
+                "Found circular imports! Check the config file {config_path}",
+                config_path = config_path.display()
+            );
             return None;
         }
 
@@ -389,7 +392,10 @@ fn expand_path(value: String, path_prefix: &Path) -> Vec<PathBuf> {
     }
 
     let Some(expanded_path_str) = expanded_path.to_str() else {
-        error!("Path {expanded_path:?} is not UTF-8 valid!");
+        error!(
+            "Path {expanded_path} is not UTF-8 valid!",
+            expanded_path = expanded_path.display()
+        );
         return vec![];
     };
 
@@ -399,8 +405,8 @@ fn expand_path(value: String, path_prefix: &Path) -> Vec<PathBuf> {
             .inspect(|entry| {
                 if let Err(err) = entry {
                     warn!(
-                        "Failed to read config file at {:?}. Error: {}",
-                        err.path(),
+                        "Failed to read config file at {}. Error: {}",
+                        err.path().display(),
                         err.error()
                     );
                 }

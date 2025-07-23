@@ -54,9 +54,15 @@ impl NotiClient<'_> {
             \tapp_icon - {icon},\n\
             \tsummary - {summary},\n\
             \tbody - {body},\n\
-            \tactions - {actions:?},\n\
-            \thints - {new_hints:?},\n\
-            \ttimeout - {timeout}"
+            \tactions - [{actions}],\n\
+            \thints - {{ {new_hints} }},\n\
+            \ttimeout - {timeout}",
+            actions = actions.join(", "),
+            new_hints = new_hints
+                .iter()
+                .map(|(k, v)| k.to_string() + ": " + &v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
 
         let notification_id = self
