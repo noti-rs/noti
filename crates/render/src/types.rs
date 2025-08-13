@@ -59,11 +59,11 @@ impl RectSize<usize> {
     }
 }
 
-impl From<RectSize<usize>> for RectSize<f64> {
+impl From<RectSize<usize>> for RectSize<f32> {
     fn from(value: RectSize<usize>) -> Self {
         Self {
-            width: value.width as f64,
-            height: value.height as f64,
+            width: value.width as f32,
+            height: value.height as f32,
         }
     }
 }
@@ -161,11 +161,11 @@ where
     }
 }
 
-impl From<Offset<usize>> for Offset<f64> {
+impl From<Offset<usize>> for Offset<f32> {
     fn from(value: Offset<usize>) -> Self {
         Self {
-            x: value.x as f64,
-            y: value.y as f64,
+            x: value.x as f32,
+            y: value.y as f32,
         }
     }
 }

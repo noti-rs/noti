@@ -12,8 +12,11 @@ use error::Error;
 use log::{debug, error, info, warn};
 use managers::{idle_manager::IdleManager, window_manager::WindowManager};
 use scheduler::Scheduler;
-use shared::file_watcher::FileState;
-use std::time::Duration;
+use shared::{
+    data::{Borrowed, Data},
+    file_watcher::FileState,
+};
+use std::{rc::Rc, time::Duration};
 use wayland_client::{
     delegate_noop,
     protocol::{
@@ -32,7 +35,8 @@ mod error;
 mod managers;
 mod scheduler;
 
-pub fn run(mut config: Config) -> anyhow::Result<()> {
+pub fn run(config: Config) -> anyhow::Result<()> {
+    let mut config = Data::new(config);
     let (sender, receiver) = unbounded();
 
     let server = async_io::block_on(Server::init(sender))?;
@@ -82,19 +86,19 @@ pub fn run(mut config: Config) -> anyhow::Result<()> {
                 );
             });
 
-        backend.poll(&config).handle_error()?;
+        backend.poll(config.borrow()).handle_error()?;
 
         match config.check_updates() {
             FileState::Updated => {
                 partially_default_config = false;
                 config.update();
-                backend.update_config(&config).handle_error()?;
+                backend.update_config(config.borrow()).handle_error()?;
                 info!("Renderer: Detected changes of config files and updated")
             }
             FileState::NotFound if !partially_default_config => {
                 partially_default_config = true;
                 config.update();
-                backend.update_config(&config).handle_error()?;
+                backend.update_config(config.borrow()).handle_error()?;
                 info!("The main or imported configuration file is not found, reverting this part to default values.");
             }
             FileState::NotFound | FileState::NothingChanged => (),
@@ -165,6 +169,7 @@ pub(crate) struct Backend {
     protocols: Protocols,
     window_manager: WindowManager,
     idle_manager: IdleManager,
+    gpu_interface: GpuInterface,
 }
 
 #[derive(Builder)]
@@ -177,36 +182,148 @@ struct Protocols {
     wp_cursor_shape_manager: WpCursorShapeManagerV1,
 }
 
+struct GpuInterface {
+    egl_state: EglState,
+    skia_backend: SkiaBackend,
+}
+
+pub type EglInstance = khronos_egl::Instance<khronos_egl::Static>;
+pub type EglDisplay = khronos_egl::Display;
+pub type EglConfig = khronos_egl::Config;
+pub type EglContext = khronos_egl::Context;
+
+#[derive(Clone)]
+struct EglState {
+    instance: Rc<EglInstance>,
+    display: EglDisplay,
+    config: EglConfig,
+    context: EglContext,
+}
+
+struct SkiaBackend {
+    /// It's important to have DirectContext because it relies to current available surface.
+    /// Without it the DirectContext won't be created and usable.
+    no_surface: NoSurface,
+    gr_context: skia_safe::gpu::DirectContext,
+}
+
+struct NoSurface(pub khronos_egl::Surface);
+
 impl Backend {
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
+        let (wayland_connection, protocols) = Self::connect_to_wayland()?;
+        let egl_state = Self::init_egl(&wayland_connection)?;
+        let skia_backend = Self::init_skia_backend(&egl_state)?;
+
+        Ok(Self {
+            window_manager: WindowManager::init(config)?,
+            idle_manager: IdleManager::init(&wayland_connection, &protocols, config)?,
+            wayland_connection,
+            protocols,
+            gpu_interface: GpuInterface {
+                egl_state,
+                skia_backend,
+            },
+        })
+    }
+
+    fn connect_to_wayland() -> anyhow::Result<(Connection, Protocols)> {
         const DEFAULT_SETUP_TIME: Duration = Duration::from_secs(10);
 
         let wayland_connection = Connection::connect_to_env()?;
         let mut event_queue = wayland_connection.new_event_queue();
         let mut backend_state_builder = ProtocolsBuilder::create_empty();
 
-        wayland_connection
-            .display()
-            .get_registry(&event_queue.handle(), ());
+        let display = wayland_connection.display();
+        display.get_registry(&event_queue.handle(), ());
         let timer = std::time::Instant::now();
 
         while backend_state_builder.build().is_err() && timer.elapsed() < DEFAULT_SETUP_TIME {
             event_queue.blocking_dispatch(&mut backend_state_builder)?;
         }
 
-        let state = match backend_state_builder.build() {
+        let protocols = match backend_state_builder.build() {
             Ok(state) => state,
             Err(_) => {
                 error!("BackendManager: Failed to init due missing protocols of compositor.");
                 bail!("Failed to init noti backend due missing protocosls of compositor.")
             }
         };
+        Ok((wayland_connection, protocols))
+    }
 
-        Ok(Self {
-            window_manager: WindowManager::init(config)?,
-            idle_manager: IdleManager::init(&wayland_connection, &state, config)?,
-            wayland_connection,
-            protocols: state,
+    fn init_egl(wayland_connection: &Connection) -> anyhow::Result<EglState> {
+        let egl_instance = khronos_egl::Instance::new(khronos_egl::Static);
+        let egl_display = unsafe {
+            egl_instance
+                .get_display(wayland_connection.backend().display_ptr() as *mut std::ffi::c_void)
+                .expect("The compositor must have the EGL display")
+        };
+        egl_instance.initialize(egl_display)?;
+        egl_instance.bind_api(khronos_egl::OPENGL_ES_API)?;
+
+        let attrib_list = [
+            khronos_egl::RED_SIZE,
+            8,
+            khronos_egl::GREEN_SIZE,
+            8,
+            khronos_egl::BLUE_SIZE,
+            8,
+            khronos_egl::ALPHA_SIZE,
+            8,
+            khronos_egl::DEPTH_SIZE,
+            0,
+            khronos_egl::STENCIL_SIZE,
+            8,
+            khronos_egl::SURFACE_TYPE,
+            khronos_egl::WINDOW_BIT,
+            khronos_egl::RENDERABLE_TYPE,
+            khronos_egl::OPENGL_ES2_BIT,
+            khronos_egl::NONE,
+        ];
+        let egl_config = egl_instance
+            .choose_first_config(egl_display, &attrib_list)?
+            .expect("EGL must have suitable configuration matches to noti");
+
+        let ctx_attributes_es3 = [khronos_egl::CONTEXT_CLIENT_VERSION, 3, khronos_egl::NONE];
+        let ctx_attributes_es2 = [khronos_egl::CONTEXT_CLIENT_VERSION, 2, khronos_egl::NONE];
+
+        let mut egl_context =
+            egl_instance.create_context(egl_display, egl_config, None, &ctx_attributes_es3);
+        if egl_context.is_err() {
+            egl_context =
+                egl_instance.create_context(egl_display, egl_config, None, &ctx_attributes_es2);
+        }
+        let egl_context = egl_context?;
+
+        Ok(EglState {
+            instance: Rc::new(egl_instance),
+            display: egl_display,
+            config: egl_config,
+            context: egl_context,
+        })
+    }
+
+    fn init_skia_backend(egl_state: &EglState) -> anyhow::Result<SkiaBackend> {
+        let no_surface = unsafe { khronos_egl::Surface::from_ptr(khronos_egl::NO_SURFACE) };
+
+        egl_state.instance.make_current(
+            egl_state.display,
+            Some(no_surface),
+            Some(no_surface),
+            Some(egl_state.context),
+        )?;
+
+        let gl_interface = skia_safe::gpu::gl::Interface::new_load_with(|name| {
+            egl_state.instance.get_proc_address(name).unwrap() as *const _
+        })
+        .unwrap();
+
+        let gr_context = skia_safe::gpu::direct_contexts::make_gl(gl_interface, None).unwrap();
+
+        Ok(SkiaBackend {
+            no_surface: NoSurface(no_surface),
+            gr_context,
         })
     }
 
@@ -221,7 +338,7 @@ impl Backend {
         debug!("Backend Manager: Received notification id {notification_id} to close");
     }
 
-    pub(crate) fn poll(&mut self, config: &Config) -> Result<(), Error> {
+    pub(crate) fn poll(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
         let Self {
             idle_manager,
             window_manager,
@@ -235,12 +352,17 @@ impl Backend {
                 window_manager.reset_timeouts()?;
             }
 
-            window_manager.show_window(&self.wayland_connection, &self.protocols, config)?;
+            window_manager.show_window(
+                &self.wayland_connection,
+                &mut self.gpu_interface,
+                &self.protocols,
+                config.clone(),
+            )?;
 
-            window_manager.handle_close_notifications(config)?;
-            window_manager.remove_expired(config)?;
+            window_manager.handle_close_notifications(config.clone(), &mut self.gpu_interface)?;
+            window_manager.remove_expired(config.clone(), &mut self.gpu_interface)?;
 
-            window_manager.handle_actions(config)?;
+            window_manager.handle_actions(config.clone(), &mut self.gpu_interface)?;
         }
 
         window_manager.dispatch()?;
@@ -257,29 +379,46 @@ impl Backend {
         self.window_manager.pop_signal()
     }
 
-    pub(crate) fn update_config(&mut self, config: &Config) -> Result<(), Error> {
+    pub(crate) fn update_config(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
         let Self {
             window_manager,
             idle_manager,
             ..
         } = self;
 
+        idle_manager.update_by_config(&self.protocols, &config);
         window_manager.update_by_config(config)?;
-        idle_manager.update_by_config(&self.protocols, config);
         window_manager.reset_timeouts()?;
         Ok(())
     }
 }
 
 macro_rules! impl_as_ref {
-    ($source_type:ty: $field:ident => $derived_type:ty) => {
+    ($source_type:ty: $field:ident$(.$other_fields:ident)* => $derived_type:ty) => {
         impl AsRef<$derived_type> for $source_type {
             fn as_ref(&self) -> &$derived_type {
                 &self.$field
+                    $(.$other_fields)*
             }
         }
     };
 }
+
+macro_rules! impl_as_mut {
+    ($source_type:ty: $field:ident$(.$other_fields:ident)* => $derived_type:ty) => {
+        impl AsMut<$derived_type> for $source_type {
+            fn as_mut(&mut self) -> &mut $derived_type {
+                &mut self.$field
+                    $(.$other_fields)*
+            }
+        }
+    };
+}
+
+impl_as_ref!(GpuInterface: egl_state => EglState);
+impl_as_ref!(GpuInterface: skia_backend.no_surface => NoSurface);
+impl_as_ref!(GpuInterface: skia_backend.gr_context => skia_safe::gpu::DirectContext);
+impl_as_mut!(GpuInterface: skia_backend.gr_context => skia_safe::gpu::DirectContext);
 
 impl_as_ref!(Protocols: wl_compositor => WlCompositor);
 impl_as_ref!(Protocols: wl_shm => WlShm);

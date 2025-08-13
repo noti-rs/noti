@@ -1,4 +1,4 @@
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
 use config::color::{Color as CfgColor, LinearGradient as CfgLinearGradient, Rgba as CfgRgba};
 use shared::value::TryFromValue;
@@ -6,7 +6,7 @@ use shared::value::TryFromValue;
 #[derive(Clone)]
 pub enum Color {
     LinearGradient(LinearGradient),
-    Fill(Bgra<f64>),
+    Fill(Bgra<f32>),
 }
 
 impl Color {
@@ -26,8 +26,8 @@ impl From<LinearGradient> for Color {
     }
 }
 
-impl From<Bgra<f64>> for Color {
-    fn from(value: Bgra<f64>) -> Self {
+impl From<Bgra<f32>> for Color {
+    fn from(value: Bgra<f32>) -> Self {
         Color::Fill(value)
     }
 }
@@ -53,15 +53,15 @@ impl TryFromValue for Color {}
 
 #[derive(Clone)]
 pub struct LinearGradient {
-    pub angle: f64,
-    pub grad_vector: [f64; 2],
-    pub colors: Vec<Bgra<f64>>,
-    pub segment_per_color: f64,
+    pub angle: f32,
+    pub grad_vector: [f32; 2],
+    pub colors: Vec<Bgra<f32>>,
+    pub segment_per_color: f32,
 }
 
 impl LinearGradient {
     /// 3π/4
-    const FRAC_3_PI_4: f64 = FRAC_PI_2 + FRAC_PI_4;
+    const FRAC_3_PI_4: f32 = FRAC_PI_2 + FRAC_PI_4;
 
     pub fn new(mut angle: i16, mut colors: Vec<CfgRgba>) -> Self {
         if angle < 0 {
@@ -77,7 +77,7 @@ impl LinearGradient {
             angle -= 180
         }
 
-        let angle = (angle as f64).to_radians();
+        let angle = (angle as f32).to_radians();
 
         let grad_vector = match angle {
             x @ 0.0..=FRAC_PI_4 => [1.0, x.tan()],
@@ -88,7 +88,7 @@ impl LinearGradient {
             _ => unreachable!(),
         };
 
-        let segment_per_color = 1.0 / (colors.len() - 1) as f64;
+        let segment_per_color = 1.0 / (colors.len() - 1) as f32;
 
         Self {
             angle,
@@ -120,13 +120,13 @@ where
     pub alpha: T,
 }
 
-impl Bgra<f64> {
+impl Bgra<f32> {
     pub fn is_transparent(&self) -> bool {
         self.alpha == 0.0
     }
 }
 
-impl From<&CfgRgba> for Bgra<f64> {
+impl From<&CfgRgba> for Bgra<f32> {
     fn from(
         &CfgRgba {
             red,
@@ -136,15 +136,15 @@ impl From<&CfgRgba> for Bgra<f64> {
         }: &CfgRgba,
     ) -> Self {
         Bgra {
-            blue: blue as f64 / 255.0,
-            green: green as f64 / 255.0,
-            red: red as f64 / 255.0,
-            alpha: alpha as f64 / 255.0,
+            blue: blue as f32 / 255.0,
+            green: green as f32 / 255.0,
+            red: red as f32 / 255.0,
+            alpha: alpha as f32 / 255.0,
         }
     }
 }
 
-impl From<CfgRgba> for Bgra<f64> {
+impl From<CfgRgba> for Bgra<f32> {
     fn from(
         CfgRgba {
             red,
@@ -154,26 +154,44 @@ impl From<CfgRgba> for Bgra<f64> {
         }: CfgRgba,
     ) -> Self {
         Bgra {
-            blue: blue as f64 / 255.0,
-            green: green as f64 / 255.0,
-            red: red as f64 / 255.0,
-            alpha: alpha as f64 / 255.0,
+            blue: blue as f32 / 255.0,
+            green: green as f32 / 255.0,
+            red: red as f32 / 255.0,
+            alpha: alpha as f32 / 255.0,
         }
     }
 }
 
-impl From<Bgra<f64>> for Bgra<u16> {
-    fn from(value: Bgra<f64>) -> Self {
+impl From<CfgRgba> for Bgra<u8> {
+    fn from(
+        CfgRgba {
+            red,
+            green,
+            blue,
+            alpha,
+        }: CfgRgba,
+    ) -> Self {
+        Bgra {
+            blue,
+            green,
+            red,
+            alpha,
+        }
+    }
+}
+
+impl From<Bgra<f32>> for Bgra<u8> {
+    fn from(value: Bgra<f32>) -> Self {
         Self {
-            blue: (value.blue * u16::MAX as f64).round() as u16,
-            green: (value.green * u16::MAX as f64).round() as u16,
-            red: (value.red * u16::MAX as f64).round() as u16,
-            alpha: (value.alpha * u16::MAX as f64).round() as u16,
+            blue: (value.blue * u8::MAX as f32).round() as u8,
+            green: (value.green * u8::MAX as f32).round() as u8,
+            red: (value.red * u8::MAX as f32).round() as u8,
+            alpha: (value.alpha * u8::MAX as f32).round() as u8,
         }
     }
 }
 
-impl TryFromValue for Bgra<f64> {
+impl TryFromValue for Bgra<f32> {
     fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
         <CfgRgba as TryFrom<_>>::try_from(value.clone())
             .map(Into::into)

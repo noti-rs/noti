@@ -11,8 +11,6 @@ public! {
     #[derive(ConfigProperty, Debug)]
     #[cfg_prop(name(TomlGeneralConfig), derive(Debug, Default, Deserialize, Clone))]
     struct GeneralConfig {
-        font: Font,
-
         #[cfg_prop(default(300))]
         width: u16,
         #[cfg_prop(default(150))]
@@ -60,28 +58,6 @@ impl Default for IdleThreshold {
             duration: humantime::parse_duration("5 min")
                 .expect("The default duration must be valid")
                 .as_millis() as u32,
-        }
-    }
-}
-
-public! {
-    #[derive(Debug, Deserialize, Clone)]
-    #[serde(from = "String")]
-    struct Font {
-        name: String,
-    }
-}
-
-impl From<String> for Font {
-    fn from(name: String) -> Self {
-        Font { name }
-    }
-}
-
-impl Default for Font {
-    fn default() -> Self {
-        Font {
-            name: "Noto Sans".to_string(),
         }
     }
 }

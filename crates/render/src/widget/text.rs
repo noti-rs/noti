@@ -1,14 +1,8 @@
-use config::text::{GBuilderTextProperty, TextProperty};
-use dbus::text::{EntityKind, Text};
+use config::text::{self, GBuilderTextProperty, TextProperty};
+use dbus::text::{Entity, EntityKind, Text};
 use log::warn;
-use pangocairo::{
-    pango::{
-        ffi::PANGO_SCALE, AttrColor, AttrInt, AttrList, AttrSize, Context, FontDescription,
-        Layout as PangoLayout,
-    },
-    FontMap,
-};
 use shared::{error::ConversionError, value::TryFromValue};
+use skia_safe::{textlayout::FontCollection, Color};
 
 use crate::{
     color::Bgra,
@@ -24,7 +18,7 @@ pub struct WText {
     kind: WTextKind,
 
     #[gbuilder(hidden, default(None))]
-    layout: Option<PangoLayout>,
+    paragraph: Option<skia_safe::textlayout::Paragraph>,
 
     #[gbuilder(use_gbuilder(GBuilderTextProperty), default)]
     property: TextProperty,
@@ -38,7 +32,7 @@ impl Clone for WText {
         // INFO: we shouldn't clone compiled info about text
         Self {
             kind: self.kind.clone(),
-            layout: None,
+            paragraph: None,
             property: self.property.clone(),
             inner_size: RectSize::default(),
         }
@@ -49,7 +43,7 @@ impl Clone for GBuilderWText {
     fn clone(&self) -> Self {
         Self {
             kind: self.kind.as_ref().cloned(),
-            layout: None,
+            paragraph: None,
             property: self.property.clone(),
             inner_size: Some(RectSize::default()),
         }
@@ -81,7 +75,7 @@ impl WText {
     pub fn new(kind: WTextKind) -> Self {
         Self {
             kind,
-            layout: None,
+            paragraph: None,
             property: Default::default(),
             inner_size: RectSize::default(),
         }
@@ -93,7 +87,7 @@ impl WText {
         WidgetConfiguration {
             display_config,
             notification,
-            pango_context,
+            font_collection,
             override_properties,
             theme,
         }: &WidgetConfiguration,
@@ -104,10 +98,8 @@ impl WText {
             }
         };
 
-        let layout = PangoLayout::new(&pango_context.0);
-
         let colors = theme.by_urgency(&notification.hints.urgency);
-        let foreground: Bgra<f64> = colors.foreground.clone().into();
+        let foreground: Bgra<u8> = colors.foreground.clone().into();
 
         let notification_content: NotificationContent = match self.kind {
             WTextKind::Summary => {
@@ -124,96 +116,194 @@ impl WText {
             }
         };
 
-        rect_size.shrink_by(&self.property.margin);
-        layout.set_width(rect_size.width as i32 * PANGO_SCALE);
-        layout.set_height(rect_size.height as i32 * PANGO_SCALE);
-
-        let (text, attributes) = notification_content.as_str_with_attributes();
-        if text.trim().is_empty() {
+        if notification_content.as_str().trim().is_empty() {
             warn!("The text with kind {} is blank", self.kind);
             return CompileState::Failure;
         }
 
-        layout.set_text(text);
-        Self::apply_colors(&attributes, foreground.into());
-        self.apply_properties(&layout, attributes);
-
-        let (computed_width, computed_height) = layout.pixel_size();
-        if computed_width > rect_size.width as i32 || computed_height > rect_size.height as i32 {
-            warn!(
-                "The text with kind {} doesn't fit to available space. \
-                Available space: width={}, height={}.",
-                self.kind, rect_size.width, rect_size.height
-            );
-            CompileState::Failure
-        } else {
-            self.inner_size = rect_size;
-            self.layout = Some(layout);
-            CompileState::Success
-        }
-    }
-
-    fn apply_colors(attributes: &AttrList, foreground: Bgra<u16>) {
-        attributes.insert(AttrColor::new_foreground(
+        let mut text_style = skia_safe::textlayout::TextStyle::new();
+        text_style.set_font_families(&[&self.property.font.name]);
+        text_style.set_color(Color::from_argb(
+            foreground.alpha,
             foreground.red,
             foreground.green,
             foreground.blue,
         ));
-        attributes.insert(AttrInt::new_foreground_alpha(foreground.alpha));
+
+        text_style.set_font_style(match self.property.style {
+            text::TextStyle::Regular => skia_safe::FontStyle::normal(),
+            text::TextStyle::Bold => skia_safe::FontStyle::bold(),
+            text::TextStyle::Italic => skia_safe::FontStyle::italic(),
+            text::TextStyle::BoldItalic => skia_safe::FontStyle::bold_italic(),
+        });
+
+        rect_size.shrink_by(&self.property.margin);
+
+        // INFO: better to pass it instead of `usize::MAX` because skia's textlayout module
+        // with ellipsis will make the layout in strange way — just truncate the first line
+        // with available space.
+        const MAX_LINES: usize = 100_000;
+        let mut paragraph = self.build_paragraph(
+            &notification_content,
+            &text_style,
+            font_collection.clone(),
+            MAX_LINES,
+        );
+        paragraph.layout(rect_size.width as f32);
+
+        if paragraph.height() > rect_size.height as f32 {
+            paragraph = match self.try_fit_paragraph(
+                paragraph,
+                rect_size,
+                &notification_content,
+                &text_style,
+                font_collection.clone(),
+            ) {
+                Some(paragraph) => paragraph,
+                None => {
+                    warn!(
+                        "The text with kind {} doesn't fit to available space. \
+                Available space: width={}, height={}.",
+                        self.kind, rect_size.width, rect_size.height
+                    );
+                    return CompileState::Failure;
+                }
+            }
+        }
+
+        self.inner_size = rect_size;
+        self.paragraph = Some(paragraph);
+        CompileState::Success
     }
 
-    fn apply_properties(&self, layout: &PangoLayout, attributes: AttrList) {
-        fn from_px_to_pt(px: f32) -> i32 {
-            ((px * 72.0) / 96.0).round() as i32
+    /// Tries to fit current paragraph layout into restricted space by removing last lines.
+    /// If it isn't possible, returns None.
+    ///
+    /// This method assumes that the paragraph already fits into restricted space by width.
+    fn try_fit_paragraph(
+        &self,
+        paragraph: skia_safe::textlayout::Paragraph,
+        restricted_space: RectSize<usize>,
+        notification_content: &NotificationContent,
+        base_text_style: &skia_safe::textlayout::TextStyle,
+        font_collection: FontCollection,
+    ) -> Option<skia_safe::textlayout::Paragraph> {
+        let mut height = paragraph.height();
+        let line_metrics = paragraph.get_line_metrics();
+        let mut total_lines = line_metrics.len();
+
+        for last_line in line_metrics.into_iter().rev() {
+            height -= last_line.height as f32;
+            total_lines -= 1;
+
+            if height <= restricted_space.height as f32 {
+                break;
+            }
         }
 
-        attributes.insert(AttrSize::new_size_absolute(
-            from_px_to_pt(self.property.font_size as f32) * PANGO_SCALE,
-        ));
+        if total_lines == 0 {
+            None
+        } else {
+            let mut fitted_paragraph = self.build_paragraph(
+                notification_content,
+                base_text_style,
+                font_collection.clone(),
+                total_lines,
+            );
+            fitted_paragraph.layout(restricted_space.width as f32);
+            Some(fitted_paragraph)
+        }
+    }
 
-        match &self.property.style {
-            config::text::TextStyle::Regular => (),
-            config::text::TextStyle::Bold => {
-                attributes.insert(AttrInt::new_weight(pangocairo::pango::Weight::Bold))
+    /// This method assumes that the notification content have valid entities. They must not
+    /// overlap. Otherwise the paragraph may build with wrong styles.
+    fn build_paragraph(
+        &self,
+        notification_content: &NotificationContent,
+        base_text_style: &skia_safe::textlayout::TextStyle,
+        font_collection: FontCollection,
+        max_lines: usize,
+    ) -> skia_safe::textlayout::Paragraph {
+        let paragraph_style = self.make_paragraph_style(max_lines);
+
+        let mut paragraph_builder =
+            skia_safe::textlayout::ParagraphBuilder::new(&paragraph_style, font_collection);
+        paragraph_builder.push_style(base_text_style);
+
+        let notification_text = notification_content.as_str();
+        match notification_content.entities() {
+            Some(entities) => {
+                let mut cursor = 0;
+                let mut end_stack = vec![notification_text.len()];
+                let mut current_entity_index = 0;
+
+                while cursor < notification_text.len() {
+                    let nearest_end = unsafe { *end_stack.last().unwrap_unchecked() };
+                    let entity = match entities.get(current_entity_index) {
+                        Some(entity) => entity,
+                        None => {
+                            paragraph_builder.add_text(&notification_text[cursor..nearest_end]);
+                            paragraph_builder.pop();
+                            cursor = nearest_end;
+                            end_stack.pop();
+                            continue;
+                        }
+                    };
+
+                    if entity.offset_in_byte > nearest_end {
+                        paragraph_builder.add_text(&notification_text[cursor..nearest_end]);
+                        paragraph_builder.pop();
+                        cursor = nearest_end;
+                        end_stack.pop();
+                    } else {
+                        paragraph_builder
+                            .add_text(&notification_text[cursor..entity.offset_in_byte]);
+                        cursor = entity.offset_in_byte;
+                        end_stack.push(entity.offset_in_byte + entity.length_in_byte);
+                        current_entity_index += 1;
+
+                        let text_style = paragraph_builder.overlay_style(entity);
+                        paragraph_builder.push_style(&text_style);
+                    }
+                }
             }
-            config::text::TextStyle::Italic => {
-                attributes.insert(AttrInt::new_style(pangocairo::pango::Style::Italic))
-            }
-            config::text::TextStyle::BoldItalic => {
-                attributes.insert(AttrInt::new_weight(pangocairo::pango::Weight::Bold));
-                attributes.insert(AttrInt::new_style(pangocairo::pango::Style::Italic));
+            None => {
+                paragraph_builder.add_text(notification_text);
             }
         }
 
-        if !self.property.wrap {
-            layout.set_height(0);
+        paragraph_builder.build()
+    }
+
+    /// Creates the [skia_safe::textlayout::ParagraphStyle] using user's configuration.
+    fn make_paragraph_style(&self, max_lines: usize) -> skia_safe::textlayout::ParagraphStyle {
+        let mut paragraph_style = skia_safe::textlayout::ParagraphStyle::new();
+
+        let max_lines = if self.property.wrap { max_lines } else { 1 };
+        paragraph_style.set_max_lines(max_lines);
+        paragraph_style.set_ellipsis("…");
+
+        let text_align = match self.property.alignment {
+            text::TextAlignment::Justify => skia_safe::textlayout::TextAlign::Justify,
+            text::TextAlignment::Center => skia_safe::textlayout::TextAlign::Center,
+            text::TextAlignment::Left => skia_safe::textlayout::TextAlign::Left,
+            text::TextAlignment::Right => skia_safe::textlayout::TextAlign::Right,
+        };
+        paragraph_style.set_text_align(text_align);
+
+        {
+            let mut strut_style = skia_safe::textlayout::StrutStyle::new();
+            strut_style.set_strut_enabled(true);
+            strut_style.set_font_size(self.property.font_size as f32);
+            strut_style.set_height(
+                self.property.line_spacing as f32 / self.property.font_size as f32 + 1.0,
+            );
+            strut_style.set_height_override(true);
+
+            paragraph_style.set_strut_style(strut_style);
         }
 
-        let wrap_mode = match &self.property.wrap_mode {
-            config::text::WrapMode::Word => pangocairo::pango::WrapMode::Word,
-            config::text::WrapMode::WordChar => pangocairo::pango::WrapMode::WordChar,
-            config::text::WrapMode::Char => pangocairo::pango::WrapMode::Char,
-        };
-        layout.set_wrap(wrap_mode);
-
-        let ellipsize = match self.property.ellipsize {
-            config::text::Ellipsize::Start => pangocairo::pango::EllipsizeMode::Start,
-            config::text::Ellipsize::Middle => pangocairo::pango::EllipsizeMode::Middle,
-            config::text::Ellipsize::End => pangocairo::pango::EllipsizeMode::End,
-            config::text::Ellipsize::None => pangocairo::pango::EllipsizeMode::None,
-        };
-        layout.set_ellipsize(ellipsize);
-
-        let alignment = match self.property.alignment {
-            config::text::TextAlignment::Center => pangocairo::pango::Alignment::Center,
-            config::text::TextAlignment::Left => pangocairo::pango::Alignment::Left,
-            config::text::TextAlignment::Right => pangocairo::pango::Alignment::Right,
-        };
-        layout.set_alignment(alignment);
-        layout.set_justify(self.property.justify);
-        layout.set_spacing(self.property.line_spacing as i32 * PANGO_SCALE);
-
-        layout.set_attributes(Some(&attributes));
+        paragraph_style
     }
 
     pub fn width(&self) -> usize {
@@ -223,30 +313,22 @@ impl WText {
     }
 
     pub fn height(&self) -> usize {
-        self.layout
+        self.paragraph
             .as_ref()
-            .map(|layout| layout.pixel_size().1 + self.property.margin.vertical() as i32)
-            .unwrap_or(0) as usize
+            .map(|para| para.height() + self.property.margin.vertical() as f32)
+            .unwrap_or(0.) as usize
     }
 }
 
 impl Draw for WText {
-    fn draw_with_offset(
-        &self,
-        offset: &Offset<usize>,
-        pango_context: &PangoContext,
-        drawer: &mut Drawer,
-    ) -> pangocairo::cairo::Result<()> {
-        if let Some(layout) = self.layout.as_ref() {
-            drawer.context.move_to(
-                (offset.x + self.property.margin.left() as usize) as f64,
-                (offset.y + self.property.margin.top() as usize) as f64,
+    fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer) {
+        if let Some(paragraph) = &self.paragraph {
+            let correct_offset: Offset<f32> = (*offset).into();
+            paragraph.paint(
+                drawer.surface.canvas(),
+                (correct_offset.x, correct_offset.y),
             );
-            pangocairo::functions::update_context(&drawer.context, &pango_context.0);
-            layout.context_changed();
-            pangocairo::functions::show_layout(&drawer.context, layout);
         }
-        Ok(())
     }
 }
 
@@ -256,45 +338,18 @@ enum NotificationContent<'a> {
 }
 
 impl NotificationContent<'_> {
-    fn as_str_with_attributes(&self) -> (&str, AttrList) {
-        fn get_attribute_style(kind: &EntityKind) -> Option<AttrInt> {
-            Some(match kind {
-                dbus::text::EntityKind::Bold => {
-                    AttrInt::new_weight(pangocairo::pango::Weight::Bold)
-                }
-                dbus::text::EntityKind::Italic => {
-                    AttrInt::new_style(pangocairo::pango::Style::Italic)
-                }
-                dbus::text::EntityKind::Underline => {
-                    AttrInt::new_underline(pangocairo::pango::Underline::SingleLine)
-                }
-                _ => None?, // Images and Links will be ignored because they're useless
-                            // for pango
-            })
-        }
-
-        let string;
-        let attributes = AttrList::new();
+    fn as_str(&self) -> &str {
         match self {
-            NotificationContent::Text(text) => {
-                string = &*text.body;
-
-                for entity in &text.entities {
-                    let Some(mut attribute) = get_attribute_style(&entity.kind) else {
-                        continue;
-                    };
-
-                    attribute.set_start_index(entity.offset_in_byte as u32);
-                    attribute.set_end_index((entity.offset_in_byte + entity.length_in_byte) as u32);
-                    attributes.insert(attribute);
-                }
-            }
-            NotificationContent::String(str) => {
-                string = *str;
-            }
+            NotificationContent::String(string) => string,
+            NotificationContent::Text(text) => &text.body,
         }
+    }
 
-        (string, attributes)
+    fn entities(&self) -> Option<&[Entity]> {
+        match self {
+            NotificationContent::String(_) => None,
+            NotificationContent::Text(text) => Some(&text.entities),
+        }
     }
 }
 
@@ -310,20 +365,46 @@ impl<'a> From<&'a Text> for NotificationContent<'a> {
     }
 }
 
-pub struct PangoContext(Context);
+trait OverlayStyle {
+    fn overlay_style(&mut self, entity: &Entity) -> skia_safe::textlayout::TextStyle;
+}
 
-impl PangoContext {
-    pub fn from_font_family(font_family: &str) -> Self {
-        let context = Context::new();
-        let font_map = FontMap::new();
-        context.set_font_map(Some(&font_map));
-        context.set_font_description(Some(&FontDescription::from_string(font_family)));
+impl OverlayStyle for skia_safe::textlayout::ParagraphBuilder {
+    fn overlay_style(&mut self, entity: &Entity) -> skia_safe::textlayout::TextStyle {
+        let last_text_style = self.peek_style();
 
-        Self(context)
-    }
+        let mut text_style = skia_safe::textlayout::TextStyle::new();
+        text_style.set_color(last_text_style.color());
+        text_style.set_font_families(&last_text_style.font_families().iter().collect::<Vec<_>>());
 
-    pub fn update_font_family(&mut self, font_family: &str) {
-        self.0
-            .set_font_description(Some(&FontDescription::from_string(font_family)));
+        let last_font_style = last_text_style.font_style();
+        match &entity.kind {
+            EntityKind::Bold => {
+                if last_font_style == skia_safe::FontStyle::italic()
+                    || last_font_style == skia_safe::FontStyle::bold_italic()
+                {
+                    text_style.set_font_style(skia_safe::FontStyle::bold_italic());
+                } else {
+                    text_style.set_font_style(skia_safe::FontStyle::bold());
+                }
+            }
+            EntityKind::Italic => {
+                let last_style = self.peek_style().font_style();
+                if last_style == skia_safe::FontStyle::bold()
+                    || last_style == skia_safe::FontStyle::bold_italic()
+                {
+                    text_style.set_font_style(skia_safe::FontStyle::bold_italic());
+                } else {
+                    text_style.set_font_style(skia_safe::FontStyle::italic());
+                }
+            }
+            EntityKind::Underline => {
+                text_style.set_font_style(last_font_style);
+                text_style.set_decoration_type(skia_safe::textlayout::TextDecoration::UNDERLINE);
+            }
+            EntityKind::Link { .. } | EntityKind::Image { .. } => (),
+        }
+
+        text_style
     }
 }

@@ -4,9 +4,8 @@ use shared::{error::ConversionError, value::TryFromValue};
 
 use crate::{
     color::{Bgra, Color},
-    drawer::{Drawer, MakeRounding, SetSourceColor},
+    drawer::{Drawer, UseColor},
     types::{Offset, RectSize},
-    PangoContext,
 };
 
 use super::{CompileState, Draw, Widget, WidgetConfiguration};
@@ -165,77 +164,81 @@ impl FlexContainer {
         }
     }
 
-    fn rounded_fill(
-        &self,
-        offset: Offset<f64>,
-        rect_size: RectSize<f64>,
-        drawer: &mut Drawer,
-    ) -> pangocairo::cairo::Result<()> {
-        let outer_radius = (self.border.radius as f64)
+    fn rounded_fill(&self, offset: Offset<f32>, rect_size: RectSize<f32>, drawer: &mut Drawer) {
+        let outer_radius = (self.border.radius as f32)
             .min(rect_size.width / 2.0)
             .min(rect_size.height / 2.0);
-        let inner_radius = (outer_radius - self.border.size as f64).max(0.0);
+        let inner_radius = (outer_radius - self.border.size as f32).max(0.0);
+        let difference = self.border.size as f32;
 
-        drawer.context.new_sub_path();
-        drawer
-            .context
-            .make_rounding(offset, rect_size, outer_radius, inner_radius);
-        drawer.context.close_path();
+        let canvas = drawer.surface.canvas();
 
-        drawer.set_source_color(&self.background_color, rect_size)?;
-        drawer.context.fill()
+        let rounded_rect = skia_safe::RRect::new_rect_xy(
+            skia_safe::Rect::from_xywh(
+                offset.x + difference,
+                offset.y + difference,
+                rect_size.width - difference * 2.0,
+                rect_size.height - difference * 2.0,
+            ),
+            inner_radius,
+            inner_radius,
+        );
+
+        let mut paint = skia_safe::Paint::default();
+        paint.use_color(&self.background_color, offset, rect_size);
+        paint.set_anti_alias(true);
+
+        canvas.draw_rrect(rounded_rect, &paint);
     }
 
-    fn outline_border(
-        &self,
-        offset: Offset<f64>,
-        rect_size: RectSize<f64>,
-        drawer: &mut Drawer,
-    ) -> pangocairo::cairo::Result<()> {
-        if self.border.radius == 0 || self.border.size == 0 {
-            return Ok(());
+    fn outline_border(&self, offset: Offset<f32>, rect_size: RectSize<f32>, drawer: &mut Drawer) {
+        if self.border.size == 0 {
+            return;
         }
 
-        let outer_radius = (self.border.radius as f64)
+        let outer_radius = (self.border.radius as f32)
             .min(rect_size.width / 2.0)
             .min(rect_size.height / 2.0);
-        let inner_radius = outer_radius - self.border.size as f64;
+        let inner_radius = outer_radius - self.border.size as f32;
 
-        drawer.context.new_sub_path();
-        drawer
-            .context
-            .make_rounding(offset, rect_size, outer_radius, outer_radius);
-        drawer.context.close_path();
-        drawer.set_source_color(&self.border_color, rect_size)?;
+        let mut path = skia_safe::Path::new();
 
+        path.add_rrect(
+            skia_safe::RRect::new_rect_xy(
+                skia_safe::Rect::from_xywh(offset.x, offset.y, rect_size.width, rect_size.height),
+                outer_radius,
+                outer_radius,
+            ),
+            None,
+        );
+
+        let border_size = self.border.size as f32;
+        let base_rect = skia_safe::Rect::from_xywh(
+            offset.x + border_size,
+            offset.y + border_size,
+            rect_size.width - border_size * 2.0,
+            rect_size.height - border_size * 2.0,
+        );
         if inner_radius <= 0.0 {
-            let border_size = self.border.size as f64;
-            drawer.context.rectangle(
-                border_size,
-                border_size,
-                rect_size.width - border_size * 2.0,
-                rect_size.height - border_size * 2.0,
-            );
+            path.add_rect(base_rect, None);
         } else {
-            drawer.context.new_sub_path();
-            drawer
-                .context
-                .make_rounding(offset, rect_size, outer_radius, inner_radius);
-            drawer.context.close_path();
+            path.add_rrect(
+                skia_safe::RRect::new_rect_xy(base_rect, inner_radius, inner_radius),
+                None,
+            );
         }
 
-        drawer.context.set_fill_rule(cairo::FillRule::EvenOdd);
-        drawer.context.fill()
+        let mut paint = skia_safe::Paint::default();
+        paint.use_color(&self.border_color, offset, rect_size);
+        paint.set_anti_alias(true);
+
+        path.set_fill_type(skia_safe::path::FillType::EvenOdd);
+        drawer.surface.canvas().draw_path(&path, &paint);
     }
 }
 
 impl Draw for FlexContainer {
-    fn draw_with_offset(
-        &self,
-        offset: &Offset<usize>,
-        pango_context: &PangoContext,
-        drawer: &mut Drawer,
-    ) -> pangocairo::cairo::Result<()> {
+    fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer) {
         let Some(mut rect_size) = self.rect_size.as_ref().cloned() else {
             panic!(
                 "The rectangle size must be computed by `compile()` method of parent container!"
@@ -243,13 +246,9 @@ impl Draw for FlexContainer {
         };
         let original_rect_size = rect_size;
 
-        // NOTE: if the background color is transparent or forces to be transparent, no need to use
-        // another layer as new Drawer instance. Instead of this use the current Drawer instance.
-        // It will avoid to use costly methods `draw_area` and `draw_with_offset`.
         let transparent_bg = self.transparent_background || self.background_color.is_transparent();
-
         if !transparent_bg {
-            self.rounded_fill((*offset).into(), rect_size.into(), drawer)?;
+            self.rounded_fill((*offset).into(), rect_size.into(), drawer);
         }
 
         rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
@@ -285,12 +284,12 @@ impl Draw for FlexContainer {
                     child.len_by_direction(&self.direction.orthogonalize()),
                 );
 
-            child.draw_with_offset(&(plane.as_offset() + *offset), pango_context, drawer)?;
+            child.draw_with_offset(&(plane.as_offset() + *offset), drawer);
 
             plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
         }
 
-        self.outline_border((*offset).into(), original_rect_size.into(), drawer)
+        self.outline_border((*offset).into(), original_rect_size.into(), drawer);
     }
 }
 

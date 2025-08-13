@@ -8,15 +8,14 @@ use indexmap::{
     map::{Iter, Values, ValuesMut},
     IndexMap,
 };
-use log::{debug, error, trace};
+use log::{debug, trace};
 use render::{
     drawer::Drawer,
-    types::RectSize,
+    types::{Offset, RectSize},
     widget::{
         self, Alignment, Draw, FlexContainerBuilder, Position, WImage, WText, WTextKind, Widget,
         WidgetConfiguration,
     },
-    PangoContext,
 };
 use shared::cached_data::CachedData;
 use std::{cmp::Ordering, collections::VecDeque, hash::Hash, path::PathBuf, time};
@@ -70,7 +69,7 @@ where
     pub(super) fn configure(&mut self, config: &Config) {
         self.sort_by_config(config);
         self.banners_mut()
-            .for_each(|banner| banner.is_drawn = false);
+            .for_each(|banner| banner.is_compiled = false);
     }
 
     fn sort_by_config(&mut self, config: &Config) {
@@ -239,7 +238,7 @@ pub(super) struct Banner {
     layout: Option<Widget>,
     created_at: time::Instant,
 
-    is_drawn: bool,
+    is_compiled: bool,
 }
 
 impl Banner {
@@ -251,12 +250,8 @@ impl Banner {
             layout: None,
             created_at: time::Instant::now(),
 
-            is_drawn: false,
+            is_compiled: false,
         }
-    }
-
-    pub(super) fn is_drawn(&self) -> bool {
-        self.is_drawn
     }
 
     pub(super) fn notification(&self) -> &Notification {
@@ -293,7 +288,7 @@ impl Banner {
     pub(super) fn update_data(&mut self, notification: Notification) {
         self.notification = notification;
         self.created_at = time::Instant::now();
-        self.is_drawn = false;
+        self.is_compiled = false;
         debug!(
             "Banner (id={}): Updated notification data and timeout",
             self.notification.id
@@ -315,13 +310,15 @@ impl Banner {
             .unwrap_or_default()
     }
 
-    pub(super) fn draw(
+    pub(super) fn compile(
         &mut self,
-        pango_context: &PangoContext,
         config: &Config,
+        font_collection: skia_safe::textlayout::FontCollection,
         cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) -> DrawState<Vec<u8>> {
-        debug!("Banner (id={}): Beginning of draw", self.notification.id);
+    ) {
+        if self.is_compiled {
+            return;
+        }
 
         let rect_size = RectSize::new(
             config.general().width as usize,
@@ -329,13 +326,6 @@ impl Banner {
         );
 
         let display = config.display_by_app(&self.notification.app_name);
-        let mut drawer = match Drawer::create(rect_size) {
-            Ok(drawer) => drawer,
-            Err(err) => {
-                error!("Failed to create drawer for Banner(id={}), avoided to draw banner. Error: {err}", self.notification.id);
-                return DrawState::Failure;
-            }
-        };
 
         let mut layout = match &display.layout {
             config::display::Layout::Default => Self::default_layout(display),
@@ -351,35 +341,32 @@ impl Banner {
             &WidgetConfiguration {
                 display_config: display,
                 theme: config.theme_by_app(&self.notification.app_name),
+                font_collection,
                 notification: &self.notification,
-                pango_context,
                 override_properties: display.layout.is_default(),
             },
         );
 
-        if let Err(err) = layout.draw(pango_context, &mut drawer) {
-            error!(
-                "Failed to draw banner Banner(id={}). Error: {err}",
-                self.notification.id
-            );
-            return DrawState::Failure;
-        }
-
+        self.is_compiled = true;
         self.layout = Some(layout);
-        let framebuffer: Vec<u8> = match drawer.try_into() {
-            Ok(val) => val,
-            Err(err) => {
-                error!(
-                    "Failed to get data after drawing Banner(id={}). Error: {err}",
-                    self.notification.id
-                );
-                return DrawState::Failure;
-            }
+    }
+
+    pub(super) fn draw(
+        &self,
+        offset: &Offset<usize>,
+        sk_surface: &mut skia_safe::Surface,
+    ) -> DrawState {
+        debug!("Banner (id={}): Beginning of draw", self.notification.id);
+
+        let mut drawer = Drawer::use_surface(sk_surface.clone());
+        let Some(layout) = &self.layout else {
+            return DrawState::Failure;
         };
 
-        self.is_drawn = true;
+        layout.draw_with_offset(offset, &mut drawer);
+
         debug!("Banner (id={}): Complete draw", self.notification.id);
-        DrawState::Success(framebuffer)
+        DrawState::Success
     }
 
     fn default_layout(display_config: &DisplayConfig) -> Widget {
@@ -422,7 +409,7 @@ impl<'a> From<&'a Banner> for &'a Notification {
     }
 }
 
-pub(super) enum DrawState<T> {
-    Success(T),
+pub(super) enum DrawState {
+    Success,
     Failure,
 }

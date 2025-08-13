@@ -9,6 +9,9 @@ public! {
     #[cfg_prop(name(TomlTextProperty), derive(Debug, Clone, Default, Deserialize))]
     #[gbuilder(name(GBuilderTextProperty), derive(Clone))]
     struct TextProperty {
+        #[gbuilder(default)]
+        font: Font,
+
         #[cfg_prop(default(true))]
         #[gbuilder(default(true))]
         wrap: bool,
@@ -28,9 +31,6 @@ public! {
         #[gbuilder(default)]
         alignment: TextAlignment,
 
-        #[gbuilder(default(false))]
-        justify: bool,
-
         #[cfg_prop(default(12))]
         font_size: u8,
 
@@ -47,6 +47,34 @@ impl Default for TextProperty {
 }
 
 impl TryFromValue for TextProperty {}
+
+public! {
+    #[derive(Debug, Deserialize, Clone)]
+    #[serde(from = "String")]
+    struct Font {
+        name: String,
+    }
+}
+
+impl From<String> for Font {
+    fn from(name: String) -> Self {
+        Font { name }
+    }
+}
+
+impl Default for Font {
+    fn default() -> Self {
+        Font {
+            name: "Noto Sans".to_string(),
+        }
+    }
+}
+
+impl TryFromValue for Font {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        Ok(Font { name: value })
+    }
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub enum WrapMode {
@@ -110,6 +138,8 @@ pub enum TextAlignment {
     Left,
     #[serde(rename = "right")]
     Right,
+    #[serde(rename = "justify")]
+    Justify
 }
 
 impl TryFromValue for TextAlignment {
@@ -118,6 +148,7 @@ impl TryFromValue for TextAlignment {
             "center" => TextAlignment::Center,
             "left" => TextAlignment::Left,
             "right" => TextAlignment::Right,
+            "justify" => TextAlignment::Justify,
             _ => Err(shared::error::ConversionError::InvalidValue {
                 expected: "center, left or right",
                 actual: value,

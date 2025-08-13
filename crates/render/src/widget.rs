@@ -1,7 +1,6 @@
 use config::{display::DisplayConfig, theme::Theme};
 use dbus::notification::Notification;
 use log::warn;
-use text::PangoContext;
 
 use crate::drawer::Drawer;
 
@@ -19,19 +18,10 @@ pub use image::{GBuilderWImage, WImage};
 pub use text::{GBuilderWText, WText, WTextKind};
 
 pub trait Draw {
-    fn draw_with_offset(
-        &self,
-        offset: &Offset<usize>,
-        pango_context: &PangoContext,
-        drawer: &mut Drawer,
-    ) -> pangocairo::cairo::Result<()>;
+    fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer);
 
-    fn draw(
-        &self,
-        pango_context: &PangoContext,
-        drawer: &mut Drawer,
-    ) -> pangocairo::cairo::Result<()> {
-        self.draw_with_offset(&Default::default(), pango_context, drawer)
+    fn draw(&self, drawer: &mut Drawer) {
+        self.draw_with_offset(&Default::default(), drawer)
     }
 }
 
@@ -101,19 +91,12 @@ impl Widget {
 }
 
 impl Draw for Widget {
-    fn draw_with_offset(
-        &self,
-        offset: &Offset<usize>,
-        pango_context: &PangoContext,
-        output: &mut Drawer,
-    ) -> pangocairo::cairo::Result<()> {
+    fn draw_with_offset(&self, offset: &Offset<usize>, output: &mut Drawer) {
         match self {
-            Widget::Image(image) => image.draw_with_offset(offset, pango_context, output),
-            Widget::Text(text) => text.draw_with_offset(offset, pango_context, output),
-            Widget::FlexContainer(container) => {
-                container.draw_with_offset(offset, pango_context, output)
-            }
-            Widget::Unknown => Ok(()),
+            Widget::Image(image) => image.draw_with_offset(offset, output),
+            Widget::Text(text) => text.draw_with_offset(offset, output),
+            Widget::FlexContainer(container) => container.draw_with_offset(offset, output),
+            Widget::Unknown => (),
         }
     }
 }
@@ -125,8 +108,8 @@ pub enum CompileState {
 
 pub struct WidgetConfiguration<'a> {
     pub notification: &'a Notification,
-    pub pango_context: &'a PangoContext,
     pub theme: &'a Theme,
+    pub font_collection: skia_safe::textlayout::FontCollection,
     pub display_config: &'a DisplayConfig,
     pub override_properties: bool,
 }

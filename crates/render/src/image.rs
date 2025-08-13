@@ -1,18 +1,12 @@
 use std::io::{Read, Seek, Write};
 
-use image::codecs::png::PngEncoder;
 use log::{debug, error, warn};
-use pangocairo::cairo::ImageSurface;
 
-use config::display::{ImageProperty, ResizingMethod};
+use config::display::{ImageProperty, MipmapMode, ResizingMethod};
 use dbus::image::ImageData;
 use shared::file_descriptor::FileDescriptor;
 
-use crate::{
-    drawer::{Drawer, MakeRounding},
-    types::RectSize,
-    PangoContext,
-};
+use crate::{drawer::Drawer, types::RectSize};
 
 use super::{types::Offset, widget::Draw};
 
@@ -21,10 +15,11 @@ pub enum Image {
     Exists {
         // INFO: the image storage always store image in png format
         file_descriptor: FileDescriptor,
-        width: i32,
-        height: i32,
-        has_alpha: bool,
-        rounding_radius: f64,
+        origin_size: RectSize<i32>,
+        resized_size: RectSize<i32>,
+        rounding_radius: f32,
+        filter_mode: skia_safe::FilterMode,
+        mipmap_mode: skia_safe::MipmapMode,
     },
     Unknown,
 }
@@ -48,7 +43,18 @@ impl Image {
             return Image::Unknown;
         };
 
-        let image_buffer = {
+        if image_data.has_alpha {
+            return Image::Exists {
+                file_descriptor: image_data.image_file_descriptor,
+                origin_size: RectSize::new(image_data.width, image_data.height),
+                resized_size: RectSize::new(width, height),
+                rounding_radius: image_property.rounding as f32,
+                filter_mode: image_property.resizing_method.to_skia_value(),
+                mipmap_mode: image_property.mipmap_mode.to_skia_value(),
+            };
+        }
+
+        let rgb_image = {
             let mut image_buffer = vec![];
             let mut file = image_data.image_file_descriptor.get_file();
             file.seek(std::io::SeekFrom::Start(0))
@@ -58,40 +64,29 @@ impl Image {
             image_buffer
         };
 
-        let resized_image = if image_data.has_alpha {
-            image::RgbaImage::from_vec(origin_width, origin_height, image_buffer)
-                .map(image::DynamicImage::from)
-        } else {
-            image::RgbImage::from_vec(origin_width, origin_height, image_buffer)
-                .map(image::DynamicImage::from)
+        let mut rgba_image = vec![255; origin_width as usize * origin_height as usize * 4];
+        for (i, chunk) in rgb_image.chunks_exact(3).enumerate() {
+            let offset = i * 4;
+            rgba_image[offset] = chunk[0];
+            rgba_image[offset + 1] = chunk[1];
+            rgba_image[offset + 2] = chunk[2];
         }
-        .map(|image| {
-            image::imageops::resize(
-                &image,
-                width as u32,
-                height as u32,
-                image_property.resizing_method.to_filter_type(),
-            )
-        });
-
-        let Some(resized_image) = resized_image else {
-            warn!("Image doesn't fits into its size");
-            return Image::Unknown;
-        };
 
         let mut file = tempfile::tempfile().expect("The temp file must be created");
-        resized_image
-            .write_with_encoder(PngEncoder::new(&mut file))
-            .unwrap();
+        if let Err(err) = file.write_all(&rgba_image) {
+            Self::print_readable_fs_error(err, None);
+            return Image::Unknown;
+        }
 
         debug!("Image: Created from 'image_data'");
 
         Image::Exists {
             file_descriptor: file.into(),
-            width,
-            height,
-            has_alpha: true,
-            rounding_radius: image_property.rounding as f64,
+            origin_size: RectSize::new(image_data.width, image_data.height),
+            resized_size: RectSize::new(width, height),
+            rounding_radius: image_property.rounding as f32,
+            filter_mode: image_property.resizing_method.to_skia_value(),
+            mipmap_mode: image_property.mipmap_mode.to_skia_value(),
         }
     }
 
@@ -142,21 +137,17 @@ impl Image {
         };
 
         let mut file = tempfile::tempfile().expect("The temp file must be created");
-        image::imageops::resize(
-            &image,
-            width as u32,
-            height as u32,
-            image_property.resizing_method.to_filter_type(),
-        )
-        .write_with_encoder(PngEncoder::new(&mut file))
-        .unwrap();
+        if let Err(err) = file.write_all(&image.to_rgba8().into_vec()) {
+            Self::print_readable_fs_error(err, image_path);
+        }
 
         Image::Exists {
             file_descriptor: file.into(),
-            width,
-            height,
-            has_alpha: true,
-            rounding_radius: image_property.rounding as f64,
+            origin_size: RectSize::new(image.width() as i32, image.height() as i32),
+            resized_size: RectSize::new(width, height),
+            rounding_radius: image_property.rounding as f32,
+            filter_mode: image_property.resizing_method.to_skia_value(),
+            mipmap_mode: image_property.mipmap_mode.to_skia_value(),
         }
     }
 
@@ -228,20 +219,29 @@ impl Image {
         );
 
         let mut file = tempfile::tempfile().expect("The temp file must be created");
-        file.write_all(&pixmap.encode_png().unwrap())
-            .expect("The temp file must be able to write");
+        if let Err(err) = file.write_all(pixmap.data()) {
+            Self::print_readable_fs_error(err, image_path);
+            return Image::Unknown;
+        }
 
         Image::Exists {
             file_descriptor: file.into(),
-            width,
-            height,
-            has_alpha: true,
-            rounding_radius: image_property.rounding as f64,
+            origin_size: RectSize::new(width, height),
+            resized_size: RectSize::new(width, height),
+            rounding_radius: image_property.rounding as f32,
+            filter_mode: image_property.resizing_method.to_skia_value(),
+            mipmap_mode: image_property.mipmap_mode.to_skia_value(),
         }
     }
 
-    fn print_readable_fs_error(error: std::io::Error, image_path: &std::path::Path) {
-        let image_path = image_path.display();
+    fn print_readable_fs_error<'a, I>(error: std::io::Error, image_path: I)
+    where
+        I: Into<Option<&'a std::path::Path>>,
+    {
+        let image_path = image_path
+            .into()
+            .and_then(std::path::Path::to_str)
+            .unwrap_or("Hidden path");
 
         match error.kind() {
             std::io::ErrorKind::NotFound => {
@@ -276,14 +276,14 @@ impl Image {
 
     pub fn width(&self) -> Option<usize> {
         match self {
-            Image::Exists { width, .. } => Some(*width as usize),
+            Image::Exists { resized_size, .. } => Some(resized_size.width as usize),
             Image::Unknown => None,
         }
     }
 
     pub fn height(&self) -> Option<usize> {
         match self {
-            Image::Exists { height, .. } => Some(*height as usize),
+            Image::Exists { resized_size, .. } => Some(resized_size.height as usize),
             Image::Unknown => None,
         }
     }
@@ -333,66 +333,93 @@ impl Image {
 }
 
 impl Draw for Image {
-    fn draw_with_offset(
-        &self,
-        offset: &Offset<usize>,
-        _pango_context: &PangoContext,
-        drawer: &mut Drawer,
-    ) -> pangocairo::cairo::Result<()> {
+    fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer) {
         let Image::Exists {
             file_descriptor,
-            width,
-            height,
-            has_alpha,
+            origin_size,
+            resized_size,
             rounding_radius,
-            ..
+            filter_mode,
+            mipmap_mode,
         } = self
         else {
-            return Ok(());
+            return;
         };
-        debug_assert!(has_alpha);
 
         let mut file = file_descriptor.get_file();
         file.seek(std::io::SeekFrom::Start(0))
             .expect("The temp file should be seekable");
-        let source_surface = match ImageSurface::create_from_png(&mut *file) {
-            Ok(source_surface) => source_surface,
-            Err(err) => match err {
-                cairo::IoError::Cairo(error) => Err(error)?,
-                cairo::IoError::Io(error) => {
-                    error!("Happened something wrong with IO opertaion during image rendering. Error: {error}");
-                    return Ok(());
-                }
-            },
-        };
 
-        drawer.context.make_rounding(
-            (*offset).into(),
-            RectSize::new(*width as f64, *height as f64),
-            *rounding_radius,
-            *rounding_radius,
+        let mut buffer = vec![];
+        if let Err(err) = file.read_to_end(&mut buffer) {
+            Self::print_readable_fs_error(err, None);
+        }
+
+        let data = skia_safe::Data::new_copy(&buffer);
+        let image_info = skia_safe::ImageInfo::new(
+            (origin_size.width, origin_size.height),
+            skia_safe::ColorType::RGBA8888,
+            skia_safe::AlphaType::Premul,
+            None,
         );
-        drawer
-            .context
-            .set_source_surface(source_surface, offset.x as f64, offset.y as f64)?;
+        let image =
+            skia_safe::images::raster_from_data(&image_info, data, origin_size.width as usize * 4)
+                .expect("Image must be valid");
 
-        drawer.context.fill()?;
-        Ok(())
+        let src_rect =
+            skia_safe::Rect::from_xywh(0., 0., image.width() as f32, image.height() as f32);
+
+        let correct_offset: Offset<f32> = (*offset).into();
+        let dst_rect = skia_safe::Rect::from_xywh(
+            correct_offset.x,
+            correct_offset.y,
+            resized_size.width as f32,
+            resized_size.height as f32,
+        );
+
+        let corner_radius = (std::cmp::min(resized_size.width, resized_size.height) as f32 / 2.0)
+            .min(*rounding_radius);
+        let rrect = skia_safe::RRect::new_rect_xy(dst_rect, corner_radius, corner_radius);
+        let canvas = drawer.surface.canvas();
+
+        canvas.save();
+        canvas.clip_rrect(rrect, skia_safe::ClipOp::Intersect, true);
+
+        let sampling = skia_safe::SamplingOptions::new(*filter_mode, *mipmap_mode);
+
+        let mut paint = skia_safe::Paint::default();
+        paint.set_anti_alias(true);
+
+        canvas.draw_image_rect_with_sampling_options(
+            image,
+            Some((&src_rect, skia_safe::canvas::SrcRectConstraint::Fast)),
+            dst_rect,
+            sampling,
+            &paint,
+        );
+        canvas.restore();
     }
 }
 
-trait ToFilterType {
-    fn to_filter_type(&self) -> image::imageops::FilterType;
+trait ToSkiaValue<T> {
+    fn to_skia_value(&self) -> T;
 }
 
-impl ToFilterType for ResizingMethod {
-    fn to_filter_type(&self) -> image::imageops::FilterType {
+impl ToSkiaValue<skia_safe::FilterMode> for ResizingMethod {
+    fn to_skia_value(&self) -> skia_safe::FilterMode {
         match self {
-            ResizingMethod::Nearest => image::imageops::FilterType::Nearest,
-            ResizingMethod::Triangle => image::imageops::FilterType::Triangle,
-            ResizingMethod::CatmullRom => image::imageops::FilterType::CatmullRom,
-            ResizingMethod::Gaussian => image::imageops::FilterType::Gaussian,
-            ResizingMethod::Lanczos3 => image::imageops::FilterType::Lanczos3,
+            ResizingMethod::Nearest => skia_safe::FilterMode::Nearest,
+            ResizingMethod::Linear => skia_safe::FilterMode::Linear,
+        }
+    }
+}
+
+impl ToSkiaValue<skia_safe::MipmapMode> for MipmapMode {
+    fn to_skia_value(&self) -> skia_safe::MipmapMode {
+        match self {
+            MipmapMode::None => skia_safe::MipmapMode::None,
+            MipmapMode::Nearest => skia_safe::MipmapMode::Nearest,
+            MipmapMode::Linear => skia_safe::MipmapMode::Linear,
         }
     }
 }

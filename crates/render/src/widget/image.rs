@@ -6,7 +6,6 @@ use crate::{
     drawer::Drawer,
     image::Image,
     types::{Offset, RectSize},
-    PangoContext,
 };
 
 use super::{CompileState, Draw, WidgetConfiguration};
@@ -146,18 +145,12 @@ impl Default for WImage {
 }
 
 impl Draw for WImage {
-    fn draw_with_offset(
-        &self,
-        offset: &Offset<usize>,
-        pango_context: &PangoContext,
-        drawer: &mut Drawer,
-    ) -> pangocairo::cairo::Result<()> {
+    fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer) {
         if !self.content.is_exists() {
-            return Ok(());
+            return;
         }
 
         let offset = Offset::from(&self.property.margin) + *offset;
-        self.content
-            .draw_with_offset(&offset, pango_context, drawer)
+        self.content.draw_with_offset(&offset, drawer)
     }
 }

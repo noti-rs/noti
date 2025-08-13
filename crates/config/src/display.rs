@@ -126,6 +126,8 @@ public! {
 
         #[gbuilder(default)]
         resizing_method: ResizingMethod,
+        #[gbuilder(default)]
+        mipmap_mode: MipmapMode,
     }
 }
 
@@ -141,27 +143,43 @@ impl TryFromValue for ImageProperty {}
 pub enum ResizingMethod {
     #[serde(rename = "nearest")]
     Nearest,
-    #[serde(rename = "triangle")]
-    Triangle,
-    #[serde(rename = "catmull-rom")]
-    CatmullRom,
     #[default]
-    #[serde(rename = "gaussian")]
-    Gaussian,
-    #[serde(rename = "lanczos3")]
-    Lanczos3,
+    #[serde(rename = "linear")]
+    Linear,
 }
 
 impl TryFromValue for ResizingMethod {
     fn try_from_string(value: String) -> Result<Self, ConversionError> {
         Ok(match value.to_lowercase().as_str() {
             "nearest" => ResizingMethod::Nearest,
-            "triangle" => ResizingMethod::Triangle,
-            "catmull-rom" | "catmull_rom" => ResizingMethod::CatmullRom,
-            "gaussian" => ResizingMethod::Gaussian,
-            "lanczos3" => ResizingMethod::Lanczos3,
+            "linear" => ResizingMethod::Linear,
             _ => Err(shared::error::ConversionError::InvalidValue {
-                expected: "nearest, triangle, gaussian, lanczos3, catmull-rom or catmull_rom",
+                expected: "nearest or linear",
+                actual: value,
+            })?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub enum MipmapMode {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "nearest")]
+    Nearest,
+    #[default]
+    #[serde(rename = "linear")]
+    Linear,
+}
+
+impl TryFromValue for MipmapMode {
+    fn try_from_string(value: String) -> Result<Self, ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "none" => MipmapMode::None,
+            "nearest" => MipmapMode::Nearest,
+            "linear" => MipmapMode::Linear,
+            _ => Err(shared::error::ConversionError::InvalidValue {
+                expected: "none, nearest or linear",
                 actual: value,
             })?,
         })

@@ -29,3 +29,6 @@ wayland-protocols-wlr = { version = "0.3.8", features = ["client", "wayland-clie
 indexmap = "2.4.0"
 chrono = "0.4.39"
 libc = { version = "0.2.174", optional = true }
+wayland-egl = "0.32.8"
+skia-safe = { version = "0.87.0", features = ["gl", "textlayout"] }
+khronos-egl = { version = "6.0.0", features = ["static"] }

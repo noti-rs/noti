@@ -1,15 +1,21 @@
 use super::{
-    banner_stack::{Banner, BannerStack, DrawState},
-    buffer::DualSlotedBuffer,
+    banner_stack::{Banner, BannerStack},
     CachedLayout,
 };
-use crate::{dispatcher::Dispatcher, Error};
+use crate::{dispatcher::Dispatcher, EglState};
 use config::{self, Config};
 use dbus::{actions::Signal, notification::Notification};
 use log::{debug, error, trace};
-use render::{types::RectSize, PangoContext};
-use shared::cached_data::CachedData;
-use std::{cell::RefCell, collections::VecDeque, path::PathBuf, rc::Rc};
+use render::types::{Offset, RectSize};
+use shared::{
+    cached_data::CachedData,
+    data::{Borrowed, Data},
+};
+use skia_safe::{
+    gpu::{gl::FramebufferInfo, DirectContext},
+    Color,
+};
+use std::{collections::VecDeque, path::PathBuf};
 use wayland_client::{
     delegate_noop,
     protocol::{
@@ -24,6 +30,7 @@ use wayland_client::{
     },
     Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum,
 };
+use wayland_egl::WlEglSurface;
 use wayland_protocols::wp::cursor_shape::v1::client::{
     wp_cursor_shape_device_v1::{self, WpCursorShapeDeviceV1},
     wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
@@ -34,21 +41,26 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 
 pub(super) struct Window {
-    banner_stack: BannerStack<u32>,
-    pango_context: Rc<RefCell<PangoContext>>,
-
     event_queue: EventQueue<WindowState>,
     state: WindowState,
-
-    buffers: DualSlotedBuffer<u32>,
 }
 
 pub(super) struct WindowState {
+    banner_stack: BannerStack<u32>,
+
     rect_size: RectSize<usize>,
     anchored_margin: AnchoredMargin,
 
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
+    egl_window: WlEglSurface,
+    egl_surface: khronos_egl::Surface,
+    egl_state: EglState,
+
+    font_collection: skia_safe::textlayout::FontCollection,
+    gr_context: skia_safe::gpu::DirectContext,
+    config: Data<Config, Borrowed>,
+    cached_layouts: Data<CachedData<PathBuf, CachedLayout>, Borrowed>,
 
     pointer: WlPointer,
     cursor_device: WpCursorShapeDeviceV1,
@@ -63,11 +75,13 @@ pub(super) enum ConfigurationState {
 }
 
 impl Window {
-    pub(super) fn init<P>(
+    pub(super) fn init<P, Gpu>(
         wayland_connection: &Connection,
         protocols: &P,
-        pango_context: Rc<RefCell<PangoContext>>,
-        config: &Config,
+        gpu: &Gpu,
+        config: Data<Config, Borrowed>,
+        font_collection: skia_safe::textlayout::FontCollection,
+        cached_layouts: Data<CachedData<PathBuf, CachedLayout>, Borrowed>,
     ) -> anyhow::Result<Self>
     where
         P: AsRef<WlCompositor>
@@ -75,6 +89,7 @@ impl Window {
             + AsRef<WlSeat>
             + AsRef<WpCursorShapeManagerV1>
             + AsRef<ZwlrLayerShellV1>,
+        Gpu: AsRef<EglState> + AsRef<DirectContext>,
     {
         let mut event_queue = wayland_connection.new_event_queue();
 
@@ -85,19 +100,33 @@ impl Window {
 
         let (surface, layer_surface) = Self::make_surface(protocols, &event_queue.handle());
         let (pointer, cursor_device) = Self::make_pointer(protocols, &event_queue.handle());
+        let (egl_window, egl_surface) = Self::make_egl_surface(&surface, gpu, &rect_size)?;
 
-        let anchored_margin = Self::make_anchored_margin(config);
+        let anchored_margin = Self::make_anchored_margin(&config);
         anchored_margin.relocate_layer_surface(&layer_surface);
 
         layer_surface.set_size(rect_size.width as u32, rect_size.height as u32);
+
         surface.commit();
 
+        let egl_state: &EglState = gpu.as_ref();
+        let gr_context: &DirectContext = gpu.as_ref();
         let mut state = WindowState {
+            banner_stack: BannerStack::new(),
+
             rect_size,
             anchored_margin,
 
             surface,
             layer_surface,
+            egl_window,
+            egl_surface,
+            egl_state: egl_state.clone(),
+
+            font_collection,
+            gr_context: gr_context.clone(),
+            config: config.clone(),
+            cached_layouts: cached_layouts.clone(),
 
             pointer_state: Default::default(),
             cursor_device,
@@ -106,24 +135,13 @@ impl Window {
             configuration_state: ConfigurationState::NotConfiured,
         };
 
-        let mut buffers = DualSlotedBuffer::init(protocols, wayland_connection, &rect_size);
-        buffers.dispatch()?;
-
         while let ConfigurationState::NotConfiured = state.configuration_state {
             event_queue.blocking_dispatch(&mut state)?;
         }
 
         debug!("Window: Initialized");
 
-        Ok(Self {
-            banner_stack: BannerStack::new(),
-            pango_context,
-
-            event_queue,
-            state,
-
-            buffers,
-        })
+        Ok(Self { event_queue, state })
     }
 
     fn make_surface<P>(
@@ -169,20 +187,64 @@ impl Window {
         (pointer, cursor_device)
     }
 
-    pub(super) fn reconfigure(&mut self, config: &Config) {
+    fn make_egl_surface<Gpu>(
+        surface: &WlSurface,
+        gpu: &Gpu,
+        rect_size: &RectSize<usize>,
+    ) -> anyhow::Result<(WlEglSurface, khronos_egl::Surface)>
+    where
+        Gpu: AsRef<EglState>,
+    {
+        let egl_window = WlEglSurface::new(
+            surface.id(),
+            rect_size.width as i32,
+            rect_size.height as i32,
+        )?;
+
+        let egl_state: &EglState = gpu.as_ref();
+        let egl_surface = unsafe {
+            egl_state.instance.create_window_surface(
+                egl_state.display,
+                egl_state.config,
+                egl_window.ptr() as khronos_egl::NativeWindowType,
+                None,
+            )?
+        };
+
+        Ok((egl_window, egl_surface))
+    }
+
+    pub(super) fn frame(&mut self) {
+        self.state.surface.damage(0, 0, i32::MAX, i32::MAX);
+        self.state.surface.frame(&self.event_queue.handle(), ());
+
+        debug!("Window: Requested a frame to the Wayland compositor");
+    }
+
+    pub(super) fn commit(&self) {
+        self.state.surface.commit();
+        debug!("Window: Commited")
+    }
+
+    pub(super) fn sync(&mut self) -> anyhow::Result<()> {
+        self.event_queue.roundtrip(&mut self.state)?;
+        Ok(())
+    }
+}
+
+impl WindowState {
+    pub(super) fn reconfigure(&mut self, config: Data<Config, Borrowed>) {
         self.relocate(config.general().offset, &config.general().anchor);
-        self.banner_stack.configure(config);
+        self.banner_stack.configure(&config);
+        self.config = config.clone();
 
         debug!("Window: Reconfigured by updated config");
     }
 
     fn relocate(&mut self, (x, y): (u8, u8), anchor_cfg: &config::general::Anchor) {
-        self.state
-            .anchored_margin
-            .update(x as i32, y as i32, anchor_cfg);
-        self.state
-            .anchored_margin
-            .relocate_layer_surface(&self.state.layer_surface);
+        self.anchored_margin.update(x as i32, y as i32, anchor_cfg);
+        self.anchored_margin
+            .relocate_layer_surface(&self.layer_surface);
     }
 
     pub(super) fn total_banners(&self) -> usize {
@@ -193,17 +255,14 @@ impl Window {
         self.banner_stack.is_empty()
     }
 
-    pub(super) fn add_banners(&mut self, notifications: Vec<Notification>, config: &Config) {
+    pub(super) fn add_banners(&mut self, notifications: Vec<Notification>) {
         self.banner_stack
-            .extend_from(notifications.into_iter(), config);
+            .extend_from(notifications.into_iter(), &self.config);
     }
 
-    pub(super) fn replace_by_indices(
-        &mut self,
-        notifications: &mut VecDeque<Notification>,
-        config: &Config,
-    ) {
-        self.banner_stack.replace_by_keys(notifications, config);
+    pub(super) fn replace_by_indices(&mut self, notifications: &mut VecDeque<Notification>) {
+        self.banner_stack
+            .replace_by_keys(notifications, &self.config);
     }
 
     pub(super) fn remove_banners_by_id(
@@ -213,12 +272,12 @@ impl Window {
         self.banner_stack.remove_by_keys(notification_indices)
     }
 
-    pub(super) fn remove_expired_banners(&mut self, config: &Config) -> Vec<Notification> {
-        self.banner_stack.remove_expired(config)
+    pub(super) fn remove_expired_banners(&mut self) -> Vec<Notification> {
+        self.banner_stack.remove_expired(&self.config)
     }
 
-    pub(super) fn handle_hover(&mut self, config: &Config) {
-        if let Some(index) = self.get_hovered_banner(config) {
+    pub(super) fn handle_hover(&mut self) {
+        if let Some(index) = self.get_hovered_banner() {
             self.banner_stack[&index].reset_timeout();
 
             // INFO: because of every tracking pointer position, it emits very frequently and it's
@@ -233,21 +292,21 @@ impl Window {
             .for_each(Banner::reset_timeout);
     }
 
-    pub(super) fn handle_click(&mut self, config: &Config) -> Option<Signal> {
-        if let PrioritiedPressState::Unpressed = self.state.pointer_state.press_state {
+    pub(super) fn handle_click(&mut self) -> Option<Signal> {
+        if let PrioritiedPressState::Unpressed = self.pointer_state.press_state {
             return None;
         }
-        let _press_state = self.state.pointer_state.press_state.take();
+        let _press_state = self.pointer_state.press_state.take();
 
-        if let Some(id) = self.get_hovered_banner(config) {
-            if config.general().anchor.is_bottom() {
-                self.state.pointer_state.y -=
-                    self.banner_stack[&id].height() as f64 + config.general().gap as f64;
+        if let Some(id) = self.get_hovered_banner() {
+            if self.config.general().anchor.is_bottom() {
+                self.pointer_state.y -=
+                    self.banner_stack[&id].height() as f64 + self.config.general().gap as f64;
 
                 // INFO: the compositor may wrongly relocate to previous position and it will cause
                 // of incorrect pointer positioning for next click in row. So need to ignore and
                 // left remaining.
-                self.state.pointer_state.ignore_first_relocate();
+                self.pointer_state.ignore_first_relocate();
             }
 
             debug!("Window: Clicked to notification banner with id {id}");
@@ -264,18 +323,18 @@ impl Window {
         None
     }
 
-    fn get_hovered_banner(&self, config: &Config) -> Option<u32> {
-        if !self.state.pointer_state.entered {
+    fn get_hovered_banner(&self) -> Option<u32> {
+        if !self.pointer_state.entered {
             return None;
         }
 
         let mut offset = 0.0;
-        let gap = config.general().gap as f64;
+        let gap = self.config.general().gap as f64;
 
         let finder = |banner: &Banner| {
             let banner_height = banner.height() as f64;
             let bottom = offset + banner_height;
-            if (offset..bottom).contains(&self.state.pointer_state.y) {
+            if (offset..bottom).contains(&self.pointer_state.y) {
                 Some(banner.notification().id)
             } else {
                 offset += banner_height + gap;
@@ -283,139 +342,78 @@ impl Window {
             }
         };
 
-        if config.general().anchor.is_top() {
+        if self.config.general().anchor.is_top() {
             self.banner_stack.banners().find_map(finder)
         } else {
             self.banner_stack.banners().rev().find_map(finder)
         }
     }
-
-    pub(super) fn draw(
-        &mut self,
-        config: &Config,
-        cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) -> Result<(), Error> {
-        let gap = config.general().gap;
-        let gap_buffer = self.allocate_gap_buffer(gap);
-
-        self.buffers.current_mut().reset();
-
-        let threshold = self.banner_stack.len().saturating_sub(1);
-        let mut total = 0;
-        let mut indices_of_unrendered_banners = vec![];
-
-        let writer = |banner: &mut Banner| {
-            if !banner.is_drawn() {
-                match banner.draw(&self.pango_context.borrow(), config, cached_layouts) {
-                    DrawState::Success(framebuffer) => self
-                        .buffers
-                        .current_mut()
-                        .push(banner.notification().id, &framebuffer),
-                    DrawState::Failure => {
-                        indices_of_unrendered_banners.push(banner.notification().id);
-                    }
-                }
-            } else {
-                match self.buffers.other().data_by_slot(&banner.notification().id) {
-                    Some(stored_framebuffer) => self
-                        .buffers
-                        .current_mut()
-                        .push(banner.notification().id, &stored_framebuffer),
-                    None => {
-                        error!("Window: Invalide state! There is no stored framebuffer and it was skipped. The further work of the application may be invalid!");
-                        self.buffers.current_mut().push(
-                            banner.notification().id,
-                            &vec![0; banner.width() * banner.height() * 4],
-                        );
-                    }
-                }
-            }
-
-            if total < threshold {
-                self.buffers.current_mut().push_without_slot(&gap_buffer);
-            }
-
-            total += 1;
-        };
-
-        if config.general().anchor.is_top() {
-            self.banner_stack.banners_mut().for_each(writer)
-        } else {
-            self.banner_stack.banners_mut().rev().for_each(writer)
+    fn use_current_egl_surface(&self) -> anyhow::Result<()> {
+        if let Err(err) = self.egl_state.instance.make_current(
+            self.egl_state.display,
+            Some(self.egl_surface),
+            Some(self.egl_surface),
+            Some(self.egl_state.context),
+        ) {
+            anyhow::bail!(err);
         }
 
-        let unrendered_banners = self
-            .banner_stack
-            .remove_by_keys(&indices_of_unrendered_banners);
+        Ok(())
+    }
 
-        self.resize(RectSize::new(
-            self.banner_stack.width(),
-            self.banner_stack.total_height_with_gap(gap as usize),
-        ));
+    fn create_drawing_surface(&mut self) -> anyhow::Result<skia_safe::Surface> {
+        let samples = 0;
+        let stencil_bits = 8;
+        let backend_rt = skia_safe::gpu::backend_render_targets::make_gl(
+            (self.rect_size.width as i32, self.rect_size.height as i32),
+            samples,
+            stencil_bits,
+            FramebufferInfo {
+                fboid: 0,
+                format: skia_safe::gpu::gl::Format::RGBA8.into(),
+                protected: skia_safe::gpu::Protected::No,
+            },
+        );
 
-        self.buffers.current_mut().build(&self.state.rect_size);
-
-        if unrendered_banners.is_empty() {
-            Ok(())
-        } else {
-            Err(Error::UnrenderedNotifications(unrendered_banners))
+        match skia_safe::gpu::surfaces::wrap_backend_render_target(
+            &mut self.gr_context,
+            &backend_rt,
+            skia_safe::gpu::SurfaceOrigin::BottomLeft,
+            skia_safe::ColorType::RGBA8888,
+            None,
+            None,
+        ) {
+            Some(surface) => Ok(surface),
+            None => anyhow::bail!("Failed to make drawing surface for layer surface"),
         }
     }
 
     fn resize(&mut self, rect_size: RectSize<usize>) {
-        self.state.rect_size = rect_size;
+        self.rect_size = rect_size;
 
-        self.state.layer_surface.set_size(
-            self.state.rect_size.width as u32,
-            self.state.rect_size.height as u32,
-        );
+        let (width, height) = (self.rect_size.width, self.rect_size.height);
+        self.layer_surface.set_size(width as u32, height as u32);
+        let (dx, dy) = (0, 0);
+        self.egl_window.resize(width as i32, height as i32, dx, dy);
 
         debug!(
             "Window: Resized to width - {}, height - {}",
-            self.state.rect_size.width, self.state.rect_size.height
+            self.rect_size.width, self.rect_size.height
         );
     }
 
-    fn allocate_gap_buffer(&self, gap: u8) -> Vec<u8> {
-        let rowstride = self.state.rect_size.width * 4;
-        let gap_size = gap as usize * rowstride;
-        vec![0; gap_size]
-    }
-
-    pub(super) fn frame(&mut self) {
-        self.state.surface.damage(0, 0, i32::MAX, i32::MAX);
-        self.state.surface.frame(&self.event_queue.handle(), ());
-        self.state
-            .surface
-            .attach(self.buffers.current().wl_buffer().into(), 0, 0);
-        self.buffers.flip();
-
-        debug!("Window: Requested a frame to the Wayland compositor");
-    }
-
-    pub(super) fn commit(&self) {
-        self.state.surface.commit();
-        debug!("Window: Commited")
-    }
-
-    pub(super) fn sync(&mut self) -> anyhow::Result<()> {
-        self.event_queue.roundtrip(&mut self.state)?;
-        Ok(())
-    }
-
-    pub(super) fn dispatch(&mut self) -> anyhow::Result<bool> {
-        let mut is_dispatched = self.buffers.dispatch()?;
-        is_dispatched |= <Self as Dispatcher>::dispatch(self)?;
-        Ok(is_dispatched)
-    }
-}
-
-impl WindowState {
     fn destroy(&self) {
         self.layer_surface.destroy();
         self.surface.destroy();
         self.cursor_device.destroy();
         self.pointer.release();
+        if let Err(err) = self
+            .egl_state
+            .instance
+            .destroy_surface(self.egl_state.display, self.egl_surface)
+        {
+            error!("Failed to destroy EGL surface! Further application work won't guaranteed to be normal! Error: {err}.")
+        }
     }
 }
 
@@ -428,6 +426,19 @@ impl Drop for Window {
         }
 
         debug!("Window: Deinitialized");
+    }
+}
+
+impl std::ops::Deref for Window {
+    type Target = WindowState;
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl std::ops::DerefMut for Window {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
     }
 }
 
@@ -601,8 +612,71 @@ impl PointerState {
 delegate_noop!(WindowState: ignore WlSurface);
 delegate_noop!(WindowState: ignore WlShmPool);
 delegate_noop!(WindowState: ignore WlBuffer);
-delegate_noop!(WindowState: ignore WlCallback);
 delegate_noop!(WindowState: ignore WpCursorShapeDeviceV1);
+
+impl Dispatch<WlCallback, ()> for WindowState {
+    fn event(
+        state: &mut Self,
+        _proxy: &WlCallback,
+        event: <WlCallback as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        if let wayland_client::protocol::wl_callback::Event::Done { .. } = event {
+            state
+                .use_current_egl_surface()
+                .expect("The EGL surface must be available to make current and use it");
+
+            state.banner_stack.banners_mut().for_each(|banner| {
+                banner.compile(
+                    &state.config,
+                    state.font_collection.clone(),
+                    &state.cached_layouts,
+                )
+            });
+
+            let gap = state.config.general().gap as usize;
+            state.resize(RectSize::new(
+                state.banner_stack.width(),
+                state.banner_stack.total_height_with_gap(gap),
+            ));
+
+            let mut sk_surface = state
+                .create_drawing_surface()
+                .expect("The skia's surface must be correct and created without issues");
+            sk_surface.canvas().clear(Color::from_argb(0, 0, 0, 0));
+
+            let mut offset = Offset::default();
+            let writer = |banner: &Banner| {
+                banner.draw(&offset, &mut sk_surface);
+                offset.y += banner.height() + gap;
+            };
+
+            if state.config.general().anchor.is_top() {
+                state.banner_stack.banners().for_each(writer)
+            } else {
+                state.banner_stack.banners().rev().for_each(writer)
+            }
+
+            state
+                .gr_context
+                .flush_and_submit_surface(&mut sk_surface, skia_safe::gpu::SyncCpu::No);
+
+            state
+                .egl_state
+                .instance
+                .swap_interval(state.egl_state.display, 0)
+                .and_then(|_| {
+                    state
+                        .egl_state
+                        .instance
+                        .swap_buffers(state.egl_state.display, state.egl_surface)
+                })
+                .expect("The buffer swapping must be errorless");
+        }
+    }
+}
 
 impl Dispatch<WlPointer, ()> for WindowState {
     fn event(

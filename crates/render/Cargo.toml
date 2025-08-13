@@ -17,7 +17,6 @@ derive_more.workspace = true
 derive_builder.workspace = true
 
 resvg = "0.45.1"
-image = { version = "0.25.2", features = ["png"] }
-pangocairo = "0.21.0"
-cairo-rs = { version = "0.21.0", features = ["png", "svg"] }
+image = { version = "0.25.2"}
 linicon = "2.3.0"
+skia-safe = { version = "0.87.0", features = ["gl", "textlayout"] }
