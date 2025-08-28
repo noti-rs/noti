@@ -9,16 +9,17 @@ use indexmap::{
     IndexMap,
 };
 use log::{debug, trace};
-use render::{
-    drawer::Drawer,
-    types::{Offset, RectSize},
-    widget::{
-        self, Alignment, Draw, FlexContainerBuilder, Position, WImage, WText, WTextKind, Widget,
-        WidgetConfiguration,
-    },
-};
 use shared::cached_data::CachedData;
 use std::{cmp::Ordering, collections::VecDeque, hash::Hash, path::PathBuf, time};
+use widgets::{
+    self,
+    drawer::Drawer,
+    types::{Offset, RectSize},
+    widget::flex_container::{Alignment, FlexContainerBuilder, Position},
+    widget::image::WImage,
+    widget::text::{WText, WTextKind},
+    Draw, Widget, WidgetConfiguration,
+};
 
 use super::CachedLayout;
 
@@ -373,14 +374,14 @@ impl Banner {
         FlexContainerBuilder::default()
             .spacing(display_config.padding.clone())
             .border(display_config.border.clone())
-            .direction(widget::Direction::Horizontal)
+            .direction(widgets::widget::flex_container::Direction::Horizontal)
             .alignment(Alignment::new(Position::Start, Position::Center))
             .children(vec![
                 WImage::new().into(),
                 FlexContainerBuilder::default()
                     .spacing(Default::default())
                     .border(Border::default())
-                    .direction(widget::Direction::Vertical)
+                    .direction(widgets::widget::flex_container::Direction::Vertical)
                     .alignment(Alignment::new(Position::Center, Position::Center))
                     .transparent_background(true)
                     .children(vec![

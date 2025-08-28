@@ -8,7 +8,7 @@ use crate::{
     types::{Offset, RectSize},
 };
 
-use super::{CompileState, Draw, WidgetConfiguration};
+use crate::{CompileState, Draw, WidgetConfiguration};
 
 const DEFAULT_ICON_THEME: &str = "hicolor";
 

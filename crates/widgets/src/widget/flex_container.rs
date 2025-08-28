@@ -6,9 +6,8 @@ use crate::{
     color::{Bgra, Color},
     drawer::{Drawer, UseColor},
     types::{Offset, RectSize},
+    CompileState, Draw, Widget, WidgetConfiguration,
 };
-
-use super::{CompileState, Draw, Widget, WidgetConfiguration};
 
 #[derive(macros::GenericBuilder, derive_builder::Builder, Clone)]
 #[builder(pattern = "owned")]
@@ -93,11 +92,11 @@ impl FlexContainer {
         CompileState::Success
     }
 
-    pub(super) fn max_width(&self) -> usize {
+    pub(crate) fn max_width(&self) -> usize {
         self.max_width
     }
 
-    pub(super) fn max_height(&self) -> usize {
+    pub(crate) fn max_height(&self) -> usize {
         self.max_height
     }
 

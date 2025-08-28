@@ -326,7 +326,6 @@ dependencies = [
  "khronos-egl",
  "libc",
  "log",
- "render",
  "shared",
  "skia-safe",
  "tempfile",
@@ -334,6 +333,7 @@ dependencies = [
  "wayland-egl",
  "wayland-protocols",
  "wayland-protocols-wlr",
+ "widgets",
 ]
 
 [[package]]
@@ -1022,8 +1022,8 @@ dependencies = [
  "log",
  "pest",
  "pest_derive",
- "render",
  "shared",
+ "widgets",
 ]
 
 [[package]]
@@ -2207,25 +2207,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
-name = "render"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "config",
- "dbus",
- "derive_builder",
- "derive_more",
- "image",
- "linicon",
- "log",
- "macros",
- "resvg",
- "shared",
- "skia-safe",
- "tempfile",
-]
-
-[[package]]
 name = "resvg"
 version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3205,6 +3186,25 @@ name = "weezl"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a751b3277700db47d3e574514de2eced5e54dc8a5436a3bf7a0b248b2cee16f3"
+
+[[package]]
+name = "widgets"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "config",
+ "dbus",
+ "derive_builder",
+ "derive_more",
+ "image",
+ "linicon",
+ "log",
+ "macros",
+ "resvg",
+ "shared",
+ "skia-safe",
+ "tempfile",
+]
 
 [[package]]
 name = "winapi"

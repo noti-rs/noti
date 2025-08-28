@@ -1,21 +1,22 @@
+pub mod color;
+pub mod drawer;
+pub mod image;
+pub mod types;
+pub mod widget;
+
 use config::{display::DisplayConfig, theme::Theme};
 use dbus::notification::Notification;
 use log::warn;
 
 use crate::drawer::Drawer;
 
-use super::types::{Offset, RectSize};
+use types::{Offset, RectSize};
 
-mod flex_container;
-mod image;
-pub(crate) mod text;
-
-pub use flex_container::{
-    Alignment, Direction, FlexContainer, FlexContainerBuilder, GBuilderAlignment,
-    GBuilderFlexContainer, Position,
+use widget::{
+    flex_container::{Direction, FlexContainer},
+    image::WImage,
+    text::WText,
 };
-pub use image::{GBuilderWImage, WImage};
-pub use text::{GBuilderWText, WText, WTextKind};
 
 pub trait Draw {
     fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer);

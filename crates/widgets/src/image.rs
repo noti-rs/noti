@@ -8,7 +8,7 @@ use shared::file_descriptor::FileDescriptor;
 
 use crate::{drawer::Drawer, types::RectSize};
 
-use super::{types::Offset, widget::Draw};
+use super::{types::Offset, Draw};
 
 #[derive(Clone)]
 pub enum Image {

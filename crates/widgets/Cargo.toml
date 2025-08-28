@@ -1,5 +1,5 @@
 [package]
-name = "render"
+name = "widgets"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true

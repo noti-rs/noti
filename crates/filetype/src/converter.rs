@@ -7,12 +7,15 @@ use config::{
 };
 use log::warn;
 use pest::iterators::{Pair, Pairs};
-use render::widget::{
-    Alignment, GBuilderAlignment, GBuilderFlexContainer, GBuilderWImage, GBuilderWText, Widget,
-};
 use shared::{
     error::ConversionError,
     value::{TryDowncast, Value},
+};
+use widgets::{
+    widget::flex_container::{Alignment, GBuilderAlignment, GBuilderFlexContainer},
+    widget::image::GBuilderWImage,
+    widget::text::GBuilderWText,
+    Widget,
 };
 
 use crate::parser::Rule;

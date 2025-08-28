@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use log::warn;
-use render::widget::Widget;
+use widgets::Widget;
 use shared::{
     cached_data::{CacheUpdate, CachedValueError},
     file_watcher::{FileState, FilesWatcher},

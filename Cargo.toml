@@ -29,7 +29,7 @@ members = [
   "crates/client",
   "crates/dbus",
   "crates/macros",
-  "crates/render",
+  "crates/widgets",
   "crates/filetype",
   "crates/shared"
 ]
@@ -51,7 +51,7 @@ tempfile = "3.12.0"
 derive_builder = "0.20.0"
 
 config.path = "crates/config"
-render.path = "crates/render"
+widgets.path = "crates/widgets"
 dbus.path = "crates/dbus"
 shared.path = "crates/shared"
 macros.path = "crates/macros"

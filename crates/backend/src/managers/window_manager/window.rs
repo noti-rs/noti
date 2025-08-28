@@ -6,7 +6,7 @@ use crate::{dispatcher::Dispatcher, EglState};
 use config::{self, Config};
 use dbus::{actions::Signal, notification::Notification};
 use log::{debug, error, trace};
-use render::types::{Offset, RectSize};
+use widgets::types::{Offset, RectSize};
 use shared::{
     cached_data::CachedData,
     data::{Borrowed, Data},

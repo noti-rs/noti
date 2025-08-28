@@ -8,9 +8,8 @@ use crate::{
     color::Bgra,
     drawer::Drawer,
     types::{Offset, RectSize},
+    CompileState, Draw, WidgetConfiguration,
 };
-
-use super::{CompileState, Draw, WidgetConfiguration};
 
 #[derive(macros::GenericBuilder)]
 #[gbuilder(name(GBuilderWText))]

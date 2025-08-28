@@ -11,7 +11,7 @@ libc_alloc = ["dep:libc"]
 [dependencies]
 dbus.workspace = true
 config.workspace = true
-render.workspace = true
+widgets.workspace = true
 shared.workspace = true
 filetype.path = "../filetype"
 
