@@ -10,10 +10,22 @@ use crate::{drawer::Drawer, types::RectSize};
 
 use super::{types::Offset, Draw};
 
+/// Represents a GPU-ready image used by `WImage` during rendering.
+///
+/// The `Image` type acts as a container for image data and its rendering
+/// configuration. Rather than immediately rasterizing or resizing images,
+/// it stores their file descriptor and size information, leaving the
+/// final drawing and scaling work to the GPU.
+///
+/// This allows efficient rendering and flexible resizing while avoiding
+/// unnecessary CPU work.  
+///
+/// The [`Image::Unknown`] variant indicates that the image could
+/// not be loaded or was invalid (e.g. corrupt raw data or unsupported format),
+/// allowing the caller to gracefully skip rendering instead of crashing.
 #[derive(Clone)]
 pub enum Image {
     Exists {
-        // INFO: the image storage always store image in png format
         file_descriptor: FileDescriptor,
         origin_size: RectSize<i32>,
         resized_size: RectSize<i32>,
@@ -25,6 +37,17 @@ pub enum Image {
 }
 
 impl Image {
+    /// Creates an [`Image`] from raw image data received over D-Bus or another source.
+    ///
+    /// This method decodes the provided [`ImageData`] into a valid RGBA buffer,
+    /// stores it in a temporary file (via [`FileDescriptor`]), and prepares its
+    /// rendering metadata (sizes, filter mode, mipmap mode).
+    ///
+    /// Before creating the final image, it verifies that it can fit within
+    /// the provided [`RectSize`] constraints, optionally scaling it down
+    /// according to [`ImageProperty`] settings.  
+    ///
+    /// Returns [`Image::Unknown`] if the data cannot be decoded or does not fit.
     pub fn from_image_data(
         image_data: ImageData,
         image_property: &ImageProperty,
@@ -90,6 +113,17 @@ impl Image {
         }
     }
 
+    /// Creates an [`Image`] from an image file at the given path.
+    ///
+    /// This method supports any file format handled by `image-rs`
+    /// (PNG, JPEG, WEBP, etc.) and will load, decode, and store the
+    /// result as a temporary file descriptor for GPU-backed rendering.
+    ///
+    /// Like [`Self::from_image_data`], it respects the
+    /// size restrictions and scaling rules provided in [`ImageProperty`].
+    ///
+    /// Returns [`Image::Unknown`] if the file is missing, unreadable,
+    /// or cannot be decoded.
     pub fn from_path(
         image_path: &std::path::Path,
         image_property: &ImageProperty,
@@ -151,6 +185,15 @@ impl Image {
         }
     }
 
+    /// Creates an [`Image`] from an SVG file.
+    ///
+    /// Unlike [`Self::from_path`], this method rasterizes
+    /// the SVG immediately into a bitmap image before storing it
+    /// as a file descriptor.  
+    ///
+    /// This ensures the resulting image is GPU-friendly while preserving
+    /// correct vector scaling and aspect ratio within the given
+    /// [`RectSize`] constraints.
     pub fn from_svg(
         image_path: &std::path::Path,
         image_property: &ImageProperty,
@@ -234,6 +277,14 @@ impl Image {
         }
     }
 
+    /// Prints a human-readable description of a file-system error
+    /// that occurred while working with the image.
+    ///
+    /// This is used when reading, writing, or opening the temporary
+    /// file descriptor fails, making it easier to debug I/O issues.
+    ///
+    /// It is intended for logging and diagnostics, not for user-facing
+    /// error messages.
     fn print_readable_fs_error<'a, I>(error: std::io::Error, image_path: I)
     where
         I: Into<Option<&'a std::path::Path>>,
@@ -254,26 +305,17 @@ impl Image {
         }
     }
 
-    pub fn or(self, other: Self) -> Self {
-        if self.is_exists() {
-            self
-        } else {
-            other
-        }
-    }
-
-    pub fn or_else<F: FnOnce() -> Self>(self, other: F) -> Self {
-        if self.is_exists() {
-            self
-        } else {
-            other()
-        }
-    }
-
+    /// Checks whether the image is exists or not.
     pub fn is_exists(&self) -> bool {
         matches!(self, Image::Exists { .. })
     }
 
+    /// Returns the current width of the image in pixels.
+    ///
+    /// This reflects the `resized_size.width` if the image was scaled
+    /// during creation.  
+    ///  
+    /// For [`Image::Unknown`], this will typically return [None].
     pub fn width(&self) -> Option<usize> {
         match self {
             Image::Exists { resized_size, .. } => Some(resized_size.width as usize),
@@ -281,6 +323,9 @@ impl Image {
         }
     }
 
+    /// Returns the current height of the image in pixels.
+    ///
+    /// For [`Image::Unknown`], this will typically return [`None`].
     pub fn height(&self) -> Option<usize> {
         match self {
             Image::Exists { resized_size, .. } => Some(resized_size.height as usize),
@@ -288,6 +333,14 @@ impl Image {
         }
     }
 
+    /// Attempts to fit the image into the provided rectangular space.
+    ///
+    /// This method calculates a scaled width and height that preserve
+    /// the image's aspect ratio while respecting margins and constraints
+    /// from [`ImageProperty`].  
+    ///
+    /// Returns `Some((width, height))` if the image can fit into the
+    /// specified space, or `None` if it cannot be displayed at all.
     fn try_fit_into_restricted_space(
         mut width: i32,
         mut height: i32,
@@ -314,6 +367,11 @@ impl Image {
         }
     }
 
+    /// Scales the image dimensions down to not exceed `max_size`,
+    /// preserving its aspect ratio.
+    ///
+    /// This is typically used to cap very large images to a reasonable
+    /// size before rendering.
     fn limit_size(width: &mut i32, height: &mut i32, max_size: u16) {
         let swap = height > width;
         if swap {
@@ -401,6 +459,16 @@ impl Draw for Image {
     }
 }
 
+/// A helper trait to convert application-specific configuration
+/// values into their Skia equivalents.
+///
+/// This trait is implemented for types like filter mode or mipmap
+/// mode that exist in user configuration but must be translated
+/// into `skia_safe` enums before rendering.
+///
+/// By using this trait, `Image` and other drawing code remain
+/// decoupled from configuration details, making the conversion
+/// process uniform and easy to extend.
 trait ToSkiaValue<T> {
     fn to_skia_value(&self) -> T;
 }

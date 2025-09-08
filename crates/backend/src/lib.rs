@@ -62,7 +62,7 @@ pub fn run(config: Config) -> anyhow::Result<()> {
                 Action::Schedule(notification) => {
                     debug!(
                         "Backend: Scheduled notification with id {} for time {}",
-                        &notification.id, &notification.time
+                        notification.data.id, notification.time
                     );
                     scheduler.add(notification);
                 }
@@ -79,10 +79,11 @@ pub fn run(config: Config) -> anyhow::Result<()> {
             .pop_due_notifications()
             .into_iter()
             .for_each(|scheduled| {
+                let notification_id = scheduled.data.id;
                 backend.create_notification(scheduled.data);
                 debug!(
                     "Backend: Notification with id {} due for delivery",
-                    &scheduled.id
+                    notification_id
                 );
             });
 
@@ -164,6 +165,8 @@ fn debug_signal(signal: &Signal) {
     }
 }
 
+/// Represents the main state of the `Noti` backend. It stores key objects related to drawing and
+/// presentation.
 pub(crate) struct Backend {
     wayland_connection: Connection,
     protocols: Protocols,
@@ -172,6 +175,8 @@ pub(crate) struct Backend {
     gpu_interface: GpuInterface,
 }
 
+/// Represents the list of bound Wayland protocols, usable for a wide range of tasks—from window
+/// creation to managing complex states.
 #[derive(Builder)]
 struct Protocols {
     wl_compositor: WlCompositor,
@@ -182,6 +187,7 @@ struct Protocols {
     wp_cursor_shape_manager: WpCursorShapeManagerV1,
 }
 
+/// Represents a collection of objects related to the GPU.
 struct GpuInterface {
     egl_state: EglState,
     skia_backend: SkiaBackend,
@@ -192,6 +198,10 @@ pub type EglDisplay = khronos_egl::Display;
 pub type EglConfig = khronos_egl::Config;
 pub type EglContext = khronos_egl::Context;
 
+/// Represents the state for managing an EGL instance, including display, configuration, and context.
+///
+/// EGL provides a bridge between OpenGL (or OpenGL ES) and the native windowing system. In Wayland,
+/// EGL allows rendering directly to GPU buffers, enabling hardware-accelerated drawing.
 #[derive(Clone)]
 struct EglState {
     instance: Rc<EglInstance>,
@@ -200,6 +210,8 @@ struct EglState {
     context: EglContext,
 }
 
+/// This application uses Skia as the primary module for drawing complex UI. To enable immediate
+/// surface creation, the `GrContext` must be persisted for the lifetime of the application.
 struct SkiaBackend {
     /// It's important to have DirectContext because it relies to current available surface.
     /// Without it the DirectContext won't be created and usable.
@@ -207,9 +219,13 @@ struct SkiaBackend {
     gr_context: skia_safe::gpu::DirectContext,
 }
 
+/// Wrapper for `NO_SURFACE` from EGL. This wrapper can be set as the current surface to indicate
+/// to the GPU that no surface is active, effectively performing no rendering. It helps ensure
+/// correct EGL surface management.
 struct NoSurface(pub khronos_egl::Surface);
 
 impl Backend {
+    /// Initializes the backend by connecting to Wayland, setting up EGL, and creating a Skia context.
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
         let (wayland_connection, protocols) = Self::connect_to_wayland()?;
         let egl_state = Self::init_egl(&wayland_connection)?;
@@ -227,6 +243,13 @@ impl Backend {
         })
     }
 
+    /// Connects to Wayland and binds the required protocols. To prevent application deadlock during
+    /// connection, a timeout is used.
+    ///
+    /// This method requires the presence of specific protocols; otherwise, the application will
+    /// refuse to start, as it would not know how to interact with Wayland compositor.
+    ///
+    /// The required protocols are listed in the [Protocols] struct.
     fn connect_to_wayland() -> anyhow::Result<(Connection, Protocols)> {
         const DEFAULT_SETUP_TIME: Duration = Duration::from_secs(10);
 
@@ -246,12 +269,16 @@ impl Backend {
             Ok(state) => state,
             Err(_) => {
                 error!("BackendManager: Failed to init due missing protocols of compositor.");
-                bail!("Failed to init noti backend due missing protocosls of compositor.")
+                bail!("Failed to init noti backend due missing protocols of compositor.")
             }
         };
         Ok((wayland_connection, protocols))
     }
 
+    /// Initializes the EGL context and creates the required components for the application to work.
+    ///
+    /// This method assumes the application will operate in an RGBA8 color space and that Wayland
+    /// provides a way to obtain a `WlEglSurface`, from which an EGL surface will be created.
     fn init_egl(wayland_connection: &Connection) -> anyhow::Result<EglState> {
         let egl_instance = khronos_egl::Instance::new(khronos_egl::Static);
         let egl_display = unsafe {
@@ -304,6 +331,7 @@ impl Backend {
         })
     }
 
+    /// Creates a Skia context from the initialized [EglState], which is used to create Skia surfaces.
     fn init_skia_backend(egl_state: &EglState) -> anyhow::Result<SkiaBackend> {
         let no_surface = unsafe { khronos_egl::Surface::from_ptr(khronos_egl::NO_SURFACE) };
 
@@ -338,6 +366,12 @@ impl Backend {
         debug!("Backend Manager: Received notification id {notification_id} to close");
     }
 
+    /// Processes and dispatches a single iteration of backend events.
+    ///
+    /// Unlike a continuous `run` loop, this method performs only one cycle and must be called
+    /// repeatedly, typically inside an application loop.
+    ///
+    /// It handles only events related to the backend.
     pub(crate) fn poll(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
         let Self {
             idle_manager,
@@ -375,10 +409,12 @@ impl Backend {
         Ok(())
     }
 
+    /// Takes a D-Bus signal from the backend that needs to be sent to the application.
     pub(crate) fn pop_signal(&mut self) -> Option<Signal> {
         self.window_manager.pop_signal()
     }
 
+    /// Borrows the user configuration and updates the parts that depend on it.
     pub(crate) fn update_config(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
         let Self {
             window_manager,

@@ -11,6 +11,11 @@ use crate::{
     CompileState, Draw, WidgetConfiguration,
 };
 
+/// A text widget that manages layout, styling, and rendering of text
+/// content within the UI.
+///
+/// `WText` aims to be simple but flexible, providing a consistent API
+/// for compilation and querying its dimensions after layout.
 #[derive(macros::GenericBuilder)]
 #[gbuilder(name(GBuilderWText))]
 pub struct WText {
@@ -49,6 +54,18 @@ impl Clone for GBuilderWText {
     }
 }
 
+/// Describes what kind of text a `WText` widget represents.
+///
+/// Currently there are only two kinds:
+/// * `Summary` — the notification title, plain text without HTML markup.
+/// * `Body` — the notification body, which may contain HTML tags,
+///   entities, and complex styling.
+///
+/// # Why only two kinds?
+/// In the context of desktop notifications, there is usually a short
+/// title (summary) and a longer message (body). Supporting just these
+/// two kinds simplifies styling, layout, and rendering logic while
+/// still covering the common use cases.
 #[derive(Clone, derive_more::Display)]
 pub enum WTextKind {
     #[display("summary")]
@@ -80,6 +97,15 @@ impl WText {
         }
     }
 
+    /// Prepares the text for rendering by building a Skia `Paragraph`
+    /// with the correct style and layout constraints.
+    ///
+    /// This step computes the layout according to the available space
+    /// [`RectSize<usize>`] and applies the provided [`WidgetConfiguration`].
+    /// After compilation, the widget knows exactly how much space the
+    /// text will occupy and can be drawn at the right position.
+    ///
+    /// Must be called before querying the text's dimensions or drawing it.
     pub fn compile(
         &mut self,
         mut rect_size: RectSize<usize>,
@@ -175,10 +201,15 @@ impl WText {
         CompileState::Success
     }
 
-    /// Tries to fit current paragraph layout into restricted space by removing last lines.
-    /// If it isn't possible, returns None.
+    /// Attempts to make the current paragraph layout fit within the available
+    /// vertical space by iteratively removing the last lines until it fits.
     ///
-    /// This method assumes that the paragraph already fits into restricted space by width.
+    /// Returns `None` if fitting is impossible without removing all text.
+    ///
+    /// # Assumptions
+    /// * The paragraph is already known to fit horizontally within the
+    ///   available width.
+    /// * Called after paragraph construction and layout calculation.
     fn try_fit_paragraph(
         &self,
         paragraph: skia_safe::textlayout::Paragraph,
@@ -214,8 +245,13 @@ impl WText {
         }
     }
 
-    /// This method assumes that the notification content have valid entities. They must not
-    /// overlap. Otherwise the paragraph may build with wrong styles.
+    /// Builds a Skia `Paragraph` from the notification's text and entities.
+    ///
+    /// This method assumes that all text entities are valid and non-overlapping.
+    /// If entities overlap or are malformed, the resulting paragraph may have
+    /// incorrect or conflicting styles.
+    ///
+    /// Intended for internal use during `compile`.
     fn build_paragraph(
         &self,
         notification_content: &NotificationContent,
@@ -274,7 +310,12 @@ impl WText {
         paragraph_builder.build()
     }
 
-    /// Creates the [skia_safe::textlayout::ParagraphStyle] using user's configuration.
+    /// Creates a [`skia_safe::textlayout::ParagraphStyle`] based on the current
+    /// widget's text properties and user configuration.
+    ///
+    /// This method is responsible for setting up alignment, line spacing,
+    /// and other high-level paragraph attributes before building the text
+    /// content itself.
     fn make_paragraph_style(&self, max_lines: usize) -> skia_safe::textlayout::ParagraphStyle {
         let mut paragraph_style = skia_safe::textlayout::ParagraphStyle::new();
 
@@ -305,12 +346,21 @@ impl WText {
         paragraph_style
     }
 
+    /// Returns the width + horizontal margins of the text container.
+    ///
+    /// Unlike [`Self::height`], this does not reflect the intrinsic text width,
+    /// but rather the allocated width for text layout, since text widgets
+    /// are expected to fill the entire available horizontal space.
     pub fn width(&self) -> usize {
         // INFO: the width should get all available width but height should get only renderable
         // rows.
         self.inner_size.width + self.property.margin.horizontal() as usize
     }
 
+    /// Returns the computed height of the text after compilation.
+    ///
+    /// The result reflects the actual paragraph height + vertical margins, which may be
+    /// smaller than the available area if the text fits without overflow.
     pub fn height(&self) -> usize {
         self.paragraph
             .as_ref()
@@ -331,12 +381,20 @@ impl Draw for WText {
     }
 }
 
+/// Represents the content of a notification, abstracting over whether
+/// the text is plain or contains entities for styled rendering.
+///
+/// This type makes it easy to handle both cases uniformly: callers can
+/// access the raw string via [`as_str`] or get structured entities via
+/// [`entities`] when available.
 enum NotificationContent<'a> {
     String(&'a str),
     Text(&'a Text),
 }
 
 impl NotificationContent<'_> {
+    /// Returns the raw text content, regardless of whether it's a simple
+    /// string or a `Text` object with entities.
     fn as_str(&self) -> &str {
         match self {
             NotificationContent::String(string) => string,
@@ -344,6 +402,8 @@ impl NotificationContent<'_> {
         }
     }
 
+    /// Returns the list of entities if the content supports styling.
+    /// Returns `None` for plain string content.
     fn entities(&self) -> Option<&[Entity]> {
         match self {
             NotificationContent::String(_) => None,
@@ -364,6 +424,14 @@ impl<'a> From<&'a Text> for NotificationContent<'a> {
     }
 }
 
+/// A helper trait that allows stacking and combining multiple text styles
+/// to mimic HTML-like nested styling.
+///
+/// By default, Skia's [`skia_safe::textlayout::TextStyle`] does not overlay
+/// previous styles — each style fully replaces the last one. This trait
+/// provides a way to build a combined [`skia_safe::textlayout::TextStyle`]
+/// from an [`Entity`], making it possible to support constructs like
+/// `<b><i>bold italic text</i></b>` where multiple styles apply simultaneously.
 trait OverlayStyle {
     fn overlay_style(&mut self, entity: &Entity) -> skia_safe::textlayout::TextStyle;
 }

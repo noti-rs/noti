@@ -1,22 +1,31 @@
 use std::path::{Path, PathBuf};
 
 use log::warn;
-use widgets::Widget;
 use shared::{
     cached_data::{CacheUpdate, CachedValueError},
     file_watcher::{FileState, FilesWatcher},
 };
+use widgets::Widget;
 
+/// Represents a custom widget layout loaded into memory. This wrapper allows detecting
+/// changes to the layout file and reloading it on demand.
 pub(super) struct CachedLayout {
     watcher: FilesWatcher,
     layout: Option<Widget>,
 }
 
 impl CachedLayout {
+    /// Returns a custom widget layout if it has been successfully loaded.
+    ///
+    /// The layout may not exist if the file path is invalid, the file is missing, or any other
+    /// error occurs while loading.
     pub(super) fn layout(&self) -> Option<&Widget> {
         self.layout.as_ref()
     }
 
+    /// Attempts to load a custom widget layout from the specified path.
+    ///
+    /// Returns `None` if the layout is invalid or the file is missing.
     fn load_layout(path: &Path) -> Option<Widget> {
         match filetype::parse_layout(path) {
             Ok(widget) => Some(widget),

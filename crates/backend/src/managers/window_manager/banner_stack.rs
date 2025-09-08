@@ -234,11 +234,13 @@ where
     }
 }
 
+/// Represents a notification banner.
 pub(super) struct Banner {
     notification: Notification,
     layout: Option<Widget>,
     created_at: time::Instant,
 
+    /// A widget layout only needs to be compiled once, until the data or layout changes.
     is_compiled: bool,
 }
 
@@ -311,6 +313,11 @@ impl Banner {
             .unwrap_or_default()
     }
 
+    /// Compiles the widget layout of notification banner.
+    ///
+    /// Compiling the widget layout is important to ensure correct positioning of the UI elements,
+    /// proper text alignment, and overall layout consistency. Without compilation, the notification
+    /// banner may render incorrectly or not appear at all.
     pub(super) fn compile(
         &mut self,
         config: &Config,
@@ -352,6 +359,7 @@ impl Banner {
         self.layout = Some(layout);
     }
 
+    /// Draws the notification banner frame into provided surface with offset.
     pub(super) fn draw(
         &self,
         offset: &Offset<usize>,
@@ -370,6 +378,7 @@ impl Banner {
         DrawState::Success
     }
 
+    /// Returns the default widget layout if a custom layout has not been defined.
     fn default_layout(display_config: &DisplayConfig) -> Widget {
         FlexContainerBuilder::default()
             .spacing(display_config.padding.clone())

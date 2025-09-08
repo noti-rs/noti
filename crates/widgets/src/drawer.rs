@@ -5,11 +5,17 @@ use crate::{
     types::{Offset, RectSize},
 };
 
+/// A simple wrapper around [`skia_safe::Surface`] used as the main
+/// drawing target for widgets.
+///
+/// This type exists to provide a consistent way to access the
+/// underlying Skia surface, making rendering code easier to work with.
 pub struct Drawer {
     pub(crate) surface: skia_safe::Surface,
 }
 
 impl Drawer {
+    /// Creates a new [`Drawer`] from an existing Skia surface.
     pub fn use_surface(sk_surface: skia_safe::Surface) -> Self {
         Self {
             surface: sk_surface,
@@ -17,6 +23,11 @@ impl Drawer {
     }
 }
 
+/// A helper trait for applying a [`Color`] to Skia paint objects.
+///
+/// This trait abstracts the conversion of high-level color types
+/// (solid fills, gradients, etc.) into Skia's low-level representation,
+/// making it easy to consistently apply colors across drawing code.
 pub trait UseColor {
     fn use_color(&mut self, color: &Color, offset: Offset<f32>, frame_size: RectSize<f32>);
 }

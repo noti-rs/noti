@@ -18,6 +18,7 @@ use zbus::{
 
 static UNIQUE_ID: AtomicU32 = AtomicU32::new(1);
 
+/// Represents a D-Bus server for handling notifications.
 pub struct Server {
     connection: Connection,
 }
@@ -26,6 +27,7 @@ impl Server {
     const NOTIFICATIONS_PATH: &'static str = "/org/freedesktop/Notifications";
     const NOTIFICATIONS_NAME: &'static str = "org.freedesktop.Notifications";
 
+    /// Connects to server with initialization notification endpoint.
     pub async fn init(sender: Sender<Action>) -> anyhow::Result<Self> {
         debug!("D-Bus Server: Initializing");
 
@@ -42,6 +44,7 @@ impl Server {
         Ok(Self { connection })
     }
 
+    /// Emits a signal for a user action to an external application.
     pub async fn emit_signal(&self, signal: Signal) -> zbus::Result<()> {
         debug!("D-Bus Server: Emitting signal {signal}");
 
@@ -66,6 +69,7 @@ impl Server {
     }
 }
 
+/// Represents shared data used for handling incoming notifications.
 struct Handler {
     sender: Sender<Action>,
 }
@@ -113,7 +117,6 @@ impl Handler {
 
         if let Some(schedule) = &notification.hints.schedule {
             let scheduled_notification = crate::notification::ScheduledNotification {
-                id: notification.id,
                 time: schedule.to_owned(),
                 data: notification.into(),
             };

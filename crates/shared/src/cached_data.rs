@@ -4,6 +4,16 @@ use log::error;
 
 use crate::file_watcher::FileState;
 
+/// A helper struct for managing cached data with automatic updates and modifications.
+///
+/// `CachedData` provides a convenient API for storing and accessing key-value data,
+/// while handling changes and extensions efficiently.
+/// 
+/// The caller only needs to implement a [CacheUpdate] to notify about external changes,
+/// allowing `CachedData` to keep the cache up-to-date automatically.
+///
+/// This abstraction simplifies cache management and ensures consistency without
+/// exposing the underlying storage details.
 pub struct CachedData<K, V>(HashMap<K, V>)
 where
     K: std::cmp::Eq + std::hash::Hash,
@@ -65,15 +75,11 @@ where
     V: for<'b> TryFrom<&'b K, Error = CachedValueError>,
 {
     fn from_iter<T: IntoIterator<Item = &'a K>>(iter: T) -> Self {
-        let data = iter
-            .into_iter()
-            .filter_map(|key| V::try_from(key).map(|value| (key, value)).ok())
-            .fold(HashMap::new(), |mut acc, (key, value)| {
-                acc.insert(key.to_owned(), value);
-                acc
-            });
-
-        Self(data)
+        Self(
+            iter.into_iter()
+                .filter_map(|key| V::try_from(key).map(|value| (key.to_owned(), value)).ok())
+                .collect(),
+        )
     }
 }
 
@@ -87,6 +93,18 @@ where
     }
 }
 
+/// A trait for checking and updating cached data.
+///
+/// Types implementing `CacheUpdate` provide a way for `CachedData` to detect
+/// whether the underlying data has changed, allowing the cache to be updated
+/// accordingly.
+///
+/// While `CacheUpdate` itself is generic, it often interacts with [`crate::file_watcher::FilesWatcher`]
+/// indirectly: one of its methods returns a [`FileState`], which relies on `FileWatcher`
+/// to detect changes in files and update the cache accordingly.
+///
+/// Implementing this trait allows `CachedData` to stay synchronized with external
+/// data sources automatically.
 pub trait CacheUpdate {
     fn check_updates(&mut self) -> FileState;
     fn update(&mut self);

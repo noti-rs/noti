@@ -18,27 +18,51 @@ use widget::{
     text::WText,
 };
 
+/// A minimal trait for drawing any widget onto a [`Drawer`].
+///
+/// This trait abstracts over the rendering process, allowing each widget to
+/// define its own drawing logic. The backend uses EGL and a Skia surface, so
+/// drawing always happens relative to a top-left origin.
+///
+/// The [`draw_with_offset`] method is the core API and should be used whenever
+/// a widget must be rendered at a specific position. The [`draw`] method is a
+/// convenience wrapper that draws the widget at the origin `(0, 0)`.
 pub trait Draw {
+    /// Draws the widget using the given [`Drawer`], applying an explicit offset
+    /// from the top-left origin.
     fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer);
 
+    /// Draws the widget at the origin `(0, 0)`.
+    ///
+    /// This is a convenience method for `draw_with_offset` with no displacement.
     fn draw(&self, drawer: &mut Drawer) {
         self.draw_with_offset(&Default::default(), drawer)
     }
 }
 
+/// A container enum for all supported widget types.
+///
+/// This allows dynamic storage and composition of widgets, including complex
+/// layouts such as a [`FlexContainer`] holding multiple widgets.
 #[derive(Clone)]
 pub enum Widget {
     Image(WImage),
     Text(WText),
     FlexContainer(FlexContainer),
+    /// Placeholder for unsupported or unrecognized widgets; safely ignored during drawing.
     Unknown,
 }
 
 impl Widget {
+    /// Check whether the widget is [`Widget::Unknown`].
     pub fn is_unknown(&self) -> bool {
         matches!(self, Widget::Unknown)
     }
 
+    /// Returns the type of this widget as a human-readable string.
+    ///
+    /// This is primarily intended for logging and debugging, allowing developers
+    /// to inspect which kind of widget is being processed at runtime.
     fn get_type(&self) -> &'static str {
         match self {
             Widget::Image(_) => "image",
@@ -48,6 +72,22 @@ impl Widget {
         }
     }
 
+    /// Compiles this widget and computes its final layout properties.
+    ///
+    /// During compilation, this widget calculates its post-compilation width,
+    /// height, spacing, margins, fill behavior, and other layout properties.
+    /// The provided [`RectSize`] defines the available drawing space for this
+    /// widget, while the [`WidgetConfiguration`] provides shared context such as
+    /// theme, fonts, and notification data.
+    ///
+    /// # Why This Matters
+    /// Widgets cannot know their final size or layout until compilation is
+    /// performed. Call this method before querying [`width`], [`height`],
+    /// or before drawing, to ensure the widget is placed correctly on screen.
+    ///
+    /// # Parameters
+    /// - `rect_size` – The size of the available space in which this widget may fit.
+    /// - `configuration` – Shared context and configuration data for the compilation.
     pub fn compile(&mut self, rect_size: RectSize<usize>, configuration: &WidgetConfiguration) {
         let state = match self {
             Widget::Image(image) => image.compile(rect_size, configuration),
@@ -65,6 +105,12 @@ impl Widget {
         }
     }
 
+    /// Returns the size of this widget along the specified [`Direction`].
+    ///
+    /// If the direction is [`Direction::Horizontal`], this method is equivalent
+    /// to calling [`Self::width`].  
+    /// If the direction is [`Direction::Vertical`], it is equivalent
+    /// to calling [`Self::height`].
     pub fn len_by_direction(&self, direction: &Direction) -> usize {
         match direction {
             Direction::Horizontal => self.width(),
@@ -72,6 +118,9 @@ impl Widget {
         }
     }
 
+    /// Returns the fixed, post-compiled width of this widget.
+    ///
+    /// The width value is determined during widget compilation.
     pub fn width(&self) -> usize {
         match self {
             Widget::Image(image) => image.width(),
@@ -81,6 +130,9 @@ impl Widget {
         }
     }
 
+    /// Returns the fixed, post-compiled height of this widget.
+    ///
+    /// The height value is determined during widget compilation.
     pub fn height(&self) -> usize {
         match self {
             Widget::Image(image) => image.height(),
@@ -107,6 +159,14 @@ pub enum CompileState {
     Failure,
 }
 
+/// Provides shared context and resources for widget compilation.
+///
+/// This struct bundles together data such as the current notification,
+/// theme, font collection, and display configuration, so widgets can
+/// compute their layout in a consistent way.
+///
+/// Used as input to [`Widget::compile`] and other widget compilation
+/// methods to ensure all layout decisions respect the same configuration.
 pub struct WidgetConfiguration<'a> {
     pub notification: &'a Notification,
     pub theme: &'a Theme,

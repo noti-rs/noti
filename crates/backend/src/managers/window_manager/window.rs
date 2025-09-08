@@ -6,7 +6,6 @@ use crate::{dispatcher::Dispatcher, EglState};
 use config::{self, Config};
 use dbus::{actions::Signal, notification::Notification};
 use log::{debug, error, trace};
-use widgets::types::{Offset, RectSize};
 use shared::{
     cached_data::CachedData,
     data::{Borrowed, Data},
@@ -39,12 +38,24 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{self, ZwlrLayerShellV1},
     zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
 };
+use widgets::types::{Offset, RectSize};
 
+/// Wraps a [WindowState] and holds an event queue used only for dispatching.
+///
+/// The inner window state can be accessed via `Deref`.
 pub(super) struct Window {
     event_queue: EventQueue<WindowState>,
     state: WindowState,
 }
 
+/// Represents the state of a `Window`, holding notifications, window properties, Wayland objects,
+/// shared rendering data, and a track of user actions.
+///
+/// Instead of creating a separate Wayland window for each notification, all notifications are drawn
+/// as banners inside a single window. This approach avoids the complexity and instability of using
+/// multiple windows, especially since many Wayland protocols needed for that are still unstable or
+/// not well maintained. Managing everything in one window makes updates, user interactions, and
+/// redrawing much easier.
 pub(super) struct WindowState {
     banner_stack: BannerStack<u32>,
 
@@ -69,12 +80,21 @@ pub(super) struct WindowState {
     configuration_state: ConfigurationState,
 }
 
+/// Represents the configuration state of a `Window`, focusing on careful resource management.
+///
+/// A `Window` can request resources from the Wayland compositor, but they are not always granted
+/// immediately. Until the compositor provides them, further resource management would be invalid,
+/// so this state helps track and wait for permission before continuing.
 pub(super) enum ConfigurationState {
     NotConfiured,
     Configured,
 }
 
 impl Window {
+    /// Initializes a `Window` with its event queue and state.
+    ///
+    /// Initialization is eager, ensuring that all important data is loaded before it finishes.
+    /// Because of this, it may take a little more time to complete.
     pub(super) fn init<P, Gpu>(
         wayland_connection: &Connection,
         protocols: &P,
@@ -91,6 +111,15 @@ impl Window {
             + AsRef<ZwlrLayerShellV1>,
         Gpu: AsRef<EglState> + AsRef<DirectContext>,
     {
+        // Note for developers:
+        // To simplify `Window` initialization, the process is divided into three steps:
+        // 1. Create a `wl_surface` and `zwlr_layer_surface_v1` from it.
+        // 2. Request a `wl_pointer` with `wp_cursor_shape_device`.
+        // 3. Create a `wl_egl_surface` from the `wl_surface` and an EGL surface via the EGL instance.
+        //
+        // Additional step:
+        // - Ensure the surface has the correct size and position.
+
         let mut event_queue = wayland_connection.new_event_queue();
 
         let rect_size = RectSize::new(
@@ -144,6 +173,9 @@ impl Window {
         Ok(Self { event_queue, state })
     }
 
+    /// Creates a `wl_surface` with the `zwlr_layer_surface_v1` role, applying minimal properties.
+    ///
+    /// By default, the layer surface uses the `Overlay` layer and has no keyboard interactivity.
     fn make_surface<P>(
         protocols: &P,
         qhandle: &QueueHandle<WindowState>,
@@ -166,11 +198,15 @@ impl Window {
         (surface, layer_surface)
     }
 
+    /// Creates an [AnchoredMargin] from the user configuration for a `Window` state,
+    /// used to position a `zwlr_layer_surface_v1`.
     fn make_anchored_margin(config: &Config) -> AnchoredMargin {
         let (x_offset, y_offset) = config.general().offset;
         AnchoredMargin::new(x_offset as i32, y_offset as i32, &config.general().anchor)
     }
 
+    /// Requests a pointer from the Wayland compositor using `wp_cursor_shape_device_v1`
+    /// for the specified pointer.
     fn make_pointer<P>(
         protocols: &P,
         qhandle: &QueueHandle<WindowState>,
@@ -187,6 +223,8 @@ impl Window {
         (pointer, cursor_device)
     }
 
+    /// Requests a pointer to a `wl_egl_surface` from the `wl_surface` and uses it to create a native EGL surface.
+    /// This is important for GPU-accelerated rendering.
     fn make_egl_surface<Gpu>(
         surface: &WlSurface,
         gpu: &Gpu,
@@ -214,6 +252,9 @@ impl Window {
         Ok((egl_window, egl_surface))
     }
 
+    /// Requests a frame for the current `Window` from the Wayland compositor.
+    /// This allows the compositor to schedule the redraw at the correct time, ensuring smooth
+    /// rendering with VSync.
     pub(super) fn frame(&mut self) {
         self.state.surface.damage(0, 0, i32::MAX, i32::MAX);
         self.state.surface.frame(&self.event_queue.handle(), ());
@@ -221,11 +262,16 @@ impl Window {
         debug!("Window: Requested a frame to the Wayland compositor");
     }
 
+    /// Sends a `commit` message to the Wayland compositor to apply previously requested actions.
     pub(super) fn commit(&self) {
         self.state.surface.commit();
         debug!("Window: Commited")
     }
 
+    /// Synchronizes with the Wayland compositor, blocking the current thread until all requested
+    /// actions have been completed.
+    ///
+    /// This ensures that all pending requests are processed immediately.
     pub(super) fn sync(&mut self) -> anyhow::Result<()> {
         self.event_queue.roundtrip(&mut self.state)?;
         Ok(())
@@ -233,6 +279,7 @@ impl Window {
 }
 
 impl WindowState {
+    /// Applies a new user configuration to an existing `Window` state, updating it with the new values.
     pub(super) fn reconfigure(&mut self, config: Data<Config, Borrowed>) {
         self.relocate(config.general().offset, &config.general().anchor);
         self.banner_stack.configure(&config);
@@ -293,7 +340,7 @@ impl WindowState {
     }
 
     pub(super) fn handle_click(&mut self) -> Option<Signal> {
-        if let PrioritiedPressState::Unpressed = self.pointer_state.press_state {
+        if let PrioritizedPressState::Unpressed = self.pointer_state.press_state {
             return None;
         }
         let _press_state = self.pointer_state.press_state.take();
@@ -348,6 +395,7 @@ impl WindowState {
             self.banner_stack.banners().rev().find_map(finder)
         }
     }
+
     fn use_current_egl_surface(&self) -> anyhow::Result<()> {
         if let Err(err) = self.egl_state.instance.make_current(
             self.egl_state.display,
@@ -402,6 +450,9 @@ impl WindowState {
         );
     }
 
+    /// Sends requests to the Wayland compositor to destroy objects belonging to the current
+    /// `Window` state. The [Drop] trait cannot be used for this, because specific requests must
+    /// be sent to the Wayland compositor.
     fn destroy(&self) {
         self.layer_surface.destroy();
         self.surface.destroy();
@@ -451,6 +502,11 @@ impl Dispatcher for Window {
     }
 }
 
+/// Represents a helper for positioning a `zwlr_layer_surface_v1`.
+///
+/// The `zwlr_layer_surface_v1` can be positioned using an anchor and an offset. There are only
+/// 8 possible anchor directions (4 corners and 4 edges). The offset defines the margin from
+/// the selected corner or edge.
 struct AnchoredMargin {
     margin: Margin,
     anchor: Anchor,
@@ -468,6 +524,7 @@ impl AnchoredMargin {
         *self = Self::new(x_offset, y_offset, anchor);
     }
 
+    /// Uses the `zwlr_layer_surface_v1` to reposition the surface according to its current properties.
     fn relocate_layer_surface(&self, layer_surface: &ZwlrLayerSurfaceV1) {
         layer_surface.set_anchor(self.anchor);
         self.margin.apply(layer_surface);
@@ -491,6 +548,7 @@ impl Margin {
         }
     }
 
+    /// Uses the specified anchor to determine the correct directions for the offsets.
     fn with_anchor(x: i32, y: i32, anchor: &config::general::Anchor) -> Self {
         let mut margin = Margin::new();
 
@@ -515,20 +573,30 @@ impl Margin {
     }
 }
 
+/// Represents the state of the user pointer.
+///
+/// The `state` tracks events that are useful for handling interactions with notification banners.
 #[derive(Default)]
 struct PointerState {
     x: f64,
     y: f64,
 
     entered: bool,
+    /// Some Wayland compositors reposition the pointer unexpectedly after a window resize.
+    /// The first repositioning should be ignored; subsequent repositionings are considered valid.
     ignore_first_relocate: bool,
-    press_state: PrioritiedPressState,
+    press_state: PrioritizedPressState,
 }
 
-/// Mouse button press state which have priority (LMB > RMB > MMB) if any is set at least,
-/// otherwise sets the 'unpressed' state.
+/// Represents a mouse click button with priority.
+///
+/// If the user clicks multiple buttons in a very short time, the priority determines which
+/// button is considered. By default, the left mouse button (LMB) has the highest priority,
+/// followed by the right mouse button (RMB), and then the middle mouse button (MMB).
+///
+/// In short: LMB > RMB > MMB.
 #[derive(Default, Clone)]
-enum PrioritiedPressState {
+enum PrioritizedPressState {
     #[default]
     Unpressed,
     Lmb,
@@ -536,26 +604,28 @@ enum PrioritiedPressState {
     Mmb,
 }
 
-impl PrioritiedPressState {
-    fn update(&mut self, new_state: PrioritiedPressState) {
+impl PrioritizedPressState {
+    /// Updates the current state, keeping only the event with the highest priority.
+    fn update(&mut self, new_state: PrioritizedPressState) {
         match self {
-            PrioritiedPressState::Lmb => (),
-            PrioritiedPressState::Rmb => {
-                if let PrioritiedPressState::Lmb = &new_state {
+            PrioritizedPressState::Lmb => (),
+            PrioritizedPressState::Rmb => {
+                if let PrioritizedPressState::Lmb = &new_state {
                     *self = new_state
                 }
             }
-            PrioritiedPressState::Mmb => match &new_state {
-                PrioritiedPressState::Lmb | PrioritiedPressState::Rmb => *self = new_state,
+            PrioritizedPressState::Mmb => match &new_state {
+                PrioritizedPressState::Lmb | PrioritizedPressState::Rmb => *self = new_state,
                 _ => (),
             },
-            PrioritiedPressState::Unpressed => *self = new_state,
+            PrioritizedPressState::Unpressed => *self = new_state,
         }
     }
 
+    /// Returns the current state while resetting it to the unpressed state.
     fn take(&mut self) -> Self {
         let current_state = self.clone();
-        *self = PrioritiedPressState::Unpressed;
+        *self = PrioritizedPressState::Unpressed;
         current_state
     }
 }
@@ -565,16 +635,21 @@ impl PointerState {
     const RIGHT_BTN: u32 = 273;
     const MIDDLE_BTN: u32 = 274;
 
+    /// Ignores the first pointer-move event from the Wayland compositor.
+    /// This can be useful if the compositor moves the pointer unexpectedly.
     fn ignore_first_relocate(&mut self) {
         self.ignore_first_relocate = true;
     }
 
+    /// Updates the current pointer state to indicate that it has left the window frame.
     fn leave(&mut self) {
         self.entered = false;
 
         debug!("Pointer: Left");
     }
 
+    /// Updates the current pointer state to indicate that it has entered the window frame and sets
+    /// the pointer’s position.
     fn enter_and_relocate(&mut self, x: f64, y: f64) {
         self.entered = true;
         debug!("Pointer: Entered");
@@ -582,6 +657,9 @@ impl PointerState {
         self.relocate(x, y);
     }
 
+    /// Updates the current pointer state to reflect movement to a new position.
+    ///
+    /// Behavior may differ if `ignore_first_relocate` is enabled.
     fn relocate(&mut self, x: f64, y: f64) {
         if self.ignore_first_relocate {
             debug!("Pointer: Forced to ignore first relocate.");
@@ -598,12 +676,13 @@ impl PointerState {
         trace!("Pointer: Relocate to x - {x}, y - {y}")
     }
 
+    /// Updates the current pointer state to reflect a user’s mouse button click.
     fn press(&mut self, button: u32) {
         debug!("Pointer: Pressed button {button}");
         match button {
-            PointerState::LEFT_BTN => self.press_state.update(PrioritiedPressState::Lmb),
-            PointerState::RIGHT_BTN => self.press_state.update(PrioritiedPressState::Rmb),
-            PointerState::MIDDLE_BTN => self.press_state.update(PrioritiedPressState::Mmb),
+            PointerState::LEFT_BTN => self.press_state.update(PrioritizedPressState::Lmb),
+            PointerState::RIGHT_BTN => self.press_state.update(PrioritizedPressState::Rmb),
+            PointerState::MIDDLE_BTN => self.press_state.update(PrioritizedPressState::Mmb),
             _ => (),
         }
     }
@@ -749,6 +828,8 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for WindowState {
     }
 }
 
+/// Anchors from the [config] crate and the wlr-protocols use different types.
+/// This trait allows converting between them while preserving the underlying logic.
 trait ToLayerShellAnchor {
     fn to_layer_shell_anchor(&self) -> Anchor;
 }

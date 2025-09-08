@@ -3,13 +3,25 @@ use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use config::color::{Color as CfgColor, LinearGradient as CfgLinearGradient, Rgba as CfgRgba};
 use shared::value::TryFromValue;
 
+/// Represents a drawable color or paint that can be applied to widgets.
+///
+/// Unlike a simple RGBA value, `Color` can represent complex paint
+/// types such as linear gradients. This allows flexible and visually
+/// rich rendering while keeping a single generic type for all widgets.
 #[derive(Clone)]
 pub enum Color {
+    /// A linear gradient with angle, vector, and computed color stops.
     LinearGradient(LinearGradient),
+
+    /// A solid fill color represented as BGRA floating-point values.
     Fill(Bgra<f32>),
 }
 
 impl Color {
+    /// Returns `true` if the color is effectively transparent.
+    ///
+    /// Used by containers and widgets to skip unnecessary drawing passes
+    /// when no visible paint would be produced (e.g., transparent fill).
     pub fn is_transparent(&self) -> bool {
         match self {
             Color::LinearGradient(linear_gradient) => {
@@ -51,11 +63,26 @@ impl Default for Color {
 
 impl TryFromValue for Color {}
 
+/// Describes a linear gradient, including direction and computed
+/// color-stop information for rendering.
+///
+/// This is a fully resolved gradient — all additional parameters
+/// needed for drawing (like gradient vector and per-color segment
+/// size) are already precomputed from user configuration.
 #[derive(Clone)]
 pub struct LinearGradient {
+    /// The gradient’s angle in degrees, used to determine orientation.
     pub angle: f32,
+
+    /// A normalized direction vector derived from `angle`, used to
+    /// compute color transitions along the gradient.
     pub grad_vector: [f32; 2],
+
+    /// The sequence of colors forming the gradient stops.
     pub colors: Vec<Bgra<f32>>,
+
+    /// The length of each gradient segment, used to space colors
+    /// evenly or proportionally along the gradient line.
     pub segment_per_color: f32,
 }
 
@@ -105,10 +132,16 @@ impl From<CfgLinearGradient> for LinearGradient {
     }
 }
 
-/// The RGBA color representation by ARGB format in little endian.
+/// Represents a color in BGRA channel order, using a generic component type.
 ///
-/// The struct was made in as adapter between config Rgba color and cairo's ARgb32 format because
-/// the first one is very simple and the second one is complex and accepts only floats.
+/// This type serves as an adapter between configuration-level RGBA
+/// colors (typically simple integers) and rendering backends like
+/// Cairo or Skia, which expect normalized floating-point channels.
+///
+/// The BGRA order is chosen because many graphics backends (including
+/// Cairo’s `ARgb32` format) and GPU pipelines store colors in this
+/// channel order on little-endian systems, allowing direct memory
+/// mapping without conversion overhead.
 #[derive(Clone, Copy, Default)]
 pub struct Bgra<T>
 where

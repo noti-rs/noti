@@ -9,10 +9,28 @@ use crate::{
     CompileState, Draw, Widget, WidgetConfiguration,
 };
 
+/// A container widget that arranges its child widgets along a single
+/// axis, inspired by CSS flexbox layout but with a simpler and more
+/// predictable implementation.
+///
+/// The container is responsible for:
+/// * Compiling each child widget and determining its size.
+/// * Shrinking the available space as children are placed.
+/// * Arranging children according to the configured [`Alignment`]
+///   on both the main and cross axis.
+///
+/// This type is intentionally lightweight — it does not implement the
+/// full CSS flexbox algorithm, but provides enough flexibility to build
+/// common notification layouts without duplicating positioning logic.
 #[derive(macros::GenericBuilder, derive_builder::Builder, Clone)]
 #[builder(pattern = "owned")]
 #[gbuilder(name(GBuilderFlexContainer), derive(Clone))]
 pub struct FlexContainer {
+    /// The computed size of the container after compilation.
+    ///
+    /// `None` means the container has not been compiled yet, so its
+    /// dimensions are unknown. After a successful call to [`Self::compile`],
+    /// this will contain the resolved [`RectSize`].
     #[builder(private, setter(skip))]
     #[gbuilder(hidden, default(None))]
     rect_size: Option<RectSize<usize>>,
@@ -50,6 +68,20 @@ pub struct FlexContainer {
 }
 
 impl FlexContainer {
+    /// Compiles the container and its children, determining the final size
+    /// and layout arrangement.
+    ///
+    /// This method:
+    /// 1. Iterates over all children and calls their `compile` methods,
+    ///    passing them the remaining available space.
+    /// 2. Shrinks the available space after each successful child
+    ///    compilation.
+    /// 3. Stores the resolved container size in `rect_size` so that future
+    ///    layout operations can use it.
+    ///
+    /// Callers **must** invoke `compile` before calling [`Self::width`], [`Self::height`],
+    /// or attempting to draw the container, since layout information is
+    /// unavailable until compilation is complete.
     pub fn compile(
         &mut self,
         mut rect_size: RectSize<usize>,
@@ -163,7 +195,12 @@ impl FlexContainer {
         }
     }
 
-    fn rounded_fill(&self, offset: Offset<f32>, rect_size: RectSize<f32>, drawer: &mut Drawer) {
+    /// Fills the container’s background before drawing children.
+    ///
+    /// If configured, the background will be filled with rounded corners.
+    /// This is the first step of the `draw` routine, ensuring that child
+    /// widgets are rendered on top of a consistent background.
+    fn fill_background(&self, offset: Offset<f32>, rect_size: RectSize<f32>, drawer: &mut Drawer) {
         let outer_radius = (self.border.radius as f32)
             .min(rect_size.width / 2.0)
             .min(rect_size.height / 2.0);
@@ -190,6 +227,10 @@ impl FlexContainer {
         canvas.draw_rrect(rounded_rect, &paint);
     }
 
+    /// Draws the container’s border after all children have been rendered.
+    ///
+    /// This is the final step of the `draw` routine, allowing the border
+    /// to visually wrap around both the background and the children.
     fn outline_border(&self, offset: Offset<f32>, rect_size: RectSize<f32>, drawer: &mut Drawer) {
         if self.border.size == 0 {
             return;
@@ -247,7 +288,7 @@ impl Draw for FlexContainer {
 
         let transparent_bg = self.transparent_background || self.background_color.is_transparent();
         if !transparent_bg {
-            self.rounded_fill((*offset).into(), rect_size.into(), drawer);
+            self.fill_background((*offset).into(), rect_size.into(), drawer);
         }
 
         rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
@@ -292,6 +333,12 @@ impl Draw for FlexContainer {
     }
 }
 
+/// Defines how children are placed inside a [`FlexContainer`].
+///
+/// [`Self::horizontal`] controls alignment along the x-axis, and
+/// [`Self::vertical`] along the y-axis. These values affect the
+/// final placement of child widgets when there is extra free space
+/// remaining after compilation.
 #[derive(macros::GenericBuilder, Debug, Default, Clone)]
 #[gbuilder(name(GBuilderAlignment), derive(Clone), constructor)]
 pub struct Alignment {
@@ -313,12 +360,20 @@ impl Alignment {
 
 impl TryFromValue for Alignment {}
 
+/// The position strategy used by [`Alignment`] to place children.
 #[derive(Debug, Default, Clone)]
 pub enum Position {
+    /// Aligns children at the start of the axis.
     Start,
+
+    /// Centers children (default).
     #[default]
     Center,
+
+    /// Aligns children at the end of the axis.
     End,
+
+    /// Distributes children evenly, adding spacing between them to fill available space.
     SpaceBetween,
 }
 
@@ -338,6 +393,11 @@ impl TryFromValue for Position {
 }
 
 impl Position {
+    /// Computes the starting offset for an element of a given width
+    /// relative to the available space, based on the positioning strategy.
+    ///
+    /// This is the core helper for placing children at `Start`, `Center`,
+    /// `End`, or evenly with `SpaceBetween`.
     pub fn compute_initial_pos(&self, width: usize, element_width: usize) -> usize {
         match self {
             Position::Start | Position::SpaceBetween => 0,
@@ -347,6 +407,8 @@ impl Position {
     }
 }
 
+/// Determines whether a [`FlexContainer`] arranges its children
+/// horizontally or vertically.
 #[derive(Clone)]
 pub enum Direction {
     Horizontal,
@@ -354,6 +416,12 @@ pub enum Direction {
 }
 
 impl Direction {
+    /// Returns the direction orthogonal to the current one.
+    ///
+    /// * Horizontal → Vertical  
+    /// * Vertical → Horizontal
+    ///
+    /// Useful when computing cross-axis alignment or spacing.
     fn orthogonalize(&self) -> Direction {
         match self {
             Direction::Horizontal => Direction::Vertical,
@@ -375,6 +443,13 @@ impl TryFromValue for Direction {
     }
 }
 
+/// A helper type that abstracts away the difference between horizontal
+/// and vertical layout, allowing the container logic to operate on a
+/// single *main axis* and a single *cross axis*.
+///
+/// This prevents code duplication — layout math can be written once
+/// for a generic axis, and converted back into X/Y coordinates on
+/// demand.
 struct FlexContainerPlane<'a> {
     main_len: usize,
     auxiliary_len: usize,
@@ -386,6 +461,8 @@ struct FlexContainerPlane<'a> {
 }
 
 impl<'a> FlexContainerPlane<'a> {
+    /// Creates a new [`FlexContainerPlane`] from a container size, mapping
+    /// width/height to main/auxiliary axes depending on [`Direction`].
     fn new(
         RectSize {
             mut width,
@@ -406,6 +483,8 @@ impl<'a> FlexContainerPlane<'a> {
         }
     }
 
+    /// Creates a new [`FlexContainerPlane`] from an offset, mapping x/y
+    /// to main/auxiliary offsets depending on [`Direction`].
     fn new_only_offset(Offset { mut x, mut y }: Offset<usize>, direction: &'a Direction) -> Self {
         if let Direction::Vertical = direction {
             (x, y) = (y, x);
@@ -420,6 +499,11 @@ impl<'a> FlexContainerPlane<'a> {
         }
     }
 
+    /// Relocates the plane by applying a new offset from the global
+    /// coordinate system (X0Y) and converting it to main/auxiliary axes.
+    ///
+    /// This is used to reposition the container or its children while
+    /// keeping layout logic axis-agnostic.
     fn relocate(&mut self, Offset { mut x, mut y }: &Offset<usize>) {
         if let Direction::Vertical = self.direction {
             (x, y) = (y, x);
@@ -429,6 +513,8 @@ impl<'a> FlexContainerPlane<'a> {
         self.auxiliary_axis_offset = y;
     }
 
+    /// Converts the plane’s main/auxiliary lengths back into a standard
+    /// [`RectSize`] in X/Y coordinates.
     fn as_rect_size(&self) -> RectSize<usize> {
         let (mut width, mut height) = (self.main_len, self.auxiliary_len);
 
@@ -439,6 +525,8 @@ impl<'a> FlexContainerPlane<'a> {
         RectSize::new(width, height)
     }
 
+    /// Converts the plane’s main/auxiliary offsets back into a standard
+    /// [`Offset`] in X/Y coordinates.
     fn as_offset(&self) -> Offset<usize> {
         let (mut x, mut y) = (self.main_axis_offset, self.auxiliary_axis_offset);
 

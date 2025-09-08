@@ -3,23 +3,42 @@ use derive_more::Display;
 use std::{cmp::Ordering, collections::HashMap};
 use zbus::zvariant::Value;
 
+/// Represents a notification sent through D-Bus.
 #[derive(Debug)]
 pub struct Notification {
+    /// Unique identifier for the notification, assigned by the D-Bus notification server.
     pub id: u32,
+
+    /// Name of the application sending the notification.
     pub app_name: String,
+
+    /// Icon associated with the application (can be empty).
     pub app_icon: String,
+
+    /// Short summary or title of the notification.
     pub summary: String,
+
+    /// Main content of the notification.
     pub body: Text,
+
+    /// Time (in milliseconds) after which the notification expires.
     pub expire_timeout: Timeout,
+
+    /// Optional hints that provide additional information for the notification (e.g., urgency, category, image data).
     pub hints: Hints,
+
+    /// List of actions associated with the notification (buttons or commands the user can trigger).
     pub actions: Vec<NotificationAction>,
+
+    /// Indicates whether the notification has been marked as read.
     pub is_read: bool,
+
+    /// Timestamp (Unix epoch in milliseconds) when the notification was created.
     pub created_at: u64,
 }
 
 #[derive(Debug)]
 pub struct ScheduledNotification {
-    pub id: u32,
     pub time: String,
     pub data: Box<Notification>,
 }
@@ -32,7 +51,7 @@ impl Ord for ScheduledNotification {
 
 impl PartialOrd for ScheduledNotification {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.time.cmp(&other.time))
+        Some(self.cmp(other))
     }
 }
 
@@ -151,9 +170,17 @@ impl From<HashMap<&str, Value<'_>>> for Hints {
 }
 
 #[derive(Debug)]
+/// Represents a single action attached to a notification, following the freedesktop specification.
 pub struct NotificationAction {
+    /// A unique key that identifies the action.
+    ///
+    /// This key is sent back to the notification server when the user activates the action.
     #[allow(unused)]
     action_key: String,
+
+    /// A human-readable, localized label for the action.
+    ///
+    /// This is shown to the user as the button or menu item text.
     #[allow(unused)]
     localized_string: String,
 }
@@ -193,14 +220,31 @@ impl Coordinates {
     }
 }
 
+/// Represents the category of a notification, following the freedesktop notification specification.
+///
+/// Categories help classify notifications so that the server or compositor can handle
+/// them appropriately (e.g., show with different priority or style).
 #[derive(Debug, Clone, Default)]
 pub enum Category {
+    /// Notifications related to device events (e.g., battery low, hardware change).
     Device(CategoryEvent),
+
+    /// Notifications related to email events (e.g., new mail).
     Email(CategoryEvent),
+
+    /// Notifications for instant messaging (e.g., chat messages).
     InstantMessage(CategoryEvent),
+
+    /// Notifications about network events (e.g., connectivity changes).
     Network(CategoryEvent),
+
+    /// Notifications indicating user presence changes (e.g., online/offline status).
     Presence(CategoryEvent),
+
+    /// Notifications about file or data transfer events.
     Transfer(CategoryEvent),
+
+    /// Fallback when the category is unknown or unspecified.
     #[default]
     Unknown,
 }
@@ -239,26 +283,68 @@ impl From<&str> for Category {
     }
 }
 
+/// Represents a specific event within a notification category, following the freedesktop specification.
+///
+/// These events allow for more fine-grained classification of notifications,
+/// helping the server decide how to present them (e.g., different urgency or icon).
 #[derive(Debug, Clone)]
 pub enum CategoryEvent {
+    /// A generic event that does not fit into any of the more specific types.
     Generic,
+
+    /// Indicates that something was added (e.g., a new device).
     Added,
+
+    /// Indicates that something was removed (e.g., a device disconnected).
     Removed,
+
+    /// Indicates that something has arrived (e.g., new message, new mail).
     Arrived,
+
+    /// Indicates a bounce event (e.g., message failed to send).
     Bounced,
+
+    /// Indicates that something has been received (e.g., file transfer completed).
     Received,
+
+    /// Indicates an error occurred.
     Error,
+
+    /// Indicates a connection was established.
     Connected,
+
+    /// Indicates a connection was lost or closed.
     Disconnected,
+
+    /// Indicates that something went offline.
     Offline,
+
+    /// Indicates that something came online.
     Online,
+
+    /// Indicates that a process or transfer has completed.
     Complete,
 }
 
+/// Represents the timeout of a notification, following the freedesktop notification specification.
+///
+/// This value determines how long the notification should be displayed.
 #[derive(Default, Debug, Clone, Display)]
 pub enum Timeout {
+    /// A custom timeout in milliseconds.
+    ///
+    /// The notification server will attempt to close the notification after the specified time.
+    /// The server may ignore this value if it enforces its own policy.
     Millis(u32),
+
+    /// Indicates that the notification should never automatically expire.
+    ///
+    /// The notification will remain visible until the user dismisses it or the application withdraws it.
     Never,
+
+    /// Uses the notification server's default timeout behavior.
+    ///
+    /// This is usually preferred unless a specific behavior is required.
     #[default]
     Configurable,
 }
@@ -274,11 +360,23 @@ impl From<i32> for Timeout {
     }
 }
 
+/// Represents the urgency level of a notification, following the freedesktop notification specification.
+///
+/// Urgency levels are used by the notification server to determine how the notification
+/// should be presented (e.g., style, priority, or persistence).
 #[derive(Debug, Clone, Copy, Default, Display, PartialEq, Eq)]
 pub enum Urgency {
+    /// Low urgency — the notification is not time-sensitive and may be shown less prominently.
     Low,
+
+    /// Normal urgency — the default level for most notifications.
     #[default]
     Normal,
+
+    /// Critical urgency — indicates the notification is very important.
+    ///
+    /// Such notifications may remain on screen until the user explicitly dismisses them,
+    /// depending on the server's implementation.
     Critical,
 }
 

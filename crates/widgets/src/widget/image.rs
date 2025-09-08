@@ -12,6 +12,21 @@ use crate::{CompileState, Draw, WidgetConfiguration};
 
 const DEFAULT_ICON_THEME: &str = "hicolor";
 
+/// A widget that displays an image within a notification layout.
+///
+/// `WImage` abstracts away the complexity of loading and preparing an image
+/// for rendering. It can handle multiple image sources as defined by the
+/// freedesktop notification specification, including application icons,
+/// raw image data, and file paths.
+///
+/// This widget is responsible for:
+/// - Selecting the most appropriate image source during compilation.
+/// - Preparing the image for rendering (decoding and sizing).
+/// - Reporting its final size after compilation so it can be positioned
+///   correctly in the layout.
+///
+/// Typically used for application icons or media previews within a
+/// notification banner.
 #[derive(macros::GenericBuilder, Clone)]
 #[gbuilder(name(GBuilderWImage), derive(Clone))]
 pub struct WImage {
@@ -37,6 +52,19 @@ impl WImage {
         }
     }
 
+    /// Compiles the image widget by selecting and preparing the image to display.
+    ///
+    /// This method chooses the most appropriate image source (icon, raw data,
+    /// or file path) based on the notification data and the freedesktop
+    /// specification. After selection, it decodes the image and determines
+    /// whether it can fit in the available space defined by [`RectSize`].
+    ///
+    /// # Returns
+    /// Returns [`CompileState::Success`] if the image was successfully compiled.
+    /// If the image cannot fit into the given space, [`CompileState::Failure`] is returned,
+    /// allowing the caller to handle the case gracefully (e.g. omit the image).
+    ///
+    /// Call this before drawing or querying [`width`] and [`height`].
     pub fn compile(
         &mut self,
         rect_size: RectSize<usize>,
@@ -129,10 +157,19 @@ impl WImage {
         }
     }
 
+    /// Returns the width of the compiled image.
+    ///
+    /// This value is only meaningful after [`Self::compile`] has been called.
+    /// If the widget has not been compiled yet, this will typically return
+    /// an undefined or default value.
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Returns the height of the compiled image.
+    ///
+    /// Like [`Self::width`], this is only meaningful after [`Self::compile`] has been
+    /// successfully called.
     pub fn height(&self) -> usize {
         self.height
     }

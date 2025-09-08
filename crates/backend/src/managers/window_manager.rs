@@ -21,6 +21,10 @@ mod banner_stack;
 mod cache;
 mod window;
 
+/// Manages application windows through a convenient API, abstracting away explicit window
+/// management and providing high-level access to window-related operations.
+///
+/// Also this struct stores shared data between windows.
 pub(crate) struct WindowManager {
     window: Option<Window>,
 
@@ -34,6 +38,7 @@ pub(crate) struct WindowManager {
 }
 
 impl WindowManager {
+    /// Initializes the window manager and loads layouts and fonts into the cache.
     pub(crate) fn init(config: &Config) -> anyhow::Result<Self> {
         let cached_layouts = Data::new(
             config
@@ -71,6 +76,7 @@ impl WindowManager {
         Ok(wm)
     }
 
+    /// Dispatches the window events into Wayland compositor.
     pub(crate) fn dispatch(&mut self) -> anyhow::Result<bool> {
         if let Some(window) = self.window.as_mut() {
             window.dispatch()?;
@@ -79,10 +85,13 @@ impl WindowManager {
         Ok(false)
     }
 
+    /// Updates the layout cache if any layouts have changed.
     pub(crate) fn update_cache(&mut self) -> bool {
         self.cached_layouts.update()
     }
 
+    /// Updates the shared data and cache with the new user configuration. If any windows are open,
+    /// they are updated as well.
     pub(crate) fn update_by_config(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
         self.cached_layouts.extend_by_keys(
             config
@@ -116,14 +125,17 @@ impl WindowManager {
         Ok(())
     }
 
+    /// Shows notification if possible.
     pub(crate) fn create_notification(&mut self, notification: Box<Notification>) {
         self.notification_queue.push_back(*notification);
     }
 
+    /// Closes a notification by ID.
     pub(crate) fn close_notification(&mut self, notification_id: u32) {
         self.close_notifications.push(notification_id);
     }
 
+    /// Shows the window with notifications if any exist; otherwise, the window remains unused.
     pub(crate) fn show_window<P, Gpu>(
         &mut self,
         wayland_connection: &Connection,
@@ -157,6 +169,13 @@ impl WindowManager {
         Ok(())
     }
 
+    /// Notification management in the window manager is queue-based. Replacing a notification by ID
+    /// bypasses the queue limit; other notifications will be added to the window until the limit is
+    /// reached.
+    ///
+    /// In case the window does not exist, these actions are not performed.
+    ///
+    /// After this, a frame will be requested from the Wayland compositor.
     fn process_notification_queue<Gpu>(
         &mut self,
         config: Data<Config, Borrowed>,
@@ -182,13 +201,16 @@ impl WindowManager {
 
             window.add_banners(notifications_to_display);
 
-            self.update_window(gpu)?;
+            self.frame_window(gpu)?;
             self.sync()?;
         }
 
         Ok(())
     }
 
+    /// Handles requests from external applications to close notifications by ID.
+    ///
+    /// Other kinds of notification closing are not handled here.
     pub(crate) fn handle_close_notifications<Gpu>(
         &mut self,
         config: Data<Config, Borrowed>,
@@ -221,6 +243,7 @@ impl WindowManager {
         Ok(())
     }
 
+    /// Removes all expired notifications from the window when their timeout has elapsed, if a timeout was specified.
     pub(crate) fn remove_expired<Gpu>(
         &mut self,
         config: Data<Config, Borrowed>,
@@ -250,10 +273,13 @@ impl WindowManager {
         Ok(())
     }
 
+    /// Removes the last stored signal from the state and returns it.
+    /// This signal is used as a response in D-Bus communication.
     pub(crate) fn pop_signal(&mut self) -> Option<Signal> {
         self.signals.pop()
     }
 
+    /// Handles user interaction with the window, if any has occurred.
     pub(crate) fn handle_actions<Gpu>(
         &mut self,
         config: Data<Config, Borrowed>,
@@ -278,6 +304,10 @@ impl WindowManager {
         Ok(())
     }
 
+    /// Resets the timeout for all notifications.
+    ///
+    /// This is useful when the configuration is updated with new values or other important
+    /// changes related to notifications occur.
     pub(crate) fn reset_timeouts(&mut self) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
             window.reset_timeouts();
@@ -286,7 +316,8 @@ impl WindowManager {
         Ok(())
     }
 
-    fn update_window<Gpu>(&mut self, gpu: &mut Gpu) -> Result<(), Error>
+    /// Requests a frame from the Wayland compositor for the window to render.
+    fn frame_window<Gpu>(&mut self, gpu: &mut Gpu) -> Result<(), Error>
     where
         Gpu: AsRef<EglState> + AsRef<NoSurface>,
     {
@@ -298,12 +329,15 @@ impl WindowManager {
             window.frame();
             window.commit();
 
-            debug!("Window Manager: Updated the windows");
+            debug!("Window Manager: Requested a frame for window");
         }
 
         Ok(())
     }
 
+    /// Round-trips all events related to the window with the Wayland compositor; in other words, synchronizes with it.
+    ///
+    /// This is useful for processing all events immediately as a single batch.
     fn sync(&mut self) -> anyhow::Result<()> {
         if let Some(window) = self.window.as_mut() {
             window.sync()?;
@@ -313,6 +347,7 @@ impl WindowManager {
         Ok(())
     }
 
+    /// Initializes a window to show notifications.
     fn init_window<P, Gpu>(
         &mut self,
         wayland_connection: &Connection,
@@ -346,6 +381,7 @@ impl WindowManager {
         }
     }
 
+    /// Deinitializes the window to free resources on the output.
     fn deinit_window<Gpu>(&mut self, gpu: &Gpu) -> anyhow::Result<()>
     where
         Gpu: AsRef<EglState> + AsRef<NoSurface>,
