@@ -13,7 +13,10 @@ use wayland_client::{
     protocol::{wl_compositor::WlCompositor, wl_seat::WlSeat, wl_shm::WlShm},
     Connection,
 };
-use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1;
+use wayland_protocols::wp::{
+    cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+    presentation_time::client::wp_presentation::WpPresentation,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 use window::Window;
 
@@ -115,13 +118,9 @@ impl WindowManager {
 
         if let Some(window) = self.window.as_mut() {
             window.reconfigure(config);
-            window.frame();
-            window.commit();
         }
 
         debug!("Window Manager: Updated the windows by updated config");
-
-        self.sync()?;
         Ok(())
     }
 
@@ -135,12 +134,16 @@ impl WindowManager {
         self.close_notifications.push(notification_id);
     }
 
-    /// Shows the window with notifications if any exist; otherwise, the window remains unused.
+    /// Shows the window only if there are notifications to display.
+    ///
+    /// If the window is shown, this method also triggers a compositor frame
+    /// request by calling [`Self::frame_window`], ensuring that the first frame
+    /// is rendered immediately.
     pub(crate) fn show_window<P, Gpu>(
         &mut self,
         wayland_connection: &Connection,
         gpu: &mut Gpu,
-        protoctols: &P,
+        protocols: &P,
         config: Data<Config, Borrowed>,
     ) -> Result<(), Error>
     where
@@ -148,7 +151,8 @@ impl WindowManager {
             + AsRef<WlShm>
             + AsRef<WlSeat>
             + AsRef<WpCursorShapeManagerV1>
-            + AsRef<ZwlrLayerShellV1>,
+            + AsRef<ZwlrLayerShellV1>
+            + AsRef<WpPresentation>,
         Gpu: AsRef<EglState> + AsRef<NoSurface> + AsRef<DirectContext>,
     {
         let mut notifications_limit = config.general().limit as usize;
@@ -162,11 +166,23 @@ impl WindowManager {
             .is_none_or(|window| window.total_banners() < notifications_limit)
             && !self.notification_queue.is_empty()
         {
-            self.init_window(wayland_connection, protoctols, gpu, config.clone())?;
-            self.process_notification_queue(config, gpu)?;
+            self.init_window(wayland_connection, protocols, gpu, config.clone())?;
+            self.process_notification_queue(config)?;
+            self.frame_window(gpu, protocols)?;
+        } else if self.window.is_some() {
+            self.frame_window(gpu, protocols)?;
         }
 
         Ok(())
+    }
+
+    /// Returns `true` if the window is currently visible on screen.
+    ///
+    /// This method is used to decide whether to keep the render loop running
+    /// eagerly (for smooth animations and responsiveness) or to slow it down
+    /// during idle periods to save CPU.
+    pub(crate) fn is_window_visible(&self) -> bool {
+        self.window.is_some()
     }
 
     /// Notification management in the window manager is queue-based. Replacing a notification by ID
@@ -174,16 +190,7 @@ impl WindowManager {
     /// reached.
     ///
     /// In case the window does not exist, these actions are not performed.
-    ///
-    /// After this, a frame will be requested from the Wayland compositor.
-    fn process_notification_queue<Gpu>(
-        &mut self,
-        config: Data<Config, Borrowed>,
-        gpu: &mut Gpu,
-    ) -> Result<(), Error>
-    where
-        Gpu: AsRef<EglState> + AsRef<NoSurface>,
-    {
+    fn process_notification_queue(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
         if let Some(window) = self.window.as_mut() {
             let mut notifications_limit = config.general().limit as usize;
 
@@ -200,9 +207,6 @@ impl WindowManager {
                 .collect();
 
             window.add_banners(notifications_to_display);
-
-            self.frame_window(gpu)?;
-            self.sync()?;
         }
 
         Ok(())
@@ -211,14 +215,10 @@ impl WindowManager {
     /// Handles requests from external applications to close notifications by ID.
     ///
     /// Other kinds of notification closing are not handled here.
-    pub(crate) fn handle_close_notifications<Gpu>(
+    pub(crate) fn handle_close_notifications(
         &mut self,
         config: Data<Config, Borrowed>,
-        gpu: &mut Gpu,
-    ) -> Result<(), Error>
-    where
-        Gpu: AsRef<EglState> + AsRef<NoSurface> + AsMut<DirectContext>,
-    {
+    ) -> Result<(), Error> {
         if self.window.as_ref().is_some() && !self.close_notifications.is_empty() {
             let window = self.window.as_mut().unwrap();
 
@@ -237,21 +237,14 @@ impl WindowManager {
                 })
             });
 
-            self.process_notification_queue(config, gpu)?;
+            self.process_notification_queue(config)?;
         }
 
         Ok(())
     }
 
     /// Removes all expired notifications from the window when their timeout has elapsed, if a timeout was specified.
-    pub(crate) fn remove_expired<Gpu>(
-        &mut self,
-        config: Data<Config, Borrowed>,
-        gpu: &mut Gpu,
-    ) -> Result<(), Error>
-    where
-        Gpu: AsRef<EglState> + AsRef<NoSurface> + AsMut<DirectContext>,
-    {
+    pub(crate) fn remove_expired(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
         if let Some(window) = self.window.as_mut() {
             let notifications = window.remove_expired_banners();
 
@@ -267,7 +260,7 @@ impl WindowManager {
                 })
             });
 
-            self.process_notification_queue(config, gpu)?;
+            self.process_notification_queue(config)?;
         }
 
         Ok(())
@@ -280,14 +273,7 @@ impl WindowManager {
     }
 
     /// Handles user interaction with the window, if any has occurred.
-    pub(crate) fn handle_actions<Gpu>(
-        &mut self,
-        config: Data<Config, Borrowed>,
-        gpu: &mut Gpu,
-    ) -> Result<(), Error>
-    where
-        Gpu: AsRef<EglState> + AsRef<NoSurface>,
-    {
+    pub(crate) fn handle_actions(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
         //TODO: change it to actions which defines in config file
 
         if let Some(window) = self.window.as_mut() {
@@ -298,7 +284,7 @@ impl WindowManager {
             };
 
             self.signals.push(signal);
-            self.process_notification_queue(config, gpu)?;
+            self.process_notification_queue(config)?;
         }
 
         Ok(())
@@ -316,32 +302,29 @@ impl WindowManager {
         Ok(())
     }
 
-    /// Requests a frame from the Wayland compositor for the window to render.
-    fn frame_window<Gpu>(&mut self, gpu: &mut Gpu) -> Result<(), Error>
+    /// Requests a new frame from the Wayland compositor if no other frame
+    /// request is pending.
+    ///
+    /// This method respects the compositor's drawing loop and avoids spamming
+    /// frame requests by consulting [`Window::has_requested_frame`].
+    /// It should be called whenever a new frame needs to be drawn (e.g.,
+    /// when the window becomes visible or during animations).
+    fn frame_window<Gpu, P>(&mut self, gpu: &mut Gpu, protocols: &P) -> Result<(), Error>
     where
         Gpu: AsRef<EglState> + AsRef<NoSurface>,
+        P: AsRef<WpPresentation>,
     {
         if let Some(window) = self.window.as_mut() {
             if window.is_empty() {
                 return Ok(self.deinit_window(gpu)?);
             }
 
-            window.frame();
-            window.commit();
+            if !window.has_requested_frame() {
+                window.frame();
+                window.commit(protocols.as_ref());
 
-            debug!("Window Manager: Requested a frame for window");
-        }
-
-        Ok(())
-    }
-
-    /// Round-trips all events related to the window with the Wayland compositor; in other words, synchronizes with it.
-    ///
-    /// This is useful for processing all events immediately as a single batch.
-    fn sync(&mut self) -> anyhow::Result<()> {
-        if let Some(window) = self.window.as_mut() {
-            window.sync()?;
-            debug!("Window Manager: Roundtrip events for the windows");
+                debug!("Window Manager: Requested a frame for window");
+            }
         }
 
         Ok(())

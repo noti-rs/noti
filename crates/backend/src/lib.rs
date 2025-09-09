@@ -26,7 +26,10 @@ use wayland_client::{
 };
 use wayland_protocols::{
     ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1,
-    wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+    wp::{
+        cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+        presentation_time::client::wp_presentation::WpPresentation,
+    },
 };
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 
@@ -128,8 +131,10 @@ pub fn run(config: Config) -> anyhow::Result<()> {
             libc::malloc_trim(0);
         }
 
-        std::thread::sleep(Duration::from_millis(50));
-        std::hint::spin_loop();
+        if !backend.window_manager.is_window_visible() {
+            std::thread::sleep(Duration::from_millis(50));
+            std::hint::spin_loop();
+        }
     }
 }
 
@@ -184,6 +189,7 @@ struct Protocols {
     wl_seat: WlSeat,
     ext_idle_notifier: ExtIdleNotifierV1,
     zwlr_layer_shell: ZwlrLayerShellV1,
+    wp_presentation: WpPresentation,
     wp_cursor_shape_manager: WpCursorShapeManagerV1,
 }
 
@@ -393,10 +399,9 @@ impl Backend {
                 config.clone(),
             )?;
 
-            window_manager.handle_close_notifications(config.clone(), &mut self.gpu_interface)?;
-            window_manager.remove_expired(config.clone(), &mut self.gpu_interface)?;
-
-            window_manager.handle_actions(config.clone(), &mut self.gpu_interface)?;
+            window_manager.handle_close_notifications(config.clone())?;
+            window_manager.remove_expired(config.clone())?;
+            window_manager.handle_actions(config.clone())?;
         }
 
         window_manager.dispatch()?;
@@ -461,6 +466,7 @@ impl_as_ref!(Protocols: wl_shm => WlShm);
 impl_as_ref!(Protocols: wl_seat => WlSeat);
 impl_as_ref!(Protocols: ext_idle_notifier => ExtIdleNotifierV1);
 impl_as_ref!(Protocols: zwlr_layer_shell => ZwlrLayerShellV1);
+impl_as_ref!(Protocols: wp_presentation => WpPresentation);
 impl_as_ref!(Protocols: wp_cursor_shape_manager => WpCursorShapeManagerV1);
 
 impl Dispatch<WlRegistry, ()> for ProtocolsBuilder {
@@ -514,10 +520,21 @@ impl Dispatch<WlRegistry, ()> for ProtocolsBuilder {
                     ));
                     debug!("Backend: Bound the ext_idle_notifier_v1");
                 }
+                "wp_presentation" => {
+                    state.wp_presentation(registry.bind::<WpPresentation, _, _>(
+                        name,
+                        version,
+                        qhandle,
+                        (),
+                    ));
+                }
                 "wp_cursor_shape_manager_v1" => {
-                    state.wp_cursor_shape_manager = Some(
-                        registry.bind::<WpCursorShapeManagerV1, _, _>(name, version, qhandle, ()),
-                    );
+                    state.wp_cursor_shape_manager(registry.bind::<WpCursorShapeManagerV1, _, _>(
+                        name,
+                        version,
+                        qhandle,
+                        (),
+                    ));
 
                     debug!("Backend: Bound the wp_cursor_shape_manager_v1");
                 }
@@ -531,5 +548,6 @@ delegate_noop!(ProtocolsBuilder: ignore WlCompositor);
 delegate_noop!(ProtocolsBuilder: ignore ZwlrLayerShellV1);
 delegate_noop!(ProtocolsBuilder: ignore WlShm);
 delegate_noop!(ProtocolsBuilder: ignore WlSeat);
+delegate_noop!(ProtocolsBuilder: ignore WpPresentation);
 delegate_noop!(ProtocolsBuilder: ignore WpCursorShapeManagerV1);
 delegate_noop!(ProtocolsBuilder: ignore ExtIdleNotifierV1);

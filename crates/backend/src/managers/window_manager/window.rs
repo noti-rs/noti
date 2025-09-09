@@ -30,9 +30,14 @@ use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum,
 };
 use wayland_egl::WlEglSurface;
-use wayland_protocols::wp::cursor_shape::v1::client::{
-    wp_cursor_shape_device_v1::{self, WpCursorShapeDeviceV1},
-    wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+use wayland_protocols::wp::{
+    cursor_shape::v1::client::{
+        wp_cursor_shape_device_v1::{self, WpCursorShapeDeviceV1},
+        wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+    },
+    presentation_time::client::{
+        wp_presentation, wp_presentation_feedback::WpPresentationFeedback,
+    },
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{self, ZwlrLayerShellV1},
@@ -77,6 +82,8 @@ pub(super) struct WindowState {
     cursor_device: WpCursorShapeDeviceV1,
     pointer_state: PointerState,
 
+    has_requested_frame: bool,
+    last_presented_time_ns: Option<u64>,
     configuration_state: ConfigurationState,
 }
 
@@ -161,6 +168,8 @@ impl Window {
             cursor_device,
             pointer,
 
+            has_requested_frame: false,
+            last_presented_time_ns: None,
             configuration_state: ConfigurationState::NotConfiured,
         };
 
@@ -252,19 +261,31 @@ impl Window {
         Ok((egl_window, egl_surface))
     }
 
+    /// Returns `true` if a frame has already been requested from the compositor.
+    ///
+    /// This flag is used to prevent duplicate frame requests while the previous
+    /// frame callback has not yet been processed. Avoiding repeated requests
+    /// prevents unnecessary load on the Wayland compositor and keeps rendering
+    /// efficient.
+    pub(super) fn has_requested_frame(&self) -> bool {
+        self.state.has_requested_frame
+    }
+
     /// Requests a frame for the current `Window` from the Wayland compositor.
     /// This allows the compositor to schedule the redraw at the correct time, ensuring smooth
     /// rendering with VSync.
     pub(super) fn frame(&mut self) {
         self.state.surface.damage(0, 0, i32::MAX, i32::MAX);
         self.state.surface.frame(&self.event_queue.handle(), ());
+        self.state.has_requested_frame = true;
 
         debug!("Window: Requested a frame to the Wayland compositor");
     }
 
     /// Sends a `commit` message to the Wayland compositor to apply previously requested actions.
-    pub(super) fn commit(&self) {
+    pub(super) fn commit(&self, wp_presentation: &wp_presentation::WpPresentation) {
         self.state.surface.commit();
+        wp_presentation.feedback(&self.state.surface, &self.event_queue.handle(), ());
         debug!("Window: Commited")
     }
 
@@ -472,8 +493,8 @@ impl Drop for Window {
     fn drop(&mut self) {
         self.state.destroy();
 
-        if let Err(_err) = self.sync() {
-            error!("Window: Failed to sync during deinitialization.")
+        if let Err(err) = self.sync() {
+            error!("Window: Failed to sync during deinitialization. Error: {err}")
         }
 
         debug!("Window: Deinitialized");
@@ -703,6 +724,8 @@ impl Dispatch<WlCallback, ()> for WindowState {
         _qhandle: &QueueHandle<Self>,
     ) {
         if let wayland_client::protocol::wl_callback::Event::Done { .. } = event {
+            state.has_requested_frame = false;
+
             state
                 .use_current_egl_surface()
                 .expect("The EGL surface must be available to make current and use it");
@@ -753,6 +776,34 @@ impl Dispatch<WlCallback, ()> for WindowState {
                         .swap_buffers(state.egl_state.display, state.egl_surface)
                 })
                 .expect("The buffer swapping must be errorless");
+        }
+    }
+}
+
+impl Dispatch<WpPresentationFeedback, ()> for WindowState {
+    fn event(
+        state: &mut Self,
+        _proxy: &WpPresentationFeedback,
+        event: <WpPresentationFeedback as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        match event {
+            wayland_protocols::wp::presentation_time::client::wp_presentation_feedback::Event::Presented { tv_sec_hi, tv_sec_lo, tv_nsec, .. } => {
+                let sec = ((tv_sec_hi as u64) << 32) | (tv_sec_lo as u64);
+                let time_ns = sec * 1_000_000_000 + tv_nsec as u64;
+
+                let delta_time = state.last_presented_time_ns.map(|last| time_ns - last).unwrap_or(0);
+                state.last_presented_time_ns = Some(time_ns);
+                trace!("Window Presentation: Current FPS — {}", 1_000_000_000.0 / delta_time as f64);
+
+                // TODO: update animation with `delta_time`
+            },
+            wayland_protocols::wp::presentation_time::client::wp_presentation_feedback::Event::Discarded => {
+                // Frame has never shown — skip
+            },
+            _ => (),
         }
     }
 }
