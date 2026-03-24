@@ -22,6 +22,7 @@ use wayland_client::{
         wl_callback::WlCallback,
         wl_compositor::WlCompositor,
         wl_pointer::{self, ButtonState, WlPointer},
+        wl_region::WlRegion,
         wl_seat::WlSeat,
         wl_shm::WlShm,
         wl_shm_pool::WlShmPool,
@@ -67,8 +68,9 @@ pub(super) struct Window {
 pub(super) struct WindowState {
     banner_stack: BannerStack<u32>,
 
-    rect_size: RectSize<usize>,
-    anchored_margin: AnchoredMargin,
+    actual_size: RectSize<usize>,
+    anchor: Anchor,
+    margin: Margin,
 
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
@@ -132,19 +134,25 @@ impl Window {
 
         let mut event_queue = wayland_connection.new_event_queue();
 
-        let rect_size = RectSize::new(
+        let actual_size = RectSize::new(
             config.general().width.into(),
             config.general().height.into(),
         );
 
         let (surface, layer_surface) = Self::make_surface(protocols, &event_queue.handle());
         let (pointer, cursor_device) = Self::make_pointer(protocols, &event_queue.handle());
-        let (egl_window, egl_surface) = Self::make_egl_surface(&surface, gpu, &rect_size)?;
+        let (egl_window, egl_surface) = Self::make_egl_surface(&surface, gpu, &actual_size)?;
 
-        let anchored_margin = Self::make_anchored_margin(&config);
-        anchored_margin.relocate_layer_surface(&layer_surface);
+        let (x_offset, y_offset) = config.general().offset;
+        let margin = Margin::with_anchor(
+            x_offset as usize,
+            y_offset as usize,
+            &config.general().anchor,
+        );
+        let anchor = config.general().anchor.to_layer_shell_anchor();
+        layer_surface.set_anchor(anchor);
 
-        layer_surface.set_size(rect_size.width as u32, rect_size.height as u32);
+        layer_surface.set_size(actual_size.width as u32, actual_size.height as u32);
 
         surface.commit();
 
@@ -153,8 +161,9 @@ impl Window {
         let mut state = WindowState {
             banner_stack: BannerStack::new(),
 
-            rect_size,
-            anchored_margin,
+            actual_size,
+            anchor,
+            margin,
 
             surface,
             layer_surface,
@@ -210,13 +219,6 @@ impl Window {
         (surface, layer_surface)
     }
 
-    /// Creates an [AnchoredMargin] from the user configuration for a `Window` state,
-    /// used to position a `zwlr_layer_surface_v1`.
-    fn make_anchored_margin(config: &Config) -> AnchoredMargin {
-        let (x_offset, y_offset) = config.general().offset;
-        AnchoredMargin::new(x_offset as i32, y_offset as i32, &config.general().anchor)
-    }
-
     /// Requests a pointer from the Wayland compositor using `wp_cursor_shape_device_v1`
     /// for the specified pointer.
     fn make_pointer<P>(
@@ -240,15 +242,15 @@ impl Window {
     fn make_egl_surface<Gpu>(
         surface: &WlSurface,
         gpu: &Gpu,
-        rect_size: &RectSize<usize>,
+        actual_size: &RectSize<usize>,
     ) -> anyhow::Result<(WlEglSurface, khronos_egl::Surface)>
     where
         Gpu: AsRef<EglState>,
     {
         let egl_window = WlEglSurface::new(
             surface.id(),
-            rect_size.width as i32,
-            rect_size.height as i32,
+            actual_size.width as i32,
+            actual_size.height as i32,
         )?;
 
         let egl_state: &EglState = gpu.as_ref();
@@ -272,6 +274,32 @@ impl Window {
     /// efficient.
     pub(super) fn has_requested_frame(&self) -> bool {
         self.state.has_requested_frame
+    }
+
+    pub(super) fn update_input_regions(&mut self, compositor: &WlCompositor) {
+        let region = compositor.create_region(&self.event_queue.handle(), ());
+
+        let mut offset = Offset::new(self.state.margin.left, self.state.margin.top);
+        let gap = self.state.config.general().gap as usize;
+
+        let iterator = |banner: &Banner| {
+            region.add(
+                offset.x as i32,
+                offset.y as i32,
+                banner.width() as i32,
+                banner.height() as i32,
+            );
+            offset.y += banner.height() + gap;
+        };
+
+        if self.state.config.general().anchor.is_top() {
+            self.state.banner_stack.banners().for_each(iterator)
+        } else {
+            self.state.banner_stack.banners().rev().for_each(iterator)
+        }
+
+        self.state.surface.set_input_region(Some(&region));
+        region.destroy();
     }
 
     /// Requests a frame for the current `Window` from the Wayland compositor.
@@ -313,9 +341,9 @@ impl WindowState {
     }
 
     fn relocate(&mut self, (x, y): (u8, u8), anchor_cfg: &config::general::Anchor) {
-        self.anchored_margin.update(x as i32, y as i32, anchor_cfg);
-        self.anchored_margin
-            .relocate_layer_surface(&self.layer_surface);
+        self.margin = Margin::with_anchor(x as usize, y as usize, anchor_cfg);
+        self.anchor = anchor_cfg.to_layer_shell_anchor();
+        self.layer_surface.set_anchor(self.anchor);
     }
 
     pub(super) fn total_banners(&self) -> usize {
@@ -434,7 +462,10 @@ impl WindowState {
         let samples = 0;
         let stencil_bits = 8;
         let backend_rt = skia_safe::gpu::backend_render_targets::make_gl(
-            (self.rect_size.width as i32, self.rect_size.height as i32),
+            (
+                self.actual_size.width as i32,
+                self.actual_size.height as i32,
+            ),
             samples,
             stencil_bits,
             FramebufferInfo {
@@ -457,24 +488,24 @@ impl WindowState {
         }
     }
 
-    fn resize(&mut self, rect_size: RectSize<usize>) {
-        if rect_size.width == 0 && rect_size.height == 0 {
+    fn resize(&mut self, logical_size: RectSize<usize>) {
+        if logical_size.width == 0 && logical_size.height == 0 {
             // INFO: the Wayland compositor may call the callback after destroying a last
             // notification and because of this the width and height of surface equals to 0x0. To
             // avoid this need to set dummy size. It's always last frames before disappearing.
-            self.rect_size = RectSize::new(1, 1);
+            self.actual_size = RectSize::new(1, 1);
         } else {
-            self.rect_size = rect_size;
+            self.actual_size = self.margin.apply_to_size(logical_size);
         }
 
-        let (width, height) = (self.rect_size.width, self.rect_size.height);
+        let RectSize { width, height } = self.actual_size;
         self.layer_surface.set_size(width as u32, height as u32);
         let (dx, dy) = (0, 0);
         self.egl_window.resize(width as i32, height as i32, dx, dy);
 
         debug!(
             "Window: Resized to width - {}, height - {}",
-            self.rect_size.width, self.rect_size.height
+            self.actual_size.width, self.actual_size.height
         );
     }
 
@@ -530,40 +561,16 @@ impl Dispatcher for Window {
     }
 }
 
-/// Represents a helper for positioning a `zwlr_layer_surface_v1`.
-///
-/// The `zwlr_layer_surface_v1` can be positioned using an anchor and an offset. There are only
-/// 8 possible anchor directions (4 corners and 4 edges). The offset defines the margin from
-/// the selected corner or edge.
-struct AnchoredMargin {
-    margin: Margin,
-    anchor: Anchor,
-}
-
-impl AnchoredMargin {
-    fn new(x_offset: i32, y_offset: i32, anchor: &config::general::Anchor) -> Self {
-        Self {
-            margin: Margin::with_anchor(x_offset, y_offset, anchor),
-            anchor: anchor.to_layer_shell_anchor(),
-        }
-    }
-
-    fn update(&mut self, x_offset: i32, y_offset: i32, anchor: &config::general::Anchor) {
-        *self = Self::new(x_offset, y_offset, anchor);
-    }
-
-    /// Uses the `zwlr_layer_surface_v1` to reposition the surface according to its current properties.
-    fn relocate_layer_surface(&self, layer_surface: &ZwlrLayerSurfaceV1) {
-        layer_surface.set_anchor(self.anchor);
-        self.margin.apply(layer_surface);
-    }
-}
-
+// Represents gaps between window and screen boundaries to which the window is anchored.
+//
+// Actually it uses for differing the logical and actual window positions and sizes instead of
+// setting at Wayland level. Some animations may require appearing from edges of screen including
+// gaps, and because of this we here use specific margin.
 struct Margin {
-    left: i32,
-    right: i32,
-    top: i32,
-    bottom: i32,
+    left: usize,
+    right: usize,
+    top: usize,
+    bottom: usize,
 }
 
 impl Margin {
@@ -577,7 +584,7 @@ impl Margin {
     }
 
     /// Uses the specified anchor to determine the correct directions for the offsets.
-    fn with_anchor(x: i32, y: i32, anchor: &config::general::Anchor) -> Self {
+    fn with_anchor(x: usize, y: usize, anchor: &config::general::Anchor) -> Self {
         let mut margin = Margin::new();
 
         if anchor.is_top() {
@@ -596,8 +603,10 @@ impl Margin {
         margin
     }
 
-    fn apply(&self, layer_surface: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1) {
-        layer_surface.set_margin(self.top, self.right, self.bottom, self.left);
+    fn apply_to_size(&self, mut rect_size: RectSize<usize>) -> RectSize<usize> {
+        rect_size.width += self.left + self.right;
+        rect_size.height += self.top + self.bottom;
+        rect_size
     }
 }
 
@@ -717,6 +726,7 @@ impl PointerState {
 }
 
 delegate_noop!(WindowState: ignore WlSurface);
+delegate_noop!(WindowState: ignore WlRegion);
 delegate_noop!(WindowState: ignore WlShmPool);
 delegate_noop!(WindowState: ignore WlBuffer);
 delegate_noop!(WindowState: ignore WpCursorShapeDeviceV1);
@@ -749,17 +759,18 @@ impl Dispatch<WlCallback, ()> for WindowState {
 
             // TODO: correctly resize for specific animation
             let gap = state.config.general().gap as usize;
-            state.resize(RectSize::new(
+            let logical_size = RectSize::new(
                 state.banner_stack.width(),
                 state.banner_stack.total_height_with_gap(gap),
-            ));
+            );
+            state.resize(logical_size);
 
             let mut sk_surface = state
                 .create_drawing_surface()
                 .expect("The skia's surface must be correct and created without issues");
             sk_surface.canvas().clear(Color::from_argb(0, 0, 0, 0));
 
-            let mut offset = Offset::default();
+            let mut offset = Offset::new(state.margin.left, state.margin.top);
             let writer = |banner: &Banner| {
                 banner.draw(&offset, &mut sk_surface);
                 offset.y += banner.height() + gap;
@@ -882,8 +893,8 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for WindowState {
             layer_surface.ack_configure(serial);
 
             if width != 0 || height != 0 {
-                state.rect_size.width = width as usize;
-                state.rect_size.height = height as usize;
+                state.actual_size.width = width as usize;
+                state.actual_size.height = height as usize;
             }
 
             state.configuration_state = ConfigurationState::Configured;

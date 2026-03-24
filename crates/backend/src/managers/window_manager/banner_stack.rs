@@ -643,6 +643,8 @@ fn make_animated_widget(
     let duration: Duration = animation_definition.duration.clone().into();
     let easing_type = animation_definition.easing.clone();
 
+    // TODO: better to use actual window size instead of fixed value when the dynamic adaptation by
+    // width (by filled content).
     let (start_x, end_x) = if config.general().anchor.is_left() {
         (-500.0, 0.0)
     } else if config.general().anchor.is_right() {

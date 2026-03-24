@@ -292,7 +292,7 @@ impl WindowManager {
     fn frame_window<Gpu, P>(&mut self, gpu: &mut Gpu, protocols: &P) -> Result<(), Error>
     where
         Gpu: AsRef<EglState> + AsRef<NoSurface>,
-        P: AsRef<WpPresentation>,
+        P: AsRef<WlCompositor> + AsRef<WpPresentation>,
     {
         if let Some(window) = self.window.as_mut() {
             if window.is_empty() {
@@ -300,6 +300,7 @@ impl WindowManager {
             }
 
             if !window.has_requested_frame() {
+                window.update_input_regions(protocols.as_ref());
                 window.frame();
                 window.commit(protocols.as_ref());
 
