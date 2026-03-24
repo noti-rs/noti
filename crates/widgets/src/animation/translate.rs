@@ -19,7 +19,7 @@ pub struct Translate {
     widget: Widget,
 
     shader_builder: ShaderBuilder,
-    current_time_ns: u64,
+    elapsed_ns: u64,
     duration: Duration,
     easing: Easing,
 }
@@ -82,7 +82,7 @@ impl Translate {
                 builder.set_uniform("end", UniformValue::Float2(end.x, end.y));
                 builder
             },
-            current_time_ns: 0,
+            elapsed_ns: 0,
             easing,
             duration,
         }
@@ -95,6 +95,10 @@ impl Translate {
     pub fn into_widget(self) -> Widget {
         self.widget
     }
+
+    pub fn as_widget(&self) -> &Widget {
+        &self.widget
+    }
 }
 
 impl Animated for Translate {
@@ -103,18 +107,18 @@ impl Animated for Translate {
             return;
         }
 
-        self.current_time_ns += delta_time_ns;
+        self.elapsed_ns += delta_time_ns;
         self.shader_builder.set_uniform(
             "progress",
             UniformValue::Float(self.easing.ease(
-                (self.current_time_ns as f64 / self.duration.as_nanos() as f64).clamp(0.0, 1.0)
+                (self.elapsed_ns as f64 / self.duration.as_nanos() as f64).clamp(0.0, 1.0)
                     as f32,
             )),
         );
     }
 
     fn is_finished(&self) -> bool {
-        self.current_time_ns as u128 > self.duration.as_nanos()
+        self.elapsed_ns as u128 > self.duration.as_nanos()
     }
 }
 

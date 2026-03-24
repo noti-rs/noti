@@ -104,6 +104,13 @@ public! {
     #[cfg_prop(name(AnimationProperty), derive(Debug, Deserialize, Clone, Default))]
     struct Animation {
         #[cfg_prop(
+            use_type(SpacerAnimationDefinitionProperty),
+            mergeable,
+            default
+        )]
+        allocation: SpacerAnimationDefinition,
+
+        #[cfg_prop(
             use_type(AnimationDefinitionProperty),
             mergeable,
             default(path = AnimationDefinitionProperty::default_enter)
@@ -116,6 +123,29 @@ public! {
             default(path = AnimationDefinitionProperty::default_exit)
         )]
         exit: AnimationDefinition,
+
+        #[cfg_prop(
+            use_type(SpacerAnimationDefinitionProperty),
+            mergeable,
+            default
+        )]
+        free: SpacerAnimationDefinition,
+    }
+}
+
+public! {
+    #[derive(ConfigProperty,Debug)]
+    #[cfg_prop(name(SpacerAnimationDefinitionProperty), derive(Debug, Deserialize, Clone))]
+    struct SpacerAnimationDefinition {
+        duration: AnimationDuration,
+    }
+}
+
+impl Default for SpacerAnimationDefinitionProperty {
+    fn default() -> Self {
+        Self {
+            duration: Some(AnimationDuration(Duration::from_secs_f32(0.15))),
+        }
     }
 }
 

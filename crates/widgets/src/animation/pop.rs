@@ -5,21 +5,21 @@ use super::{Animated, ShaderBuilder, UniformValue};
 use crate::{animation::Easing, Draw, Widget};
 
 pub trait PopDirection {
-    fn percentage(current_time_ns: u64, duration: Duration) -> f32;
+    fn percentage(elapsed_ns: u64, duration: Duration) -> f32;
 }
 
 pub struct In;
 pub struct Out;
 
 impl PopDirection for In {
-    fn percentage(current_time_ns: u64, duration: Duration) -> f32 {
-        (current_time_ns as f64 / duration.as_nanos() as f64).clamp(0.0, 1.0) as f32
+    fn percentage(elapsed_ns: u64, duration: Duration) -> f32 {
+        (elapsed_ns as f64 / duration.as_nanos() as f64).clamp(0.0, 1.0) as f32
     }
 }
 
 impl PopDirection for Out {
-    fn percentage(current_time_ns: u64, duration: Duration) -> f32 {
-        1.0 - (current_time_ns as f64 / duration.as_nanos() as f64).clamp(0.0, 1.0) as f32
+    fn percentage(elapsed_ns: u64, duration: Duration) -> f32 {
+        1.0 - (elapsed_ns as f64 / duration.as_nanos() as f64).clamp(0.0, 1.0) as f32
     }
 }
 
@@ -32,7 +32,7 @@ impl PopDirection for Out {
 /// and the transition curve is determined by the [`Easing`] function.
 pub struct Pop<Direction: PopDirection> {
     widget: Widget,
-    current_time_ns: u64,
+    elapsed_ns: u64,
     duration: Duration,
     easing: Easing,
     shader_builder: ShaderBuilder,
@@ -71,7 +71,7 @@ impl<D: PopDirection> Pop<D> {
         Self {
             widget,
             duration,
-            current_time_ns: 0,
+            elapsed_ns: 0,
             shader_builder: {
                 let mut builder = ShaderBuilder::new(SHADER).unwrap();
                 builder.set_uniform(
@@ -93,6 +93,10 @@ impl<D: PopDirection> Pop<D> {
     pub(super) fn into_widget(self) -> Widget {
         self.widget
     }
+
+    pub(super) fn as_widget(&self) -> &Widget {
+        &self.widget
+    }
 }
 
 impl<D: PopDirection> Animated for Pop<D> {
@@ -101,18 +105,18 @@ impl<D: PopDirection> Animated for Pop<D> {
             return;
         }
 
-        self.current_time_ns += delta_time_ns;
+        self.elapsed_ns += delta_time_ns;
         self.shader_builder.set_uniform(
             "progress",
             UniformValue::Float(
                 self.easing
-                    .ease(D::percentage(self.current_time_ns, self.duration)),
+                    .ease(D::percentage(self.elapsed_ns, self.duration)),
             ),
         );
     }
 
     fn is_finished(&self) -> bool {
-        self.current_time_ns as u128 > self.duration.as_nanos()
+        self.elapsed_ns as u128 > self.duration.as_nanos()
     }
 }
 

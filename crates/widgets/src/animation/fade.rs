@@ -5,21 +5,21 @@ use super::{Animated, ShaderBuilder, UniformValue};
 use crate::{animation::Easing, Draw, Widget};
 
 pub trait FadeDirection {
-    fn alpha_value(current_time_ns: u64, duration: Duration) -> f32;
+    fn alpha_value(elapsed_ns: u64, duration: Duration) -> f32;
 }
 
 pub struct In;
 pub struct Out;
 
 impl FadeDirection for In {
-    fn alpha_value(current_time_ns: u64, duration: Duration) -> f32 {
-        (current_time_ns as f64 / duration.as_nanos() as f64).clamp(0.0, 1.0) as f32
+    fn alpha_value(elapsed_ns: u64, duration: Duration) -> f32 {
+        (elapsed_ns as f64 / duration.as_nanos() as f64).clamp(0.0, 1.0) as f32
     }
 }
 
 impl FadeDirection for Out {
-    fn alpha_value(current_time_ns: u64, duration: Duration) -> f32 {
-        1.0 - (current_time_ns as f64 / duration.as_nanos() as f64).clamp(0.0, 1.0) as f32
+    fn alpha_value(elapsed_ns: u64, duration: Duration) -> f32 {
+        1.0 - (elapsed_ns as f64 / duration.as_nanos() as f64).clamp(0.0, 1.0) as f32
     }
 }
 
@@ -33,7 +33,7 @@ impl FadeDirection for Out {
 /// The transition speed is influenced by the chosen [`Easing`] function.
 pub struct Fade<Direction: FadeDirection> {
     widget: Widget,
-    current_time_ns: u64,
+    elapsed_ns: u64,
     duration: Duration,
     easing: Easing,
     shader_builder: ShaderBuilder,
@@ -57,7 +57,7 @@ impl<D: FadeDirection> Fade<D> {
         Self {
             widget,
             duration,
-            current_time_ns: 0,
+            elapsed_ns: 0,
             shader_builder: {
                 let mut builder = ShaderBuilder::new(SHADER).unwrap();
                 builder.set_uniform(
@@ -79,6 +79,10 @@ impl<D: FadeDirection> Fade<D> {
     pub(super) fn into_widget(self) -> Widget {
         self.widget
     }
+
+    pub(super) fn as_widget(&self) -> &Widget {
+        &self.widget
+    }
 }
 
 impl<D: FadeDirection> Animated for Fade<D> {
@@ -87,18 +91,18 @@ impl<D: FadeDirection> Animated for Fade<D> {
             return;
         }
 
-        self.current_time_ns += delta_time_ns;
+        self.elapsed_ns += delta_time_ns;
         self.shader_builder.set_uniform(
             "alpha",
             UniformValue::Float(
                 self.easing
-                    .ease(D::alpha_value(self.current_time_ns, self.duration)),
+                    .ease(D::alpha_value(self.elapsed_ns, self.duration)),
             ),
         );
     }
 
     fn is_finished(&self) -> bool {
-        self.current_time_ns as u128 > self.duration.as_nanos()
+        self.elapsed_ns as u128 > self.duration.as_nanos()
     }
 }
 

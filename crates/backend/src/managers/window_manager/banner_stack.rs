@@ -300,16 +300,16 @@ impl Banner {
 
     // TODO: use it for resize
     pub(super) fn width(&self) -> usize {
-        self.base_layout
+        self.stage
             .as_ref()
-            .map(|layout| layout.width())
+            .map(|stage| stage.width())
             .unwrap_or_default()
     }
 
     pub(super) fn height(&self) -> usize {
-        self.base_layout
+        self.stage
             .as_ref()
-            .map(|layout| layout.height())
+            .map(|stage| stage.height())
             .unwrap_or_default()
     }
 
@@ -484,6 +484,7 @@ pub(super) enum DrawState {
 
 // TODO: Add missing 'Allocation' and 'Free' variants
 enum BannerStage {
+    Allocation(Spacer<Increasing>),
     Appearing(AnimatedWidget),
     Showing {
         widget: Widget,
@@ -491,24 +492,40 @@ enum BannerStage {
         timeout: notification::Timeout,
     },
     Disappearing(AnimatedWidget),
+    Free(Spacer<Decreasing>),
 }
 
 impl BannerStage {
     fn start(widget: Widget, notification: &Notification, config: &Config) -> Self {
         // TODO: some animations may require additional information about position or something
         // else. For instance, the slide animation which requires to have start and end positions.
-        BannerStage::Appearing(make_animated_widget(
+        let max_height = widget.height();
+        BannerStage::Allocation(Spacer::<Increasing>::new(
             widget,
-            config,
-            &config
+            0,
+            max_height,
+            config
                 .display_by_app(&notification.app_name)
                 .animation
-                .enter,
+                .allocation
+                .duration
+                .clone()
+                .into(),
         ))
     }
 
     fn next(self, notification: &Notification, config: &Config) -> Option<Self> {
         match self {
+            BannerStage::Allocation(Spacer { widget, .. }) => {
+                Some(BannerStage::Appearing(make_animated_widget(
+                    widget,
+                    config,
+                    &config
+                        .display_by_app(&notification.app_name)
+                        .animation
+                        .enter,
+                )))
+            }
             BannerStage::Appearing(animated_widget) => Some(BannerStage::Showing {
                 widget: animated_widget.into_widget(),
                 created_at: time::Instant::now(),
@@ -521,25 +538,44 @@ impl BannerStage {
                     &config.display_by_app(&notification.app_name).animation.exit,
                 )))
             }
-            BannerStage::Disappearing(_) => None,
+            BannerStage::Disappearing(animated_widget) => {
+                let max_height = animated_widget.as_widget().height();
+                Some(BannerStage::Free(Spacer::<Decreasing>::new(
+                    animated_widget.into_widget(),
+                    0,
+                    max_height,
+                    config
+                        .display_by_app(&notification.app_name)
+                        .animation
+                        .free
+                        .duration
+                        .clone()
+                        .into(),
+                )))
+            }
+            BannerStage::Free(_) => None,
         }
     }
 
     fn replace_widget(&mut self, new_widget: Widget) {
         match self {
+            BannerStage::Allocation(spacer) => spacer.widget = new_widget,
             BannerStage::Appearing(animated_widget) => animated_widget.replace_widget(new_widget),
             BannerStage::Showing { widget, .. } => *widget = new_widget,
             BannerStage::Disappearing(animated_widget) => {
                 animated_widget.replace_widget(new_widget)
             }
+            BannerStage::Free(spacer) => spacer.widget = new_widget,
         }
     }
 
     fn update(&mut self, delta_time_ns: u64) {
         match self {
+            BannerStage::Allocation(spacer) => spacer.update(delta_time_ns),
             BannerStage::Appearing(animated_widget) => animated_widget.update(delta_time_ns),
-            BannerStage::Disappearing(animated_widget) => animated_widget.update(delta_time_ns),
             BannerStage::Showing { .. } => (),
+            BannerStage::Disappearing(animated_widget) => animated_widget.update(delta_time_ns),
+            BannerStage::Free(spacer) => spacer.update(delta_time_ns),
         }
     }
 
@@ -562,6 +598,7 @@ impl BannerStage {
 
     fn is_current_finished(&self, notification: &Notification, config: &Config) -> bool {
         match self {
+            BannerStage::Allocation(spacer) => spacer.is_finished(),
             BannerStage::Appearing(animated_widget) => animated_widget.is_finished(),
             BannerStage::Showing {
                 created_at,
@@ -581,15 +618,36 @@ impl BannerStage {
                 notification::Timeout::Never => false,
             },
             BannerStage::Disappearing(animated_widget) => animated_widget.is_finished(),
+            BannerStage::Free(spacer) => spacer.is_finished(),
         }
     }
 
     fn is_totally_finished(&self) -> bool {
-        if let BannerStage::Disappearing(animated_widget) = self {
-            return animated_widget.is_finished();
+        if let BannerStage::Free(spacer) = self {
+            return spacer.is_finished();
         }
 
         false
+    }
+
+    fn width(&self) -> usize {
+        match self {
+            BannerStage::Allocation(spacer) => spacer.widget.width(),
+            BannerStage::Appearing(animated_widget) => animated_widget.as_widget().width(),
+            BannerStage::Showing { widget, .. } => widget.width(),
+            BannerStage::Disappearing(animated_widget) => animated_widget.as_widget().width(),
+            BannerStage::Free(spacer) => spacer.widget.width(),
+        }
+    }
+
+    fn height(&self) -> usize {
+        match self {
+            BannerStage::Allocation(spacer) => spacer.current_height,
+            BannerStage::Appearing(animated_widget) => animated_widget.as_widget().height(),
+            BannerStage::Showing { widget, .. } => widget.height(),
+            BannerStage::Disappearing(animated_widget) => animated_widget.as_widget().height(),
+            BannerStage::Free(spacer) => spacer.current_height,
+        }
     }
 }
 
@@ -603,6 +661,7 @@ impl Draw for BannerStage {
             BannerStage::Disappearing(animated_widget) => {
                 animated_widget.draw_with_offset(offset, drawer)
             }
+            BannerStage::Allocation(_) | BannerStage::Free(_) => (),
         }
     }
 }
@@ -666,5 +725,84 @@ fn make_animated_widget(
         AnimationStyle::SlideOut => widget
             .slide_horizontally(end_x, start_x, duration, easing_type)
             .into(),
+    }
+}
+
+trait ChangeDirection {
+    fn get_current_value(progress: f32, min: usize, max: usize) -> usize;
+}
+
+struct Increasing;
+struct Decreasing;
+
+impl ChangeDirection for Increasing {
+    fn get_current_value(progress: f32, min: usize, max: usize) -> usize {
+        (progress * (max - min) as f32).round() as usize
+    }
+}
+
+impl ChangeDirection for Decreasing {
+    fn get_current_value(progress: f32, min: usize, max: usize) -> usize {
+        ((1.0 - progress) * (max - min) as f32).round() as usize
+    }
+}
+
+struct Spacer<Direction: ChangeDirection> {
+    widget: Widget,
+
+    min_height: usize,
+    max_height: usize,
+    current_height: usize,
+
+    elapsed_ns: u64,
+    duration: Duration,
+
+    _marker: std::marker::PhantomData<Direction>,
+}
+
+impl Spacer<Increasing> {
+    fn new(widget: Widget, min_height: usize, max_height: usize, duration: Duration) -> Self {
+        Self {
+            widget,
+            min_height,
+            max_height,
+            current_height: min_height,
+            elapsed_ns: 0,
+            duration,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Spacer<Decreasing> {
+    fn new(widget: Widget, min_height: usize, max_height: usize, duration: Duration) -> Self {
+        Self {
+            widget,
+            min_height,
+            max_height,
+            current_height: max_height,
+            elapsed_ns: 0,
+            duration,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<Direction: ChangeDirection> Spacer<Direction> {
+    fn update(&mut self, delta_time_ns: u64) {
+        if self.is_finished() {
+            return;
+        }
+
+        self.elapsed_ns += delta_time_ns;
+        self.current_height = Direction::get_current_value(
+            self.elapsed_ns as f32 / self.duration.as_nanos() as f32,
+            self.min_height,
+            self.max_height,
+        )
+    }
+
+    fn is_finished(&self) -> bool {
+        self.elapsed_ns as u128 > self.duration.as_nanos()
     }
 }

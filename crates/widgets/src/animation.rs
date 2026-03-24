@@ -50,6 +50,10 @@ impl AnimatedWidget {
     pub fn into_widget(self) -> Widget {
         delegate!(self.into_widget())
     }
+
+    pub fn as_widget(&self) -> &Widget {
+        delegate!(self.as_widget())
+    }
 }
 
 impl Animated for AnimatedWidget {
