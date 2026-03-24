@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{dispatcher::Dispatcher, EglState};
 use config::{self, Config};
-use dbus::{actions::Signal, notification::Notification};
+use dbus::{actions::ClosingReason, notification::Notification};
 use log::{debug, error, trace};
 use shared::{
     cached_data::CachedData,
@@ -43,7 +43,10 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{self, ZwlrLayerShellV1},
     zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
 };
-use widgets::types::{Offset, RectSize};
+use widgets::{
+    animation::Animated,
+    types::{Offset, RectSize},
+};
 
 /// Wraps a [WindowState] and holds an event queue used only for dispatching.
 ///
@@ -333,15 +336,16 @@ impl WindowState {
             .replace_by_keys(notifications, &self.config);
     }
 
-    pub(super) fn remove_banners_by_id(
-        &mut self,
-        notification_indices: &[u32],
-    ) -> Vec<Notification> {
-        self.banner_stack.remove_by_keys(notification_indices)
+    pub(super) fn close_banners_by_id(&mut self, notification_indices: &[u32]) {
+        for notification_id in notification_indices {
+            if let Some(banner) = self.banner_stack.get_mut(notification_id) {
+                banner.close(ClosingReason::CallCloseNotification)
+            }
+        }
     }
 
-    pub(super) fn remove_expired_banners(&mut self) -> Vec<Notification> {
-        self.banner_stack.remove_expired(&self.config)
+    pub(super) fn remove_closed_banners(&mut self) -> Vec<(Notification, ClosingReason)> {
+        self.banner_stack.remove_closed()
     }
 
     pub(super) fn handle_hover(&mut self) {
@@ -360,9 +364,9 @@ impl WindowState {
             .for_each(Banner::reset_timeout);
     }
 
-    pub(super) fn handle_click(&mut self) -> Option<Signal> {
+    pub(super) fn handle_click(&mut self) {
         if let PrioritizedPressState::Unpressed = self.pointer_state.press_state {
-            return None;
+            return;
         }
         let _press_state = self.pointer_state.press_state.take();
 
@@ -379,16 +383,12 @@ impl WindowState {
 
             debug!("Window: Clicked to notification banner with id {id}");
 
-            return self.banner_stack.remove(id).map(|notification| {
-                let notification_id = notification.id;
-                Signal::NotificationClosed {
-                    notification_id,
-                    reason: dbus::actions::ClosingReason::DismissedByUser,
-                }
-            });
-        }
+            let banner = &mut self.banner_stack[&id];
 
-        None
+            if banner.is_interactable() {
+                banner.close(dbus::actions::ClosingReason::DismissedByUser);
+            }
+        }
     }
 
     fn get_hovered_banner(&self) -> Option<u32> {
@@ -458,7 +458,14 @@ impl WindowState {
     }
 
     fn resize(&mut self, rect_size: RectSize<usize>) {
-        self.rect_size = rect_size;
+        if rect_size.width == 0 && rect_size.height == 0 {
+            // INFO: the Wayland compositor may call the callback after destroying a last
+            // notification and because of this the width and height of surface equals to 0x0. To
+            // avoid this need to set dummy size. It's always last frames before disappearing.
+            self.rect_size = RectSize::new(1, 1);
+        } else {
+            self.rect_size = rect_size;
+        }
 
         let (width, height) = (self.rect_size.width, self.rect_size.height);
         self.layer_surface.set_size(width as u32, height as u32);
@@ -731,6 +738,8 @@ impl Dispatch<WlCallback, ()> for WindowState {
                 .expect("The EGL surface must be available to make current and use it");
 
             state.banner_stack.banners_mut().for_each(|banner| {
+                banner.try_next_stage(&state.config);
+
                 banner.compile(
                     &state.config,
                     state.font_collection.clone(),
@@ -738,6 +747,7 @@ impl Dispatch<WlCallback, ()> for WindowState {
                 )
             });
 
+            // TODO: correctly resize for specific animation
             let gap = state.config.general().gap as usize;
             state.resize(RectSize::new(
                 state.banner_stack.width(),
@@ -794,11 +804,14 @@ impl Dispatch<WpPresentationFeedback, ()> for WindowState {
                 let sec = ((tv_sec_hi as u64) << 32) | (tv_sec_lo as u64);
                 let time_ns = sec * 1_000_000_000 + tv_nsec as u64;
 
-                let delta_time = state.last_presented_time_ns.map(|last| time_ns - last).unwrap_or(0);
-                state.last_presented_time_ns = Some(time_ns);
-                trace!("Window Presentation: Current FPS — {}", 1_000_000_000.0 / delta_time as f64);
+                if let Some(last_presented_time_ns) = &mut state.last_presented_time_ns {
+                    let delta_time_ns = time_ns - *last_presented_time_ns;
+                    state.banner_stack.banners_mut().for_each(|banner| banner.update(delta_time_ns));
 
-                // TODO: update animation with `delta_time`
+                    trace!("Window Presentation: Current FPS — {}", 1_000_000_000.0 / delta_time_ns as f64);
+                }
+
+                state.last_presented_time_ns = Some(time_ns);
             },
             wayland_protocols::wp::presentation_time::client::wp_presentation_feedback::Event::Discarded => {
                 // Frame has never shown — skip

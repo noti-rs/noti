@@ -3,6 +3,7 @@ use log::warn;
 use crate::{
     color::{Bgra, Color},
     types::{Offset, RectSize},
+    Draw,
 };
 
 /// A simple wrapper around [`skia_safe::Surface`] used as the main
@@ -20,6 +21,20 @@ impl Drawer {
         Self {
             surface: sk_surface,
         }
+    }
+
+    pub(crate) fn draw_into_offscreen(
+        &mut self,
+        offset: &Offset<usize>,
+        widget: &crate::Widget,
+    ) -> skia_safe::Image {
+        let image_info = self.surface.image_info();
+        let mut offscreen = skia_safe::surfaces::raster(&image_info, None, None).unwrap();
+        offscreen.canvas().clear(skia_safe::Color::TRANSPARENT);
+
+        let mut offscreen_drawer = Drawer::use_surface(offscreen);
+        widget.draw_with_offset(offset, &mut offscreen_drawer);
+        offscreen_drawer.surface.image_snapshot()
     }
 }
 

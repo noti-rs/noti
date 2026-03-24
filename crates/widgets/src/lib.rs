@@ -1,14 +1,25 @@
+pub mod animation;
 pub mod color;
 pub mod drawer;
 pub mod image;
 pub mod types;
 pub mod widget;
 
+use std::time::Duration;
+
 use config::{display::DisplayConfig, theme::Theme};
 use dbus::notification::Notification;
 use log::warn;
 
-use crate::drawer::Drawer;
+use crate::{
+    animation::{
+        fade::{FadeIn, FadeOut},
+        pop::{PopIn, PopOut},
+        translate::Translate,
+        Easing,
+    },
+    drawer::Drawer,
+};
 
 use types::{Offset, RectSize};
 
@@ -140,6 +151,64 @@ impl Widget {
             Widget::FlexContainer(container) => container.max_height(),
             Widget::Unknown => 0,
         }
+    }
+
+    pub fn fade_in<E: Into<Easing>>(self, duration: Duration, easing: E) -> FadeIn {
+        FadeIn::new(self, duration, easing.into())
+    }
+
+    pub fn fade_out<E: Into<Easing>>(self, duration: Duration, easing: E) -> FadeOut {
+        FadeOut::new(self, duration, easing.into())
+    }
+
+    pub fn pop_in<E: Into<Easing>>(self, duration: Duration, easing: E) -> PopIn {
+        PopIn::new(self, duration, easing.into())
+    }
+
+    pub fn pop_out<E: Into<Easing>>(self, duration: Duration, easing: E) -> PopOut {
+        PopOut::new(self, duration, easing.into())
+    }
+
+    pub fn translate<E: Into<Easing>>(
+        self,
+        start: animation::translate::Point,
+        end: animation::translate::Point,
+        duration: Duration,
+        easing: E,
+    ) -> Translate {
+        Translate::new(self, start, end, duration, easing.into())
+    }
+
+    pub fn slide_horizontally<E: Into<Easing>>(
+        self,
+        start_x: f32,
+        end_x: f32,
+        duration: Duration,
+        easing: E,
+    ) -> Translate {
+        Translate::new(
+            self,
+            animation::translate::Point::new(start_x, 0.0),
+            animation::translate::Point::new(end_x, 0.0),
+            duration,
+            easing.into(),
+        )
+    }
+
+    pub fn slide_vertically<E: Into<Easing>>(
+        self,
+        start_y: f32,
+        end_y: f32,
+        duration: Duration,
+        easing: E,
+    ) -> Translate {
+        Translate::new(
+            self,
+            animation::translate::Point::new(0.0, start_y),
+            animation::translate::Point::new(0.0, end_y),
+            duration,
+            easing.into(),
+        )
     }
 }
 

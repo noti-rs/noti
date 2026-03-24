@@ -399,9 +399,9 @@ impl Backend {
                 config.clone(),
             )?;
 
-            window_manager.handle_close_notifications(config.clone())?;
-            window_manager.remove_expired(config.clone())?;
-            window_manager.handle_actions(config.clone())?;
+            window_manager.handle_close_notifications()?;
+            window_manager.handle_actions()?;
+            window_manager.remove_closed(config.clone())?;
         }
 
         window_manager.dispatch()?;

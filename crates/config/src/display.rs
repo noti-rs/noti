@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, path::PathBuf};
+use std::{collections::HashMap, marker::PhantomData, path::PathBuf, time::Duration};
 
 use dbus::notification::Urgency;
 use macros::{ConfigProperty, GenericBuilder};
@@ -16,6 +16,9 @@ public! {
     #[cfg_prop(name(TomlDisplayConfig), derive(Debug, Deserialize, Default, Clone))]
     struct DisplayConfig {
         layout: Layout,
+
+        #[cfg_prop(use_type(AnimationProperty), mergeable)]
+        animation: Animation,
 
         theme: String,
 
@@ -94,6 +97,97 @@ impl From<String> for Layout {
             ),
         }
     }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(AnimationProperty), derive(Debug, Deserialize, Clone, Default))]
+    struct Animation {
+        #[cfg_prop(
+            use_type(AnimationDefinitionProperty),
+            mergeable,
+            default(path = AnimationDefinitionProperty::default_enter)
+        )]
+        enter: AnimationDefinition,
+
+        #[cfg_prop(
+            use_type(AnimationDefinitionProperty),
+            mergeable,
+            default(path = AnimationDefinitionProperty::default_exit)
+        )]
+        exit: AnimationDefinition,
+    }
+}
+
+public! {
+    #[derive(ConfigProperty,Debug)]
+    #[cfg_prop(name(AnimationDefinitionProperty), derive(Debug, Deserialize, Clone, Default))]
+    struct AnimationDefinition {
+        style:  AnimationStyle,
+        easing: EasingType,
+        duration: AnimationDuration,
+    }
+}
+
+impl AnimationDefinitionProperty {
+    fn default_enter() -> Self {
+        Self {
+            style: Some(AnimationStyle::FadeIn),
+            easing: Some(EasingType::EaseInOut),
+            duration: Some(AnimationDuration(Duration::from_secs_f32(0.5))),
+        }
+    }
+
+    fn default_exit() -> Self {
+        Self {
+            style: Some(AnimationStyle::FadeOut),
+            easing: Some(EasingType::EaseInOut),
+            duration: Some(AnimationDuration(Duration::from_secs_f32(0.5))),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct AnimationDuration(#[serde(with = "humantime_serde")] Duration);
+
+impl From<AnimationDuration> for Duration {
+    fn from(value: AnimationDuration) -> Self {
+        value.0
+    }
+}
+
+impl Default for AnimationDuration {
+    fn default() -> Self {
+        Self(Duration::from_secs_f32(0.5))
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub enum AnimationStyle {
+    #[default]
+    #[serde(rename = "fade-in")]
+    FadeIn,
+    #[serde(rename = "fade-out")]
+    FadeOut,
+    #[serde(rename = "pop-in")]
+    PopIn,
+    #[serde(rename = "pop-out")]
+    PopOut,
+    #[serde(rename = "slide-in")]
+    SlideIn,
+    #[serde(rename = "slide-out")]
+    SlideOut,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub enum EasingType {
+    #[serde(rename = "linear")]
+    Linear,
+    #[serde(rename = "ease-out")]
+    EaseOut,
+    #[default]
+    #[serde(rename = "ease-in-out")]
+    EaseInOut,
 }
 
 public! {

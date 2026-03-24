@@ -215,50 +215,34 @@ impl WindowManager {
     /// Handles requests from external applications to close notifications by ID.
     ///
     /// Other kinds of notification closing are not handled here.
-    pub(crate) fn handle_close_notifications(
-        &mut self,
-        config: Data<Config, Borrowed>,
-    ) -> Result<(), Error> {
+    pub(crate) fn handle_close_notifications(&mut self) -> Result<(), Error> {
+        self.notification_queue
+            .retain(|notification| !self.close_notifications.contains(&notification.id));
+
         if self.window.as_ref().is_some() && !self.close_notifications.is_empty() {
             let window = self.window.as_mut().unwrap();
 
-            let notifications = window.remove_banners_by_id(&self.close_notifications);
+            window.close_banners_by_id(&self.close_notifications);
             self.close_notifications.clear();
-
-            if notifications.is_empty() {
-                return Ok(());
-            }
-
-            notifications.into_iter().for_each(|notification| {
-                let notification_id = notification.id;
-                self.signals.push(Signal::NotificationClosed {
-                    notification_id,
-                    reason: dbus::actions::ClosingReason::CallCloseNotification,
-                })
-            });
-
-            self.process_notification_queue(config)?;
         }
 
         Ok(())
     }
 
-    /// Removes all expired notifications from the window when their timeout has elapsed, if a timeout was specified.
-    pub(crate) fn remove_expired(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
+    pub(crate) fn remove_closed(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
         if let Some(window) = self.window.as_mut() {
-            let notifications = window.remove_expired_banners();
+            let closed_notifications = window.remove_closed_banners();
 
-            if notifications.is_empty() {
+            if closed_notifications.is_empty() {
                 return Ok(());
             }
 
-            notifications.into_iter().for_each(|notification| {
-                let notification_id = notification.id;
+            for (notification, closing_reason) in closed_notifications {
                 self.signals.push(Signal::NotificationClosed {
-                    notification_id,
-                    reason: dbus::actions::ClosingReason::Expired,
+                    notification_id: notification.id,
+                    reason: closing_reason,
                 })
-            });
+            }
 
             self.process_notification_queue(config)?;
         }
@@ -273,18 +257,14 @@ impl WindowManager {
     }
 
     /// Handles user interaction with the window, if any has occurred.
-    pub(crate) fn handle_actions(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
+    pub(crate) fn handle_actions(&mut self) -> Result<(), Error> {
         //TODO: change it to actions which defines in config file
 
         if let Some(window) = self.window.as_mut() {
             window.handle_hover();
 
-            let Some(signal) = window.handle_click() else {
-                return Ok(());
-            };
-
-            self.signals.push(signal);
-            self.process_notification_queue(config)?;
+            // TODO: also add bypass by config value named 'bypass_click' or something similar
+            window.handle_click();
         }
 
         Ok(())
