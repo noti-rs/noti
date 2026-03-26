@@ -50,12 +50,8 @@ where
 
 impl RectSize<usize> {
     pub fn shrink_by(&mut self, spacing: &Spacing) {
-        self.width = self
-            .width
-            .saturating_sub(spacing.left() as usize + spacing.right() as usize);
-        self.height = self
-            .height
-            .saturating_sub(spacing.top() as usize + spacing.bottom() as usize);
+        self.width = self.width.saturating_sub(spacing.left() + spacing.right());
+        self.height = self.height.saturating_sub(spacing.top() + spacing.bottom());
     }
 }
 
@@ -173,8 +169,8 @@ impl From<Offset<usize>> for Offset<f32> {
 impl From<Spacing> for Offset<usize> {
     fn from(value: Spacing) -> Self {
         Offset {
-            x: value.left() as usize,
-            y: value.top() as usize,
+            x: value.left(),
+            y: value.top(),
         }
     }
 }
@@ -182,8 +178,8 @@ impl From<Spacing> for Offset<usize> {
 impl From<&Spacing> for Offset<usize> {
     fn from(value: &Spacing) -> Self {
         Offset {
-            x: value.left() as usize,
-            y: value.top() as usize,
+            x: value.left(),
+            y: value.top(),
         }
     }
 }

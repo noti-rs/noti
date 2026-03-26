@@ -8,20 +8,20 @@ use macros::GenericBuilder;
 use serde::{de::Visitor, Deserialize};
 use shared::value::TryFromValue;
 
-#[derive(GenericBuilder, Debug, Default, Clone)]
+#[derive(GenericBuilder, Debug, Default, Clone, Copy)]
 #[gbuilder(name(GBuilderSpacing), derive(Clone), constructor)]
 pub struct Spacing {
     #[gbuilder(default(0), aliases(vertical, all))]
-    top: u8,
+    top: usize,
 
     #[gbuilder(default(0), aliases(horizontal, all))]
-    right: u8,
+    right: usize,
 
     #[gbuilder(default(0), aliases(vertical, all))]
-    bottom: u8,
+    bottom: usize,
 
     #[gbuilder(default(0), aliases(horizontal, all))]
-    left: u8,
+    left: usize,
 }
 
 impl TryFromValue for Spacing {}
@@ -30,7 +30,7 @@ impl Spacing {
     const POSSIBLE_KEYS: [&'static str; 6] =
         ["top", "right", "bottom", "left", "vertical", "horizontal"];
 
-    pub fn all_directional(val: u8) -> Self {
+    pub fn all_directional(val: usize) -> Self {
         Self {
             top: val,
             bottom: val,
@@ -39,7 +39,7 @@ impl Spacing {
         }
     }
 
-    pub fn cross(vertical: u8, horizontal: u8) -> Self {
+    pub fn cross(vertical: usize, horizontal: usize) -> Self {
         Self {
             top: vertical,
             bottom: vertical,
@@ -48,35 +48,35 @@ impl Spacing {
         }
     }
 
-    pub fn top(&self) -> u8 {
+    pub fn top(&self) -> usize {
         self.top
     }
 
-    pub fn set_top(&mut self, top: u8) {
+    pub fn set_top(&mut self, top: usize) {
         self.top = top;
     }
 
-    pub fn right(&self) -> u8 {
+    pub fn right(&self) -> usize {
         self.right
     }
 
-    pub fn set_right(&mut self, right: u8) {
+    pub fn set_right(&mut self, right: usize) {
         self.right = right;
     }
 
-    pub fn bottom(&self) -> u8 {
+    pub fn bottom(&self) -> usize {
         self.bottom
     }
 
-    pub fn set_bottom(&mut self, bottom: u8) {
+    pub fn set_bottom(&mut self, bottom: usize) {
         self.bottom = bottom;
     }
 
-    pub fn left(&self) -> u8 {
+    pub fn left(&self) -> usize {
         self.left
     }
 
-    pub fn set_left(&mut self, left: u8) {
+    pub fn set_left(&mut self, left: usize) {
         self.left = left;
     }
 
@@ -89,8 +89,8 @@ impl Spacing {
     }
 
     pub fn shrink(&self, width: &mut usize, height: &mut usize) {
-        *width = width.saturating_sub(self.left as usize + self.right as usize);
-        *height = height.saturating_sub(self.top as usize + self.bottom as usize);
+        *width = width.saturating_sub(self.left + self.right);
+        *height = height.saturating_sub(self.top + self.bottom);
     }
 }
 
@@ -130,12 +130,12 @@ impl AddAssign<Spacing> for Spacing {
 }
 impl From<i64> for Spacing {
     fn from(value: i64) -> Self {
-        Spacing::all_directional(value.clamp(0, u8::MAX as i64) as u8)
+        Spacing::all_directional(value.clamp(0, usize::MAX as i64) as usize)
     }
 }
 
-impl From<Vec<u8>> for Spacing {
-    fn from(value: Vec<u8>) -> Self {
+impl From<Vec<usize>> for Spacing {
+    fn from(value: Vec<usize>) -> Self {
         match value.len() {
             1 => Spacing::all_directional(value[0]),
             2 => Spacing::cross(value[0], value[1]),
@@ -156,8 +156,8 @@ impl From<Vec<u8>> for Spacing {
     }
 }
 
-impl From<HashMap<String, u8>> for Spacing {
-    fn from(map: HashMap<String, u8>) -> Self {
+impl From<HashMap<String, usize>> for Spacing {
+    fn from(map: HashMap<String, usize>) -> Self {
         let vertical = map.get("vertical");
         let horizontal = map.get("horizontal");
         let top = map.get("top");
@@ -187,14 +187,14 @@ struct PaddingVisitor<T>(PhantomData<fn() -> T>);
 
 impl<'de, T> Visitor<'de> for PaddingVisitor<T>
 where
-    T: Deserialize<'de> + From<HashMap<String, u8>> + From<Vec<u8>> + From<i64>,
+    T: Deserialize<'de> + From<HashMap<String, usize>> + From<Vec<usize>> + From<i64>,
 {
     type Value = T;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             formatter,
-            r#"either u8, [u8, u8], [u8, u8, u8], [u8, u8, u8, u8] or Table.
+            r#"either usize, [usize, usize], [usize, usize, usize], [usize, usize, usize, usize] or Table.
 
 Example:
 
@@ -244,7 +244,7 @@ margin = {{ top = 5, horizontal = 10 }}"#
         A: serde::de::SeqAccess<'de>,
     {
         let mut fields = vec![];
-        while let Some(value) = seq.next_element::<u8>()? {
+        while let Some(value) = seq.next_element::<usize>()? {
             fields.push(value);
         }
 
@@ -260,7 +260,7 @@ margin = {{ top = 5, horizontal = 10 }}"#
     {
         let mut custom_padding = HashMap::new();
 
-        while let Some((key, value)) = map.next_entry::<String, u8>()? {
+        while let Some((key, value)) = map.next_entry::<String, usize>()? {
             if !Spacing::POSSIBLE_KEYS.contains(&key.as_str()) {
                 return Err(serde::de::Error::invalid_value(
                     serde::de::Unexpected::Str(key.as_str()),

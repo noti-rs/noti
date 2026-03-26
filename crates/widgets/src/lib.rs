@@ -1,6 +1,7 @@
 pub mod animation;
 pub mod color;
 pub mod drawer;
+pub mod events;
 pub mod image;
 pub mod types;
 pub mod widget;
@@ -19,6 +20,7 @@ use crate::{
         Easing,
     },
     drawer::Drawer,
+    events::{Action, DispatchEvent},
 };
 
 use types::{Offset, RectSize};
@@ -219,6 +221,17 @@ impl Draw for Widget {
             Widget::Text(text) => text.draw_with_offset(offset, output),
             Widget::FlexContainer(container) => container.draw_with_offset(offset, output),
             Widget::Unknown => (),
+        }
+    }
+}
+
+impl DispatchEvent for Widget {
+    fn dispatch_event(&self, event: events::Event) -> events::Action {
+        match self {
+            Widget::Image(wimage) => wimage.dispatch_event(event),
+            Widget::Text(wtext) => wtext.dispatch_event(event),
+            Widget::FlexContainer(flex_container) => flex_container.dispatch_event(event),
+            Widget::Unknown => Action::None,
         }
     }
 }

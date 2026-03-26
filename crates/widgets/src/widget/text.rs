@@ -5,10 +5,7 @@ use shared::{error::ConversionError, value::TryFromValue};
 use skia_safe::{textlayout::FontCollection, Color};
 
 use crate::{
-    color::Bgra,
-    drawer::Drawer,
-    types::{Offset, RectSize},
-    CompileState, Draw, WidgetConfiguration,
+    CompileState, Draw, WidgetConfiguration, color::Bgra, drawer::Drawer, events::{Action, DispatchEvent, Event}, types::{Offset, RectSize}
 };
 
 /// A text widget that manages layout, styling, and rendering of text
@@ -378,6 +375,13 @@ impl Draw for WText {
                 (correct_offset.x, correct_offset.y),
             );
         }
+    }
+}
+
+impl DispatchEvent for WText {
+    fn dispatch_event(&self, _event: Event) -> Action {
+        // TODO: implement link click
+        Action::None
     }
 }
 

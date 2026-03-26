@@ -5,6 +5,7 @@ use shared::{error::ConversionError, value::TryFromValue};
 use crate::{
     color::{Bgra, Color},
     drawer::{Drawer, UseColor},
+    events::{Action, DispatchEvent, Event, Point},
     types::{Offset, RectSize},
     CompileState, Draw, Widget, WidgetConfiguration,
 };
@@ -102,15 +103,12 @@ impl FlexContainer {
         self.background_color = colors.background.clone().into();
         self.border_color = colors.border.clone().into();
 
-        rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
-        let mut container_axes = FlexContainerPlane::new(rect_size, &self.direction);
+        let mut plane = self.get_plane();
 
         self.children.iter_mut().for_each(|child| {
-            child.compile(container_axes.as_rect_size(), configuration);
+            child.compile(plane.as_rect_size(), configuration);
 
-            container_axes.main_len = container_axes
-                .main_len
-                .saturating_sub(child.len_by_direction(&self.direction));
+            plane.saturating_cut_front(child.len_by_direction(&self.direction));
         });
         self.children.retain(|child| !child.is_unknown());
 
@@ -132,7 +130,7 @@ impl FlexContainer {
         self.max_height
     }
 
-    pub fn width(&self) -> usize {
+    pub fn actual_width(&self) -> usize {
         let widths = self.children.iter().map(|child| child.width());
 
         match self.direction {
@@ -141,7 +139,7 @@ impl FlexContainer {
         }
     }
 
-    pub fn height(&self) -> usize {
+    pub fn actual_height(&self) -> usize {
         let heights = self.children.iter().map(|child| child.height());
 
         match self.direction {
@@ -151,7 +149,7 @@ impl FlexContainer {
     }
 
     #[allow(unused)]
-    fn max_main_len(&self) -> usize {
+    fn max_main_extent(&self) -> usize {
         match &self.direction {
             Direction::Horizontal => self.max_width(),
             Direction::Vertical => self.max_height(),
@@ -159,25 +157,25 @@ impl FlexContainer {
     }
 
     #[allow(unused)]
-    fn max_auxiliary_len(&self) -> usize {
+    fn max_cross_extent(&self) -> usize {
         match &self.direction {
             Direction::Horizontal => self.max_height(),
             Direction::Vertical => self.max_width(),
         }
     }
 
-    fn main_len(&self) -> usize {
+    fn main_actual_extent(&self) -> usize {
         match &self.direction {
-            Direction::Horizontal => self.width(),
-            Direction::Vertical => self.height(),
+            Direction::Horizontal => self.actual_width(),
+            Direction::Vertical => self.actual_height(),
         }
     }
 
     #[allow(unused)]
-    fn auxiliary_len(&self) -> usize {
+    fn cross_actual_extent(&self) -> usize {
         match &self.direction {
-            Direction::Horizontal => self.height(),
-            Direction::Vertical => self.width(),
+            Direction::Horizontal => self.actual_height(),
+            Direction::Vertical => self.actual_width(),
         }
     }
 
@@ -188,11 +186,44 @@ impl FlexContainer {
         }
     }
 
-    fn auxiliary_axis_alignment(&self) -> &Position {
+    fn cross_axis_alignment(&self) -> &Position {
         match &self.direction {
             Direction::Horizontal => &self.alignment.vertical,
             Direction::Vertical => &self.alignment.horizontal,
         }
+    }
+
+    fn get_plane(&self) -> FCPlane {
+        let Some(mut rect_size) = self.rect_size.as_ref().cloned() else {
+            panic!(
+                "The rectangle size must be computed by `compile()` method of parent container!"
+            );
+        };
+
+        let inner_spacing = self.spacing + Spacing::all_directional(self.border.size);
+        rect_size.shrink_by(&inner_spacing);
+
+        FCPlane::new(inner_spacing, rect_size, self.direction)
+    }
+
+    fn get_start_and_incrementor(&self, restricted_extent: usize) -> (usize, usize) {
+        let start = self
+            .main_axis_alignment()
+            .get_start(restricted_extent, self.main_actual_extent());
+
+        let incrementor = match self.main_axis_alignment() {
+            Position::Start | Position::Center | Position::End => 0,
+            Position::SpaceBetween => {
+                if self.children.len() <= 1 {
+                    0
+                } else {
+                    (restricted_extent - self.main_actual_extent())
+                        / self.children.len().saturating_sub(1)
+                }
+            }
+        };
+
+        (start, incrementor)
     }
 
     /// Fills the container’s background before drawing children.
@@ -279,57 +310,104 @@ impl FlexContainer {
 
 impl Draw for FlexContainer {
     fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer) {
-        let Some(mut rect_size) = self.rect_size.as_ref().cloned() else {
+        let Some(rect_size) = self.rect_size.as_ref().cloned() else {
             panic!(
                 "The rectangle size must be computed by `compile()` method of parent container!"
             );
         };
-        let original_rect_size = rect_size;
 
         let transparent_bg = self.transparent_background || self.background_color.is_transparent();
         if !transparent_bg {
             self.fill_background((*offset).into(), rect_size.into(), drawer);
         }
 
-        rect_size.shrink_by(&(self.spacing.clone() + Spacing::all_directional(self.border.size)));
-        let mut plane = FlexContainerPlane::new(rect_size, &self.direction);
+        let mut plane = self.get_plane();
+        let (start, incrementor) = self.get_start_and_incrementor(plane.main.extent);
+        plane.main.start += start;
 
-        let initial_offset = Offset::new(
-            self.spacing.left() as usize + self.border.size as usize,
-            self.spacing.top() as usize + self.border.size as usize,
-        );
-        let initial_plane = FlexContainerPlane::new_only_offset(initial_offset, &self.direction);
-        plane.relocate(&initial_plane.as_offset());
-
-        plane.main_axis_offset += self
-            .main_axis_alignment()
-            .compute_initial_pos(plane.main_len, self.main_len());
-
-        let incrementor = match self.main_axis_alignment() {
-            Position::Start | Position::Center | Position::End => 0,
-            Position::SpaceBetween => {
-                if self.children.len() <= 1 {
-                    0
-                } else {
-                    (plane.main_len - self.main_len()) / self.children.len().saturating_sub(1)
-                }
-            }
-        };
-
-        let auxiliary_axis_alignment = self.auxiliary_axis_alignment().clone();
+        let cross_axis_start = plane.cross.start;
+        let cross_axis_alignment = self.cross_axis_alignment();
         for child in &self.children {
-            plane.auxiliary_axis_offset = initial_plane.auxiliary_axis_offset
-                + auxiliary_axis_alignment.compute_initial_pos(
-                    plane.auxiliary_len,
+            plane.cross.start = cross_axis_start
+                + cross_axis_alignment.get_start(
+                    plane.cross.extent,
                     child.len_by_direction(&self.direction.orthogonalize()),
                 );
 
             child.draw_with_offset(&(plane.as_offset() + *offset), drawer);
 
-            plane.main_axis_offset += child.len_by_direction(&self.direction) + incrementor;
+            plane.saturating_cut_front(child.len_by_direction(&self.direction) + incrementor);
         }
 
-        self.outline_border((*offset).into(), original_rect_size.into(), drawer);
+        self.outline_border((*offset).into(), rect_size.into(), drawer);
+    }
+}
+
+impl DispatchEvent for FlexContainer {
+    fn dispatch_event(&self, event: Event) -> Action {
+        let Some(rect_size) = self.rect_size.as_ref().cloned() else {
+            panic!(
+                "The rectangle size must be computed by `compile()` method of parent container!"
+            );
+        };
+
+        if !event.kind.is_mouse() {
+            return Action::None;
+        }
+
+        if event.local_coord.x > rect_size.width || event.local_coord.y > rect_size.height {
+            return Action::None;
+        }
+
+        let (mouse_main, mouse_cross) = if let Direction::Horizontal = self.direction {
+            (event.local_coord.x, event.local_coord.y)
+        } else {
+            (event.local_coord.y, event.local_coord.x)
+        };
+
+        let mut plane = self.get_plane();
+        let (start, incrementor) = self.get_start_and_incrementor(plane.main.extent);
+        plane.main.start += start;
+
+        if mouse_main < plane.main.start || mouse_cross < plane.cross.start {
+            return Action::None;
+        }
+
+        for child in &self.children {
+            let child_main_len = child.len_by_direction(&self.direction);
+
+            if mouse_main <= plane.main.start + child_main_len {
+                let child_cross_len = child.len_by_direction(&self.direction.orthogonalize());
+                let widget_start = self
+                    .cross_axis_alignment()
+                    .get_start(plane.cross.extent, child_cross_len);
+
+                if mouse_cross >= plane.cross.start + widget_start
+                    && mouse_cross <= plane.cross.start + widget_start + child_cross_len
+                {
+                    let local_mouse_main = mouse_main - plane.main.start;
+                    let local_mouse_cross = mouse_cross - (plane.cross.start + widget_start);
+                    let (local_mouse_x, local_mouse_y) =
+                        if let Direction::Horizontal = self.direction {
+                            (local_mouse_main, local_mouse_cross)
+                        } else {
+                            (local_mouse_cross, local_mouse_main)
+                        };
+
+                    let mut modified_event = event.clone();
+                    modified_event.local_coord = Point {
+                        x: local_mouse_x,
+                        y: local_mouse_y,
+                    };
+                    return child.dispatch_event(modified_event);
+                }
+
+                return Action::None;
+            }
+
+            plane.saturating_cut_front(child_main_len + incrementor);
+        }
+        todo!()
     }
 }
 
@@ -398,7 +476,7 @@ impl Position {
     ///
     /// This is the core helper for placing children at `Start`, `Center`,
     /// `End`, or evenly with `SpaceBetween`.
-    pub fn compute_initial_pos(&self, width: usize, element_width: usize) -> usize {
+    pub fn get_start(&self, width: usize, element_width: usize) -> usize {
         match self {
             Position::Start | Position::SpaceBetween => 0,
             Position::Center => width / 2 - element_width / 2,
@@ -409,7 +487,7 @@ impl Position {
 
 /// Determines whether a [`FlexContainer`] arranges its children
 /// horizontally or vertically.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum Direction {
     Horizontal,
     Vertical,
@@ -443,6 +521,8 @@ impl TryFromValue for Direction {
     }
 }
 
+/// FC stands for Flex Container.
+///
 /// A helper type that abstracts away the difference between horizontal
 /// and vertical layout, allowing the container logic to operate on a
 /// single *main axis* and a single *cross axis*.
@@ -450,73 +530,48 @@ impl TryFromValue for Direction {
 /// This prevents code duplication — layout math can be written once
 /// for a generic axis, and converted back into X/Y coordinates on
 /// demand.
-struct FlexContainerPlane<'a> {
-    main_len: usize,
-    auxiliary_len: usize,
+struct FCPlane {
+    main: AxisSegment,
+    cross: AxisSegment,
 
-    main_axis_offset: usize,
-    auxiliary_axis_offset: usize,
-
-    direction: &'a Direction,
+    direction: Direction,
 }
 
-impl<'a> FlexContainerPlane<'a> {
-    /// Creates a new [`FlexContainerPlane`] from a container size, mapping
-    /// width/height to main/auxiliary axes depending on [`Direction`].
-    fn new(
-        RectSize {
-            mut width,
-            mut height,
-        }: RectSize<usize>,
-        direction: &'a Direction,
-    ) -> Self {
+impl FCPlane {
+    /// Creates a new [`FCPlane`] from an offset and container size, mapping
+    /// corresponding main/cross axis values depending on [`Direction`].
+    /// width/height to main/cross axes depending on [`Direction`].
+    fn new<O, R>(offset: O, rect_size: R, direction: Direction) -> Self
+    where
+        O: Into<Offset<usize>>,
+        R: Into<RectSize<usize>>,
+    {
+        let mut offset = offset.into();
+        let mut rect_size = rect_size.into();
+
         if let Direction::Vertical = direction {
-            (width, height) = (height, width);
+            (offset.x, offset.y) = (offset.y, offset.x);
+            (rect_size.width, rect_size.height) = (rect_size.height, rect_size.width);
         }
 
         Self {
-            main_len: width,
-            auxiliary_len: height,
-            main_axis_offset: 0,
-            auxiliary_axis_offset: 0,
+            main: AxisSegment::new(offset.x, rect_size.width),
+            cross: AxisSegment::new(offset.y, rect_size.height),
             direction,
         }
     }
 
-    /// Creates a new [`FlexContainerPlane`] from an offset, mapping x/y
-    /// to main/auxiliary offsets depending on [`Direction`].
-    fn new_only_offset(Offset { mut x, mut y }: Offset<usize>, direction: &'a Direction) -> Self {
-        if let Direction::Vertical = direction {
-            (x, y) = (y, x);
-        }
-
-        Self {
-            main_len: 0,
-            auxiliary_len: 0,
-            main_axis_offset: x,
-            auxiliary_axis_offset: y,
-            direction,
-        }
-    }
-
-    /// Relocates the plane by applying a new offset from the global
-    /// coordinate system (X0Y) and converting it to main/auxiliary axes.
-    ///
-    /// This is used to reposition the container or its children while
-    /// keeping layout logic axis-agnostic.
-    fn relocate(&mut self, Offset { mut x, mut y }: &Offset<usize>) {
-        if let Direction::Vertical = self.direction {
-            (x, y) = (y, x);
-        }
-
-        self.main_axis_offset = x;
-        self.auxiliary_axis_offset = y;
+    /// Uses the providen cut length to increase offset and decrease
+    /// restricted length of main axis.
+    fn saturating_cut_front(&mut self, cut_len: usize) {
+        self.main.start = self.main.start.saturating_add(cut_len);
+        self.main.extent = self.main.extent.saturating_sub(cut_len);
     }
 
     /// Converts the plane’s main/auxiliary lengths back into a standard
     /// [`RectSize`] in X/Y coordinates.
     fn as_rect_size(&self) -> RectSize<usize> {
-        let (mut width, mut height) = (self.main_len, self.auxiliary_len);
+        let (mut width, mut height) = (self.main.extent, self.cross.extent);
 
         if let Direction::Vertical = self.direction {
             (width, height) = (height, width);
@@ -528,12 +583,23 @@ impl<'a> FlexContainerPlane<'a> {
     /// Converts the plane’s main/auxiliary offsets back into a standard
     /// [`Offset`] in X/Y coordinates.
     fn as_offset(&self) -> Offset<usize> {
-        let (mut x, mut y) = (self.main_axis_offset, self.auxiliary_axis_offset);
+        let (mut x, mut y) = (self.main.start, self.cross.start);
 
         if let Direction::Vertical = self.direction {
             (x, y) = (y, x);
         }
 
         Offset::new(x, y)
+    }
+}
+
+struct AxisSegment {
+    start: usize,
+    extent: usize,
+}
+
+impl AxisSegment {
+    fn new(start: usize, extent: usize) -> Self {
+        Self { start, extent }
     }
 }

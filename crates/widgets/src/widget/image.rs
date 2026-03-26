@@ -4,6 +4,7 @@ use log::warn;
 
 use crate::{
     drawer::Drawer,
+    events::{Action, DispatchEvent, Event},
     image::Image,
     types::{Offset, RectSize},
 };
@@ -189,5 +190,11 @@ impl Draw for WImage {
 
         let offset = Offset::from(&self.property.margin) + *offset;
         self.content.draw_with_offset(&offset, drawer)
+    }
+}
+
+impl DispatchEvent for WImage {
+    fn dispatch_event(&self, _event: Event) -> Action {
+        Action::None
     }
 }

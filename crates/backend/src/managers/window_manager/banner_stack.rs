@@ -410,7 +410,7 @@ impl Banner {
     /// Returns the default widget layout if a custom layout has not been defined.
     fn default_layout(display_config: &DisplayConfig) -> Widget {
         FlexContainerBuilder::default()
-            .spacing(display_config.padding.clone())
+            .spacing(display_config.padding)
             .border(display_config.border.clone())
             .direction(widgets::widget::flex_container::Direction::Horizontal)
             .alignment(Alignment::new(Position::Start, Position::Center))
