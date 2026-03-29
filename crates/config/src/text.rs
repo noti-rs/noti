@@ -139,7 +139,7 @@ pub enum TextAlignment {
     #[serde(rename = "right")]
     Right,
     #[serde(rename = "justify")]
-    Justify
+    Justify,
 }
 
 impl TryFromValue for TextAlignment {

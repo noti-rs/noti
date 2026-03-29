@@ -15,8 +15,15 @@ use shared::value::TryFromValue;
 
 use crate::{
     animation::{
-        Easing, fade::{FadeIn, FadeOut}, pop::{PopIn, PopOut}, translate::Translate
-    }, drawer::Drawer, events::{Action, DispatchEvent}, types::direction::Direction, widget::container::Container
+        fade::{FadeIn, FadeOut},
+        pop::{PopIn, PopOut},
+        translate::Translate,
+        Easing,
+    },
+    drawer::Drawer,
+    events::{Action, DispatchEvent},
+    types::direction::Direction,
+    widget::container::Container,
 };
 
 use types::{extent::Extent2D, offset::Offset};

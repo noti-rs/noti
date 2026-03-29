@@ -1,6 +1,5 @@
 use wayland_client::EventQueue;
 
-
 /// A simple implementation of non-blocking event dispatching for a state.
 ///
 /// Typically, the trait only requires you to implement `get_event_queue_and_state`, which is

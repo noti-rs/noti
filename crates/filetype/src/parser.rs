@@ -6,7 +6,7 @@ use pest_derive::Parser;
 pub(super) struct LayoutParser;
 
 //TODO: currently the parser is imcompatible with new widgets and it must be fixed.
-pub(super) fn parse(input: &str) -> anyhow::Result<Pairs<Rule>> {
+pub(super) fn parse(input: &str) -> anyhow::Result<Pairs<'_, Rule>> {
     Ok(LayoutParser::parse(Rule::Layout, input)?)
 }
 

@@ -111,8 +111,7 @@ impl Animated for Translate {
         self.shader_builder.set_uniform(
             "progress",
             UniformValue::Float(self.easing.ease(
-                (self.elapsed_ns as f64 / self.duration.as_nanos() as f64).clamp(0.0, 1.0)
-                    as f32,
+                (self.elapsed_ns as f64 / self.duration.as_nanos() as f64).clamp(0.0, 1.0) as f32,
             )),
         );
     }

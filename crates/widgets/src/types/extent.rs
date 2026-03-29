@@ -4,15 +4,15 @@ use config::spacing::Spacing;
 
 /// A simple way to describe the **size** of a flat area.
 ///
-/// This struct acts like a ruler. It tells you exactly how much space 
+/// This struct acts like a ruler. It tells you exactly how much space
 /// a widget takes up on the screen.
 ///
 /// It stores two pieces of information:
 /// * **width:** How far the area goes from left to right.
 /// * **height:** How far the area goes from top to bottom.
 ///
-/// **Important:** Only use this to talk about "how big" something is. 
-/// Do not use it to describe a "Point" or a location. It measures 
+/// **Important:** Only use this to talk about "how big" something is.
+/// Do not use it to describe a "Point" or a location. It measures
 /// the space inside a box, not where the box sits on the map.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Extent2D<T>
@@ -62,8 +62,12 @@ where
 
 impl Extent2D<usize> {
     pub fn shrink_by(&mut self, spacing: &Spacing) {
-        self.width = self.width.saturating_sub((spacing.left() + spacing.right()) as usize);
-        self.height = self.height.saturating_sub((spacing.top() + spacing.bottom()) as usize);
+        self.width = self
+            .width
+            .saturating_sub((spacing.left() + spacing.right()) as usize);
+        self.height = self
+            .height
+            .saturating_sub((spacing.top() + spacing.bottom()) as usize);
     }
 }
 

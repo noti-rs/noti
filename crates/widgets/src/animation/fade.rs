@@ -27,7 +27,7 @@ impl FadeDirection for Out {
 ///
 /// This effect gradually changes the alpha channel of a widget’s colors,
 /// producing a smooth fade-in or fade-out transition.  
-/// 
+///
 /// The direction of fading (in or out) is controlled by the [`FadeDirection`] trait,  
 /// with type aliases [`FadeIn`] and [`FadeOut`] for convenience.  
 /// The transition speed is influenced by the chosen [`Easing`] function.

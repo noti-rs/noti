@@ -8,7 +8,7 @@ use crate::file_watcher::FileState;
 ///
 /// `CachedData` provides a convenient API for storing and accessing key-value data,
 /// while handling changes and extensions efficiently.
-/// 
+///
 /// The caller only needs to implement a [CacheUpdate] to notify about external changes,
 /// allowing `CachedData` to keep the cache up-to-date automatically.
 ///

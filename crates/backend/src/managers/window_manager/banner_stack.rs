@@ -1,5 +1,6 @@
 use config::{
-    Config, display::{AnimationDefinition, AnimationStyle, Border, DisplayConfig}, spacing::Spacing
+    display::{AnimationDefinition, AnimationStyle, Border, DisplayConfig},
+    Config,
 };
 use dbus::{
     actions::ClosingReason,

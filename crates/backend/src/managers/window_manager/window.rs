@@ -46,7 +46,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 use widgets::{
     animation::Animated,
-    types::{offset::Offset, extent::Extent2D},
+    types::{extent::Extent2D, offset::Offset},
 };
 
 /// Wraps a [WindowState] and holds an event queue used only for dispatching.

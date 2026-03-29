@@ -4,16 +4,16 @@ use config::spacing::Spacing;
 
 /// A set of instructions that tells a widget where to sit on the screen.
 ///
-/// This struct describes a shift away from the **top-left corner**. 
-/// Without this information, a widget would not know where to start 
+/// This struct describes a shift away from the **top-left corner**.
+/// Without this information, a widget would not know where to start
 /// drawing itself and might end up in the wrong place.
 ///
 /// It stores two values to help widgets find their home:
 /// * **x:** How many steps to move to the **right** from the left edge.
 /// * **y:** How many steps to move **down** from the top edge.
 ///
-/// **Important:** This is not a "Point" on a map. Instead, think of it 
-/// as a "Shift." It tells the system how far to move away from a 
+/// **Important:** This is not a "Point" on a map. Instead, think of it
+/// as a "Shift." It tells the system how far to move away from a
 /// corner before it starts working.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Offset<T>
