@@ -69,7 +69,7 @@ impl Animated for AnimatedWidget {
 impl Draw for AnimatedWidget {
     fn draw_with_offset(
         &self,
-        offset: &crate::types::Offset<usize>,
+        offset: &crate::types::offset::Offset<usize>,
         drawer: &mut crate::drawer::Drawer,
     ) {
         delegate!(self.draw_with_offset(offset, drawer));

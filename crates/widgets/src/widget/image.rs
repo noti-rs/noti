@@ -6,7 +6,8 @@ use crate::{
     drawer::Drawer,
     events::{Action, DispatchEvent, Event},
     image::Image,
-    types::{Offset, RectSize},
+    types::{extent::Extent2D, offset::Offset},
+    Compile,
 };
 
 use crate::{CompileState, Draw, WidgetConfiguration};
@@ -53,12 +54,37 @@ impl WImage {
         }
     }
 
+    /// Returns the width of the compiled image.
+    ///
+    /// This value is only meaningful after [`Self::compile`] has been called.
+    /// If the widget has not been compiled yet, this will typically return
+    /// an undefined or default value.
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    /// Returns the height of the compiled image.
+    ///
+    /// Like [`Self::width`], this is only meaningful after [`Self::compile`] has been
+    /// successfully called.
+    pub fn height(&self) -> usize {
+        self.height
+    }
+}
+
+impl Default for WImage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Compile for WImage {
     /// Compiles the image widget by selecting and preparing the image to display.
     ///
     /// This method chooses the most appropriate image source (icon, raw data,
     /// or file path) based on the notification data and the freedesktop
     /// specification. After selection, it decodes the image and determines
-    /// whether it can fit in the available space defined by [`RectSize`].
+    /// whether it can fit in the available space defined by [`Extent2D`].
     ///
     /// # Returns
     /// Returns [`CompileState::Success`] if the image was successfully compiled.
@@ -66,9 +92,9 @@ impl WImage {
     /// allowing the caller to handle the case gracefully (e.g. omit the image).
     ///
     /// Call this before drawing or querying [`width`] and [`height`].
-    pub fn compile(
+    fn compile(
         &mut self,
-        rect_size: RectSize<usize>,
+        available_extent: Extent2D<usize>,
         WidgetConfiguration {
             notification,
             display_config,
@@ -94,14 +120,14 @@ impl WImage {
             .image_data
             .as_ref()
             .cloned()
-            .map(|image_data| Image::from_image_data(image_data, &self.property, &rect_size))
+            .map(|image_data| Image::from_image_data(image_data, &self.property, &available_extent))
             .or_else(|| {
                 notification
                     .hints
                     .image_path
                     .as_deref()
                     .map(std::path::Path::new)
-                    .map(|svg_path| Image::from_svg(svg_path, &self.property, &rect_size))
+                    .map(|svg_path| Image::from_svg(svg_path, &self.property, &available_extent))
             })
             .or_else(|| {
                 if notification.app_icon.is_empty() {
@@ -126,7 +152,9 @@ impl WImage {
                             )
                         })
                     })
-                    .map(|icon_path| Image::from_path(&icon_path.path, &self.property, &rect_size))
+                    .map(|icon_path| {
+                        Image::from_path(&icon_path.path, &self.property, &available_extent)
+                    })
             })
             .unwrap_or(Image::Unknown);
 
@@ -141,12 +169,12 @@ impl WImage {
             .map(|height| height + self.property.margin.vertical() as usize)
             .unwrap_or(0);
 
-        if self.width > rect_size.width || self.height > rect_size.height {
+        if self.width > available_extent.width || self.height > available_extent.height {
             warn!(
                 "The image doesn't fit to available space.\
                 \nThe image size: width={}, height={}.\
                 \nAvailable space: width={}, height={}.",
-                self.width, self.height, rect_size.width, rect_size.height
+                self.width, self.height, available_extent.width, available_extent.height
             );
             return CompileState::Failure;
         }
@@ -156,29 +184,6 @@ impl WImage {
         } else {
             CompileState::Failure
         }
-    }
-
-    /// Returns the width of the compiled image.
-    ///
-    /// This value is only meaningful after [`Self::compile`] has been called.
-    /// If the widget has not been compiled yet, this will typically return
-    /// an undefined or default value.
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    /// Returns the height of the compiled image.
-    ///
-    /// Like [`Self::width`], this is only meaningful after [`Self::compile`] has been
-    /// successfully called.
-    pub fn height(&self) -> usize {
-        self.height
-    }
-}
-
-impl Default for WImage {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

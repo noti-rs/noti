@@ -5,7 +5,11 @@ use shared::{error::ConversionError, value::TryFromValue};
 use skia_safe::{textlayout::FontCollection, Color};
 
 use crate::{
-    CompileState, Draw, WidgetConfiguration, color::Bgra, drawer::Drawer, events::{Action, DispatchEvent, Event}, types::{Offset, RectSize}
+    color::Bgra,
+    drawer::Drawer,
+    events::{Action, DispatchEvent, Event},
+    types::{extent::Extent2D, offset::Offset},
+    Compile, CompileState, Draw, WidgetConfiguration,
 };
 
 /// A text widget that manages layout, styling, and rendering of text
@@ -25,7 +29,7 @@ pub struct WText {
     property: TextProperty,
 
     #[gbuilder(hidden, default)]
-    inner_size: RectSize<usize>,
+    extent: Extent2D<usize>,
 }
 
 impl Clone for WText {
@@ -35,7 +39,7 @@ impl Clone for WText {
             kind: self.kind.clone(),
             paragraph: None,
             property: self.property.clone(),
-            inner_size: RectSize::default(),
+            extent: Extent2D::default(),
         }
     }
 }
@@ -46,7 +50,7 @@ impl Clone for GBuilderWText {
             kind: self.kind.as_ref().cloned(),
             paragraph: None,
             property: self.property.clone(),
-            inner_size: Some(RectSize::default()),
+            extent: Some(Extent2D::default()),
         }
     }
 }
@@ -90,112 +94,8 @@ impl WText {
             kind,
             paragraph: None,
             property: Default::default(),
-            inner_size: RectSize::default(),
+            extent: Extent2D::default(),
         }
-    }
-
-    /// Prepares the text for rendering by building a Skia `Paragraph`
-    /// with the correct style and layout constraints.
-    ///
-    /// This step computes the layout according to the available space
-    /// [`RectSize<usize>`] and applies the provided [`WidgetConfiguration`].
-    /// After compilation, the widget knows exactly how much space the
-    /// text will occupy and can be drawn at the right position.
-    ///
-    /// Must be called before querying the text's dimensions or drawing it.
-    pub fn compile(
-        &mut self,
-        mut rect_size: RectSize<usize>,
-        WidgetConfiguration {
-            display_config,
-            notification,
-            font_collection,
-            override_properties,
-            theme,
-        }: &WidgetConfiguration,
-    ) -> CompileState {
-        let mut override_if = |r#override: bool, property: &TextProperty| {
-            if r#override {
-                self.property = property.clone()
-            }
-        };
-
-        let colors = theme.by_urgency(&notification.hints.urgency);
-        let foreground: Bgra<u8> = colors.foreground.clone().into();
-
-        let notification_content: NotificationContent = match self.kind {
-            WTextKind::Summary => {
-                override_if(*override_properties, &display_config.summary);
-                notification.summary.as_str().into()
-            }
-            WTextKind::Body => {
-                override_if(*override_properties, &display_config.body);
-                if display_config.markup {
-                    (&notification.body).into()
-                } else {
-                    notification.body.body.as_str().into()
-                }
-            }
-        };
-
-        if notification_content.as_str().trim().is_empty() {
-            warn!("The text with kind {} is blank", self.kind);
-            return CompileState::Failure;
-        }
-
-        let mut text_style = skia_safe::textlayout::TextStyle::new();
-        text_style.set_font_families(&[&self.property.font.name]);
-        text_style.set_color(Color::from_argb(
-            foreground.alpha,
-            foreground.red,
-            foreground.green,
-            foreground.blue,
-        ));
-
-        text_style.set_font_style(match self.property.style {
-            text::TextStyle::Regular => skia_safe::FontStyle::normal(),
-            text::TextStyle::Bold => skia_safe::FontStyle::bold(),
-            text::TextStyle::Italic => skia_safe::FontStyle::italic(),
-            text::TextStyle::BoldItalic => skia_safe::FontStyle::bold_italic(),
-        });
-
-        rect_size.shrink_by(&self.property.margin);
-
-        // INFO: better to pass it instead of `usize::MAX` because skia's textlayout module
-        // with ellipsis will make the layout in strange way — just truncate the first line
-        // with available space.
-        const MAX_LINES: usize = 100_000;
-        let mut paragraph = self.build_paragraph(
-            &notification_content,
-            &text_style,
-            font_collection.clone(),
-            MAX_LINES,
-        );
-        paragraph.layout(rect_size.width as f32);
-
-        if paragraph.height() > rect_size.height as f32 {
-            paragraph = match self.try_fit_paragraph(
-                paragraph,
-                rect_size,
-                &notification_content,
-                &text_style,
-                font_collection.clone(),
-            ) {
-                Some(paragraph) => paragraph,
-                None => {
-                    warn!(
-                        "The text with kind {} doesn't fit to available space. \
-                Available space: width={}, height={}.",
-                        self.kind, rect_size.width, rect_size.height
-                    );
-                    return CompileState::Failure;
-                }
-            }
-        }
-
-        self.inner_size = rect_size;
-        self.paragraph = Some(paragraph);
-        CompileState::Success
     }
 
     /// Attempts to make the current paragraph layout fit within the available
@@ -210,7 +110,7 @@ impl WText {
     fn try_fit_paragraph(
         &self,
         paragraph: skia_safe::textlayout::Paragraph,
-        restricted_space: RectSize<usize>,
+        restricted_space: Extent2D<usize>,
         notification_content: &NotificationContent,
         base_text_style: &skia_safe::textlayout::TextStyle,
         font_collection: FontCollection,
@@ -351,7 +251,7 @@ impl WText {
     pub fn width(&self) -> usize {
         // INFO: the width should get all available width but height should get only renderable
         // rows.
-        self.inner_size.width + self.property.margin.horizontal() as usize
+        self.extent.width + self.property.margin.horizontal() as usize
     }
 
     /// Returns the computed height of the text after compilation.
@@ -363,6 +263,112 @@ impl WText {
             .as_ref()
             .map(|para| para.height() + self.property.margin.vertical() as f32)
             .unwrap_or(0.) as usize
+    }
+}
+
+impl Compile for WText {
+    /// Prepares the text for rendering by building a Skia `Paragraph`
+    /// with the correct style and layout constraints.
+    ///
+    /// This step computes the layout according to the available space
+    /// [`Extent2D<usize>`] and applies the provided [`WidgetConfiguration`].
+    /// After compilation, the widget knows exactly how much space the
+    /// text will occupy and can be drawn at the right position.
+    ///
+    /// Must be called before querying the text's dimensions or drawing it.
+    fn compile(
+        &mut self,
+        mut available_extent: Extent2D<usize>,
+        WidgetConfiguration {
+            display_config,
+            notification,
+            font_collection,
+            override_properties,
+            theme,
+        }: &WidgetConfiguration,
+    ) -> CompileState {
+        let mut override_if = |r#override: bool, property: &TextProperty| {
+            if r#override {
+                self.property = property.clone()
+            }
+        };
+
+        let colors = theme.by_urgency(&notification.hints.urgency);
+        let foreground: Bgra<u8> = colors.foreground.clone().into();
+
+        let notification_content: NotificationContent = match self.kind {
+            WTextKind::Summary => {
+                override_if(*override_properties, &display_config.summary);
+                notification.summary.as_str().into()
+            }
+            WTextKind::Body => {
+                override_if(*override_properties, &display_config.body);
+                if display_config.markup {
+                    (&notification.body).into()
+                } else {
+                    notification.body.body.as_str().into()
+                }
+            }
+        };
+
+        if notification_content.as_str().trim().is_empty() {
+            warn!("The text with kind {} is blank", self.kind);
+            return CompileState::Failure;
+        }
+
+        let mut text_style = skia_safe::textlayout::TextStyle::new();
+        text_style.set_font_families(&[&self.property.font.name]);
+        text_style.set_color(Color::from_argb(
+            foreground.alpha,
+            foreground.red,
+            foreground.green,
+            foreground.blue,
+        ));
+
+        text_style.set_font_style(match self.property.style {
+            text::TextStyle::Regular => skia_safe::FontStyle::normal(),
+            text::TextStyle::Bold => skia_safe::FontStyle::bold(),
+            text::TextStyle::Italic => skia_safe::FontStyle::italic(),
+            text::TextStyle::BoldItalic => skia_safe::FontStyle::bold_italic(),
+        });
+
+        available_extent.shrink_by(&self.property.margin);
+
+        // INFO: better to pass it instead of `usize::MAX` because skia's textlayout module
+        // with ellipsis will make the layout in strange way — just truncate the first line
+        // with available space.
+        const MAX_LINES: usize = 100_000;
+        let mut paragraph = self.build_paragraph(
+            &notification_content,
+            &text_style,
+            font_collection.clone(),
+            MAX_LINES,
+        );
+        paragraph.layout(available_extent.width as f32);
+
+        if paragraph.height() > available_extent.height as f32 {
+            paragraph = match self.try_fit_paragraph(
+                paragraph,
+                available_extent,
+                &notification_content,
+                &text_style,
+                font_collection.clone(),
+            ) {
+                Some(paragraph) => paragraph,
+                None => {
+                    warn!(
+                        "The text with kind {} doesn't fit to available space. \
+                Available space: width={}, height={}.",
+                        self.kind, available_extent.width, available_extent.height
+                    );
+                    return CompileState::Failure;
+                }
+            }
+        }
+
+        self.extent = available_extent;
+        self.paragraph = Some(paragraph);
+        CompileState::Success
     }
 }
 

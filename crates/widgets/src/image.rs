@@ -6,9 +6,11 @@ use config::display::{ImageProperty, MipmapMode, ResizingMethod};
 use dbus::image::ImageData;
 use shared::file_descriptor::FileDescriptor;
 
-use crate::{drawer::Drawer, types::RectSize};
-
-use super::{types::Offset, Draw};
+use crate::{
+    drawer::Drawer,
+    types::{extent::Extent2D, offset::Offset},
+    Draw,
+};
 
 /// Represents a GPU-ready image used by `WImage` during rendering.
 ///
@@ -27,8 +29,8 @@ use super::{types::Offset, Draw};
 pub enum Image {
     Exists {
         file_descriptor: FileDescriptor,
-        origin_size: RectSize<i32>,
-        resized_size: RectSize<i32>,
+        origin_size: Extent2D<i32>,
+        resized_size: Extent2D<i32>,
         rounding_radius: f32,
         filter_mode: skia_safe::FilterMode,
         mipmap_mode: skia_safe::MipmapMode,
@@ -44,14 +46,14 @@ impl Image {
     /// rendering metadata (sizes, filter mode, mipmap mode).
     ///
     /// Before creating the final image, it verifies that it can fit within
-    /// the provided [`RectSize`] constraints, optionally scaling it down
+    /// the provided [`Extent2D`] constraints, optionally scaling it down
     /// according to [`ImageProperty`] settings.  
     ///
     /// Returns [`Image::Unknown`] if the data cannot be decoded or does not fit.
     pub fn from_image_data(
         image_data: ImageData,
         image_property: &ImageProperty,
-        max_size: &RectSize<usize>,
+        max_size: &Extent2D<usize>,
     ) -> Self {
         let origin_width = image_data.width as u32;
         let origin_height = image_data.height as u32;
@@ -69,8 +71,8 @@ impl Image {
         if image_data.has_alpha {
             return Image::Exists {
                 file_descriptor: image_data.image_file_descriptor,
-                origin_size: RectSize::new(image_data.width, image_data.height),
-                resized_size: RectSize::new(width, height),
+                origin_size: Extent2D::new(image_data.width, image_data.height),
+                resized_size: Extent2D::new(width, height),
                 rounding_radius: image_property.rounding as f32,
                 filter_mode: image_property.resizing_method.to_skia_value(),
                 mipmap_mode: image_property.mipmap_mode.to_skia_value(),
@@ -105,8 +107,8 @@ impl Image {
 
         Image::Exists {
             file_descriptor: file.into(),
-            origin_size: RectSize::new(image_data.width, image_data.height),
-            resized_size: RectSize::new(width, height),
+            origin_size: Extent2D::new(image_data.width, image_data.height),
+            resized_size: Extent2D::new(width, height),
             rounding_radius: image_property.rounding as f32,
             filter_mode: image_property.resizing_method.to_skia_value(),
             mipmap_mode: image_property.mipmap_mode.to_skia_value(),
@@ -127,7 +129,7 @@ impl Image {
     pub fn from_path(
         image_path: &std::path::Path,
         image_property: &ImageProperty,
-        max_size: &RectSize<usize>,
+        max_size: &Extent2D<usize>,
     ) -> Image {
         let data = match std::fs::read(image_path) {
             Ok(data) => data,
@@ -177,8 +179,8 @@ impl Image {
 
         Image::Exists {
             file_descriptor: file.into(),
-            origin_size: RectSize::new(image.width() as i32, image.height() as i32),
-            resized_size: RectSize::new(width, height),
+            origin_size: Extent2D::new(image.width() as i32, image.height() as i32),
+            resized_size: Extent2D::new(width, height),
             rounding_radius: image_property.rounding as f32,
             filter_mode: image_property.resizing_method.to_skia_value(),
             mipmap_mode: image_property.mipmap_mode.to_skia_value(),
@@ -193,11 +195,11 @@ impl Image {
     ///
     /// This ensures the resulting image is GPU-friendly while preserving
     /// correct vector scaling and aspect ratio within the given
-    /// [`RectSize`] constraints.
+    /// [`Extent2D`] constraints.
     pub fn from_svg(
         image_path: &std::path::Path,
         image_property: &ImageProperty,
-        max_size: &RectSize<usize>,
+        max_size: &Extent2D<usize>,
     ) -> Self {
         if !image_path.is_file() {
             return Image::Unknown;
@@ -269,8 +271,8 @@ impl Image {
 
         Image::Exists {
             file_descriptor: file.into(),
-            origin_size: RectSize::new(width, height),
-            resized_size: RectSize::new(width, height),
+            origin_size: Extent2D::new(width, height),
+            resized_size: Extent2D::new(width, height),
             rounding_radius: image_property.rounding as f32,
             filter_mode: image_property.resizing_method.to_skia_value(),
             mipmap_mode: image_property.mipmap_mode.to_skia_value(),
@@ -345,7 +347,7 @@ impl Image {
         mut width: i32,
         mut height: i32,
         image_property: &ImageProperty,
-        max_size: &RectSize<usize>,
+        max_size: &Extent2D<usize>,
     ) -> Option<(i32, i32)> {
         Self::limit_size(&mut width, &mut height, image_property.max_size);
         let (horizontal_spacing, vertical_spacing) = {

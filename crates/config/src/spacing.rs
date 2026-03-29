@@ -12,16 +12,16 @@ use shared::value::TryFromValue;
 #[gbuilder(name(GBuilderSpacing), derive(Clone), constructor)]
 pub struct Spacing {
     #[gbuilder(default(0), aliases(vertical, all))]
-    top: usize,
+    top: u32,
 
     #[gbuilder(default(0), aliases(horizontal, all))]
-    right: usize,
+    right: u32,
 
     #[gbuilder(default(0), aliases(vertical, all))]
-    bottom: usize,
+    bottom: u32,
 
     #[gbuilder(default(0), aliases(horizontal, all))]
-    left: usize,
+    left: u32,
 }
 
 impl TryFromValue for Spacing {}
@@ -30,7 +30,7 @@ impl Spacing {
     const POSSIBLE_KEYS: [&'static str; 6] =
         ["top", "right", "bottom", "left", "vertical", "horizontal"];
 
-    pub fn all_directional(val: usize) -> Self {
+    pub fn all_directional(val: u32) -> Self {
         Self {
             top: val,
             bottom: val,
@@ -39,7 +39,7 @@ impl Spacing {
         }
     }
 
-    pub fn cross(vertical: usize, horizontal: usize) -> Self {
+    pub fn cross(vertical: u32, horizontal: u32) -> Self {
         Self {
             top: vertical,
             bottom: vertical,
@@ -48,35 +48,35 @@ impl Spacing {
         }
     }
 
-    pub fn top(&self) -> usize {
+    pub fn top(&self) -> u32 {
         self.top
     }
 
-    pub fn set_top(&mut self, top: usize) {
+    pub fn set_top(&mut self, top: u32) {
         self.top = top;
     }
 
-    pub fn right(&self) -> usize {
+    pub fn right(&self) -> u32 {
         self.right
     }
 
-    pub fn set_right(&mut self, right: usize) {
+    pub fn set_right(&mut self, right: u32) {
         self.right = right;
     }
 
-    pub fn bottom(&self) -> usize {
+    pub fn bottom(&self) -> u32 {
         self.bottom
     }
 
-    pub fn set_bottom(&mut self, bottom: usize) {
+    pub fn set_bottom(&mut self, bottom: u32) {
         self.bottom = bottom;
     }
 
-    pub fn left(&self) -> usize {
+    pub fn left(&self) -> u32 {
         self.left
     }
 
-    pub fn set_left(&mut self, left: usize) {
+    pub fn set_left(&mut self, left: u32) {
         self.left = left;
     }
 
@@ -88,7 +88,7 @@ impl Spacing {
         self.top as u16 + self.bottom as u16
     }
 
-    pub fn shrink(&self, width: &mut usize, height: &mut usize) {
+    pub fn shrink(&self, width: &mut u32, height: &mut u32) {
         *width = width.saturating_sub(self.left + self.right);
         *height = height.saturating_sub(self.top + self.bottom);
     }
@@ -130,12 +130,12 @@ impl AddAssign<Spacing> for Spacing {
 }
 impl From<i64> for Spacing {
     fn from(value: i64) -> Self {
-        Spacing::all_directional(value.clamp(0, usize::MAX as i64) as usize)
+        Spacing::all_directional(value.clamp(0, u32::MAX as i64) as u32)
     }
 }
 
-impl From<Vec<usize>> for Spacing {
-    fn from(value: Vec<usize>) -> Self {
+impl From<Vec<u32>> for Spacing {
+    fn from(value: Vec<u32>) -> Self {
         match value.len() {
             1 => Spacing::all_directional(value[0]),
             2 => Spacing::cross(value[0], value[1]),
@@ -156,8 +156,8 @@ impl From<Vec<usize>> for Spacing {
     }
 }
 
-impl From<HashMap<String, usize>> for Spacing {
-    fn from(map: HashMap<String, usize>) -> Self {
+impl From<HashMap<String, u32>> for Spacing {
+    fn from(map: HashMap<String, u32>) -> Self {
         let vertical = map.get("vertical");
         let horizontal = map.get("horizontal");
         let top = map.get("top");
@@ -187,14 +187,14 @@ struct PaddingVisitor<T>(PhantomData<fn() -> T>);
 
 impl<'de, T> Visitor<'de> for PaddingVisitor<T>
 where
-    T: Deserialize<'de> + From<HashMap<String, usize>> + From<Vec<usize>> + From<i64>,
+    T: Deserialize<'de> + From<HashMap<String, u32>> + From<Vec<u32>> + From<i64>,
 {
     type Value = T;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             formatter,
-            r#"either usize, [usize, usize], [usize, usize, usize], [usize, usize, usize, usize] or Table.
+            r#"either u32, [u32, u32], [u32, u32, u32], [u32, u32, u32, u32] or Table.
 
 Example:
 
@@ -244,7 +244,7 @@ margin = {{ top = 5, horizontal = 10 }}"#
         A: serde::de::SeqAccess<'de>,
     {
         let mut fields = vec![];
-        while let Some(value) = seq.next_element::<usize>()? {
+        while let Some(value) = seq.next_element::<u32>()? {
             fields.push(value);
         }
 
@@ -260,7 +260,7 @@ margin = {{ top = 5, horizontal = 10 }}"#
     {
         let mut custom_padding = HashMap::new();
 
-        while let Some((key, value)) = map.next_entry::<String, usize>()? {
+        while let Some((key, value)) = map.next_entry::<String, u32>()? {
             if !Spacing::POSSIBLE_KEYS.contains(&key.as_str()) {
                 return Err(serde::de::Error::invalid_value(
                     serde::de::Unexpected::Str(key.as_str()),

@@ -1,8 +1,9 @@
+use config::display::Border;
 use log::warn;
 
 use crate::{
     color::{Bgra, Color},
-    types::{Offset, RectSize},
+    types::{extent::Extent2D, offset::Offset},
     Draw,
 };
 
@@ -36,6 +37,99 @@ impl Drawer {
         widget.draw_with_offset(offset, &mut offscreen_drawer);
         offscreen_drawer.surface.image_snapshot()
     }
+
+    /// Fills the container’s background before drawing children.
+    ///
+    /// If configured, the background will be filled with rounded corners.
+    /// This is the first step of the `draw` routine, ensuring that child
+    /// widgets are rendered on top of a consistent background.
+    pub(crate) fn fill_background(
+        &mut self,
+        offset: Offset<f32>,
+        extent: Extent2D<f32>,
+        border: &Border,
+        background_color: &Color,
+    ) {
+        let outer_radius = (border.radius as f32)
+            .min(extent.width / 2.0)
+            .min(extent.height / 2.0);
+        let inner_radius = (outer_radius - border.size as f32).max(0.0);
+        let difference = border.size as f32;
+
+        let canvas = self.surface.canvas();
+
+        let rounded_rect = skia_safe::RRect::new_rect_xy(
+            skia_safe::Rect::from_xywh(
+                offset.x + difference,
+                offset.y + difference,
+                extent.width - difference * 2.0,
+                extent.height - difference * 2.0,
+            ),
+            inner_radius,
+            inner_radius,
+        );
+
+        let mut paint = skia_safe::Paint::default();
+        paint.use_color(background_color, offset, extent);
+        paint.set_anti_alias(true);
+
+        canvas.draw_rrect(rounded_rect, &paint);
+    }
+
+    /// Draws the container’s border after all children have been rendered.
+    ///
+    /// This is the final step of the `draw` routine, allowing the border
+    /// to visually wrap around both the background and the children.
+    pub(crate) fn outline_border(
+        &mut self,
+        offset: Offset<f32>,
+        extent: Extent2D<f32>,
+        border: &Border,
+        border_color: &Color,
+    ) {
+        if border.size == 0 {
+            return;
+        }
+
+        let outer_radius = (border.radius as f32)
+            .min(extent.width / 2.0)
+            .min(extent.height / 2.0);
+        let inner_radius = outer_radius - border.size as f32;
+
+        let mut path = skia_safe::Path::new();
+
+        path.add_rrect(
+            skia_safe::RRect::new_rect_xy(
+                skia_safe::Rect::from_xywh(offset.x, offset.y, extent.width, extent.height),
+                outer_radius,
+                outer_radius,
+            ),
+            None,
+        );
+
+        let border_size = border.size as f32;
+        let base_rect = skia_safe::Rect::from_xywh(
+            offset.x + border_size,
+            offset.y + border_size,
+            extent.width - border_size * 2.0,
+            extent.height - border_size * 2.0,
+        );
+        if inner_radius <= 0.0 {
+            path.add_rect(base_rect, None);
+        } else {
+            path.add_rrect(
+                skia_safe::RRect::new_rect_xy(base_rect, inner_radius, inner_radius),
+                None,
+            );
+        }
+
+        let mut paint = skia_safe::Paint::default();
+        paint.use_color(border_color, offset, extent);
+        paint.set_anti_alias(true);
+
+        path.set_fill_type(skia_safe::path::FillType::EvenOdd);
+        self.surface.canvas().draw_path(&path, &paint);
+    }
 }
 
 /// A helper trait for applying a [`Color`] to Skia paint objects.
@@ -44,11 +138,11 @@ impl Drawer {
 /// (solid fills, gradients, etc.) into Skia's low-level representation,
 /// making it easy to consistently apply colors across drawing code.
 pub trait UseColor {
-    fn use_color(&mut self, color: &Color, offset: Offset<f32>, frame_size: RectSize<f32>);
+    fn use_color(&mut self, color: &Color, offset: Offset<f32>, frame_size: Extent2D<f32>);
 }
 
 impl UseColor for skia_safe::Paint {
-    fn use_color(&mut self, color: &Color, offset: Offset<f32>, frame_size: RectSize<f32>) {
+    fn use_color(&mut self, color: &Color, offset: Offset<f32>, frame_size: Extent2D<f32>) {
         self.set_anti_alias(true);
 
         match color {

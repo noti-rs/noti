@@ -11,25 +11,17 @@ use std::time::Duration;
 use config::{display::DisplayConfig, theme::Theme};
 use dbus::notification::Notification;
 use log::warn;
+use shared::value::TryFromValue;
 
 use crate::{
     animation::{
-        fade::{FadeIn, FadeOut},
-        pop::{PopIn, PopOut},
-        translate::Translate,
-        Easing,
-    },
-    drawer::Drawer,
-    events::{Action, DispatchEvent},
+        Easing, fade::{FadeIn, FadeOut}, pop::{PopIn, PopOut}, translate::Translate
+    }, drawer::Drawer, events::{Action, DispatchEvent}, types::direction::Direction, widget::container::Container
 };
 
-use types::{Offset, RectSize};
+use types::{extent::Extent2D, offset::Offset};
 
-use widget::{
-    flex_container::{Direction, FlexContainer},
-    image::WImage,
-    text::WText,
-};
+use widget::{flex_container::FlexContainer, image::WImage, text::WText};
 
 /// A minimal trait for drawing any widget onto a [`Drawer`].
 ///
@@ -61,6 +53,7 @@ pub trait Draw {
 pub enum Widget {
     Image(WImage),
     Text(WText),
+    Container(Container),
     FlexContainer(FlexContainer),
     /// Placeholder for unsupported or unrecognized widgets; safely ignored during drawing.
     Unknown,
@@ -80,41 +73,9 @@ impl Widget {
         match self {
             Widget::Image(_) => "image",
             Widget::Text(_) => "text",
+            Widget::Container(_) => "container",
             Widget::FlexContainer(_) => "flex container",
             Widget::Unknown => "unknown",
-        }
-    }
-
-    /// Compiles this widget and computes its final layout properties.
-    ///
-    /// During compilation, this widget calculates its post-compilation width,
-    /// height, spacing, margins, fill behavior, and other layout properties.
-    /// The provided [`RectSize`] defines the available drawing space for this
-    /// widget, while the [`WidgetConfiguration`] provides shared context such as
-    /// theme, fonts, and notification data.
-    ///
-    /// # Why This Matters
-    /// Widgets cannot know their final size or layout until compilation is
-    /// performed. Call this method before querying [`width`], [`height`],
-    /// or before drawing, to ensure the widget is placed correctly on screen.
-    ///
-    /// # Parameters
-    /// - `rect_size` – The size of the available space in which this widget may fit.
-    /// - `configuration` – Shared context and configuration data for the compilation.
-    pub fn compile(&mut self, rect_size: RectSize<usize>, configuration: &WidgetConfiguration) {
-        let state = match self {
-            Widget::Image(image) => image.compile(rect_size, configuration),
-            Widget::Text(text) => text.compile(rect_size, configuration),
-            Widget::FlexContainer(container) => container.compile(rect_size, configuration),
-            Widget::Unknown => CompileState::Success,
-        };
-
-        if let CompileState::Failure = state {
-            warn!(
-                "A {wtype} widget is not compiled due errors!",
-                wtype = self.get_type()
-            );
-            *self = Widget::Unknown;
         }
     }
 
@@ -138,7 +99,8 @@ impl Widget {
         match self {
             Widget::Image(image) => image.width(),
             Widget::Text(text) => text.width(),
-            Widget::FlexContainer(container) => container.max_width(),
+            Widget::Container(container) => container.width(),
+            Widget::FlexContainer(flex_container) => flex_container.max_width(),
             Widget::Unknown => 0,
         }
     }
@@ -150,7 +112,8 @@ impl Widget {
         match self {
             Widget::Image(image) => image.height(),
             Widget::Text(text) => text.height(),
-            Widget::FlexContainer(container) => container.max_height(),
+            Widget::Container(container) => container.height(),
+            Widget::FlexContainer(flex_container) => flex_container.max_height(),
             Widget::Unknown => 0,
         }
     }
@@ -219,7 +182,10 @@ impl Draw for Widget {
         match self {
             Widget::Image(image) => image.draw_with_offset(offset, output),
             Widget::Text(text) => text.draw_with_offset(offset, output),
-            Widget::FlexContainer(container) => container.draw_with_offset(offset, output),
+            Widget::Container(container) => container.draw_with_offset(offset, output),
+            Widget::FlexContainer(flex_container) => {
+                flex_container.draw_with_offset(offset, output)
+            }
             Widget::Unknown => (),
         }
     }
@@ -230,9 +196,64 @@ impl DispatchEvent for Widget {
         match self {
             Widget::Image(wimage) => wimage.dispatch_event(event),
             Widget::Text(wtext) => wtext.dispatch_event(event),
+            Widget::Container(container) => container.dispatch_event(event),
             Widget::FlexContainer(flex_container) => flex_container.dispatch_event(event),
             Widget::Unknown => Action::None,
         }
+    }
+}
+
+impl TryFromValue for Widget {}
+
+/// Compiles this widget and computes its final layout properties.
+///
+/// During compilation, this widget calculates its post-compilation width,
+/// height, spacing, margins, fill behavior, and other layout properties.
+/// The provided [`Extent2D`] defines the available drawing space for this
+/// widget, while the [`WidgetConfiguration`] provides shared context such as
+/// theme, fonts, and notification data.
+///
+/// # Why This Matters
+/// Widgets cannot know their final size or layout until compilation is
+/// performed. Call this method before querying [`width`], [`height`],
+/// or before drawing, to ensure the widget is placed correctly on screen.
+///
+/// # Parameters
+/// - `available_extent` – The size of the available space in which this widget may fit.
+/// - `configuration` – Shared context and configuration data for the compilation.
+pub trait Compile {
+    fn compile(
+        &mut self,
+        available_extent: Extent2D<usize>,
+        configuration: &WidgetConfiguration,
+    ) -> CompileState;
+}
+
+impl Compile for Widget {
+    fn compile(
+        &mut self,
+        available_extent: Extent2D<usize>,
+        configuration: &WidgetConfiguration,
+    ) -> CompileState {
+        let state = match self {
+            Widget::Image(image) => image.compile(available_extent, configuration),
+            Widget::Text(text) => text.compile(available_extent, configuration),
+            Widget::Container(container) => container.compile(available_extent, configuration),
+            Widget::FlexContainer(flex_container) => {
+                flex_container.compile(available_extent, configuration)
+            }
+            Widget::Unknown => CompileState::Success,
+        };
+
+        if let CompileState::Failure = &state {
+            warn!(
+                "A {wtype} widget is not compiled due errors!",
+                wtype = self.get_type()
+            );
+            *self = Widget::Unknown;
+        }
+
+        state
     }
 }
 
@@ -266,6 +287,12 @@ impl From<WImage> for Widget {
 impl From<WText> for Widget {
     fn from(value: WText) -> Self {
         Widget::Text(value)
+    }
+}
+
+impl From<Container> for Widget {
+    fn from(value: Container) -> Self {
+        Widget::Container(value)
     }
 }
 

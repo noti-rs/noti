@@ -125,7 +125,7 @@ impl Animated for Translate {
 impl Draw for Translate {
     fn draw_with_offset(
         &self,
-        offset: &crate::types::Offset<usize>,
+        offset: &crate::types::offset::Offset<usize>,
         drawer: &mut crate::drawer::Drawer,
     ) {
         let image = drawer.draw_into_offscreen(offset, &self.widget);

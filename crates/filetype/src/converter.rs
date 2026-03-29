@@ -12,7 +12,8 @@ use shared::{
     value::{TryDowncast, Value},
 };
 use widgets::{
-    widget::flex_container::{Alignment, GBuilderAlignment, GBuilderFlexContainer},
+    types::alignment::{Alignment, GBuilderAlignment},
+    widget::flex_container::GBuilderFlexContainer,
     widget::image::GBuilderWImage,
     widget::text::GBuilderWText,
     Widget,

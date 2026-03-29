@@ -317,11 +317,11 @@ public! {
     struct Border {
         #[cfg_prop(default(0))]
         #[gbuilder(default(0))]
-        size: usize,
+        size: u32,
 
         #[cfg_prop(default(0))]
         #[gbuilder(default(0))]
-        radius: usize,
+        radius: u32,
     }
 }
 

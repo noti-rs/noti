@@ -46,7 +46,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 use widgets::{
     animation::Animated,
-    types::{Offset, RectSize},
+    types::{offset::Offset, extent::Extent2D},
 };
 
 /// Wraps a [WindowState] and holds an event queue used only for dispatching.
@@ -68,7 +68,7 @@ pub(super) struct Window {
 pub(super) struct WindowState {
     banner_stack: BannerStack<u32>,
 
-    actual_size: RectSize<usize>,
+    actual_size: Extent2D<usize>,
     anchor: Anchor,
     margin: Margin,
 
@@ -134,7 +134,7 @@ impl Window {
 
         let mut event_queue = wayland_connection.new_event_queue();
 
-        let actual_size = RectSize::new(
+        let actual_size = Extent2D::new(
             config.general().width.into(),
             config.general().height.into(),
         );
@@ -242,7 +242,7 @@ impl Window {
     fn make_egl_surface<Gpu>(
         surface: &WlSurface,
         gpu: &Gpu,
-        actual_size: &RectSize<usize>,
+        actual_size: &Extent2D<usize>,
     ) -> anyhow::Result<(WlEglSurface, khronos_egl::Surface)>
     where
         Gpu: AsRef<EglState>,
@@ -488,17 +488,17 @@ impl WindowState {
         }
     }
 
-    fn resize(&mut self, logical_size: RectSize<usize>) {
+    fn resize(&mut self, logical_size: Extent2D<usize>) {
         if logical_size.width == 0 && logical_size.height == 0 {
             // INFO: the Wayland compositor may call the callback after destroying a last
             // notification and because of this the width and height of surface equals to 0x0. To
             // avoid this need to set dummy size. It's always last frames before disappearing.
-            self.actual_size = RectSize::new(1, 1);
+            self.actual_size = Extent2D::new(1, 1);
         } else {
             self.actual_size = self.margin.apply_to_size(logical_size);
         }
 
-        let RectSize { width, height } = self.actual_size;
+        let Extent2D { width, height } = self.actual_size;
         self.layer_surface.set_size(width as u32, height as u32);
         let (dx, dy) = (0, 0);
         self.egl_window.resize(width as i32, height as i32, dx, dy);
@@ -603,10 +603,10 @@ impl Margin {
         margin
     }
 
-    fn apply_to_size(&self, mut rect_size: RectSize<usize>) -> RectSize<usize> {
-        rect_size.width += self.left + self.right;
-        rect_size.height += self.top + self.bottom;
-        rect_size
+    fn apply_to_size(&self, mut extent: Extent2D<usize>) -> Extent2D<usize> {
+        extent.width += self.left + self.right;
+        extent.height += self.top + self.bottom;
+        extent
     }
 }
 
@@ -759,7 +759,7 @@ impl Dispatch<WlCallback, ()> for WindowState {
 
             // TODO: correctly resize for specific animation
             let gap = state.config.general().gap as usize;
-            let logical_size = RectSize::new(
+            let logical_size = Extent2D::new(
                 state.banner_stack.width(),
                 state.banner_stack.total_height_with_gap(gap),
             );

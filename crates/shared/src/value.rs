@@ -120,6 +120,7 @@ impl TryFromValue for String {
     }
 }
 
+impl<T: 'static + Clone> TryFromValue for Box<T> {}
 impl<T: 'static + Clone> TryFromValue for Vec<T> {}
 
 macro_rules! impl_try_from_value_for_uint {
@@ -134,7 +135,7 @@ macro_rules! impl_try_from_value_for_uint {
     };
 }
 
-impl_try_from_value_for_uint!(u8, u16, u32, i8, i16, i32);
+impl_try_from_value_for_uint!(u8, u16, u32, u64, i8, i16, i32, i64);
 
 impl TryFromValue for bool {
     fn try_from_string(value: String) -> Result<Self, ConversionError> {

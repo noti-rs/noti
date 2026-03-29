@@ -1,6 +1,5 @@
 use config::{
-    display::{AnimationDefinition, AnimationStyle, Border, DisplayConfig},
-    Config,
+    Config, display::{AnimationDefinition, AnimationStyle, Border, DisplayConfig}, spacing::Spacing
 };
 use dbus::{
     actions::ClosingReason,
@@ -24,13 +23,17 @@ use widgets::{
     self,
     animation::{Animated, AnimatedWidget},
     drawer::Drawer,
-    types::{Offset, RectSize},
+    types::{
+        alignment::{Alignment, Position},
+        extent::Extent2D,
+        offset::Offset,
+    },
     widget::{
-        flex_container::{Alignment, FlexContainerBuilder, Position},
+        flex_container::FlexContainerBuilder,
         image::WImage,
         text::{WText, WTextKind},
     },
-    Draw, Widget, WidgetConfiguration,
+    Compile, Draw, Widget, WidgetConfiguration,
 };
 
 use super::CachedLayout;
@@ -352,7 +355,7 @@ impl Banner {
             return;
         }
 
-        let rect_size = RectSize::new(
+        let extent = Extent2D::new(
             config.general().width as usize,
             config.general().height as usize,
         );
@@ -369,7 +372,7 @@ impl Banner {
         };
 
         layout.compile(
-            rect_size,
+            extent,
             &WidgetConfiguration {
                 display_config: display,
                 theme: config.theme_by_app(&self.notification.app_name),
@@ -412,14 +415,14 @@ impl Banner {
         FlexContainerBuilder::default()
             .spacing(display_config.padding)
             .border(display_config.border.clone())
-            .direction(widgets::widget::flex_container::Direction::Horizontal)
+            .direction(widgets::types::direction::Direction::Horizontal)
             .alignment(Alignment::new(Position::Start, Position::Center))
             .children(vec![
                 WImage::new().into(),
                 FlexContainerBuilder::default()
                     .spacing(Default::default())
                     .border(Border::default())
-                    .direction(widgets::widget::flex_container::Direction::Vertical)
+                    .direction(widgets::types::direction::Direction::Vertical)
                     .alignment(Alignment::new(Position::Center, Position::Center))
                     .transparent_background(true)
                     .children(vec![

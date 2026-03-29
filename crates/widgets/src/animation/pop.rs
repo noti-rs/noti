@@ -123,7 +123,7 @@ impl<D: PopDirection> Animated for Pop<D> {
 impl<D: PopDirection> Draw for Pop<D> {
     fn draw_with_offset(
         &self,
-        offset: &crate::types::Offset<usize>,
+        offset: &crate::types::offset::Offset<usize>,
         drawer: &mut crate::drawer::Drawer,
     ) {
         let widget_image = drawer.draw_into_offscreen(offset, &self.widget);
