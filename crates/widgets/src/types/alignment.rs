@@ -7,7 +7,7 @@ use shared::{error::ConversionError, value::TryFromValue};
 /// final placement of child widgets when there is extra free space
 /// remaining after compilation.
 #[derive(macros::GenericBuilder, Debug, Default, Clone)]
-#[gbuilder(name(GBuilderAlignment), derive(Clone), constructor)]
+#[gbuilder(name(AlignmentGBuilder), derive(Clone), constructor)]
 pub struct Alignment {
     #[gbuilder(aliases(diagonal))]
     pub horizontal: Position,

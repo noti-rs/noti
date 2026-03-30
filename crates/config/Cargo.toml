@@ -8,6 +8,7 @@ edition.workspace = true
 dbus.workspace = true
 macros.workspace = true
 shared.workspace = true
+widgets.workspace = true
 
 anyhow.workspace = true
 log.workspace = true

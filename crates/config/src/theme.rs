@@ -2,10 +2,7 @@ use dbus::notification::Urgency;
 use macros::ConfigProperty;
 use serde::Deserialize;
 
-use crate::{
-    color::{Color, Rgba},
-    public,
-};
+use crate::{color::Color, public};
 
 public! {
     #[derive(ConfigProperty, Debug)]
@@ -44,8 +41,9 @@ public! {
     #[derive(ConfigProperty, Debug)]
     #[cfg_prop(name(TomlColors), derive(Debug, Clone, Deserialize, Default))]
     struct Colors {
-        #[cfg_prop(default(path = Rgba::new_black))]
-        foreground: Rgba,
+        #[cfg_prop(default(path = Color::new_rgba_black))]
+        foreground: Color,
+
         #[cfg_prop(default(path = Color::new_rgba_white))]
         background: Color,
 
@@ -58,7 +56,7 @@ impl TomlColors {
     fn default_critical() -> TomlColors {
         TomlColors {
             background: Some(Color::new_rgba_white()),
-            foreground: Some(Rgba::new_red()),
+            foreground: Some(Color::new_rgba_red()),
             border: Some(Color::new_rgba_red()),
         }
     }

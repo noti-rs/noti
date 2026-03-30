@@ -2,17 +2,27 @@ use log::warn;
 use std::collections::HashMap;
 use unic_segment;
 
+use crate::value::TryFromValue;
+
 /// Represents text that may contain HTML entities.
 ///
 /// This structure allows the text content and its HTML entities to be stored and processed
 /// separately, making it easier to parse, escape, or render the content safely and consistently.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Text {
     pub body: String,
     pub entities: Vec<Entity>,
 }
 
 impl Text {
+    /// Creates an empty text.
+    pub fn new_empty() -> Self {
+        Self {
+            body: "".to_owned(),
+            entities: vec![],
+        }
+    }
+
     /// Parses the input text, escaping HTML entities and extracting style information.
     ///
     /// This ensures that the resulting text is safe to render and that any supported
@@ -21,6 +31,27 @@ impl Text {
     /// Unmatched tags are considered invalid and will be removed during parsing.
     pub fn parse(input: String) -> Self {
         Parser::new(&input).parse()
+    }
+}
+
+impl From<String> for Text {
+    fn from(value: String) -> Self {
+        Self {
+            body: value,
+            entities: vec![],
+        }
+    }
+}
+
+impl Default for Text {
+    fn default() -> Self {
+        Self::new_empty()
+    }
+}
+
+impl TryFromValue for Text {
+    fn try_from_string(value: String) -> Result<Self, crate::error::ConversionError> {
+        Ok(Text::parse(value))
     }
 }
 
@@ -331,7 +362,7 @@ impl<'a> Parser<'a> {
 /// In most cases, the byte offset is sufficient to get a slice of the text.
 /// For accurate handling of multi-codepoint characters (e.g., emojis or accented letters),
 /// use [unic_segment] to calculate the correct g_]()
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entity {
     pub offset: usize,
     pub offset_in_byte: usize,
@@ -344,7 +375,7 @@ pub struct Entity {
 ///
 /// Examples include formatting tags such as bold, italic, underline, or other
 /// supported HTML tags that affect the text’s style or semantics.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntityKind {
     Bold,      // <b> ... </b>
     Italic,    // <i> ... </i>

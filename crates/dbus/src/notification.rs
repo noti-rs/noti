@@ -1,5 +1,6 @@
-use super::{image::ImageData, text::Text};
+use super::image::ImageData;
 use derive_more::Display;
+use shared::text::Text;
 use std::{cmp::Ordering, collections::HashMap};
 use zbus::zvariant::Value;
 
@@ -16,7 +17,7 @@ pub struct Notification {
     pub app_icon: String,
 
     /// Short summary or title of the notification.
-    pub summary: String,
+    pub summary: Text,
 
     /// Main content of the notification.
     pub body: Text,

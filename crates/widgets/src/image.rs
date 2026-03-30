@@ -2,13 +2,12 @@ use std::io::{Read, Seek, Write};
 
 use log::{debug, error, warn};
 
-use config::display::{ImageProperty, MipmapMode, ResizingMethod};
-use dbus::image::ImageData;
-use shared::file_descriptor::FileDescriptor;
+use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::TryFromValue};
 
 use crate::{
     drawer::Drawer,
     types::{extent::Extent2D, offset::Offset},
+    widget::image::ImageConfiguration,
     Draw,
 };
 
@@ -25,7 +24,7 @@ use crate::{
 /// The [`Image::Unknown`] variant indicates that the image could
 /// not be loaded or was invalid (e.g. corrupt raw data or unsupported format),
 /// allowing the caller to gracefully skip rendering instead of crashing.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum Image {
     Exists {
         file_descriptor: FileDescriptor,
@@ -35,6 +34,7 @@ pub enum Image {
         filter_mode: skia_safe::FilterMode,
         mipmap_mode: skia_safe::MipmapMode,
     },
+    #[default]
     Unknown,
 }
 
@@ -47,12 +47,12 @@ impl Image {
     ///
     /// Before creating the final image, it verifies that it can fit within
     /// the provided [`Extent2D`] constraints, optionally scaling it down
-    /// according to [`ImageProperty`] settings.  
+    /// according to [`ImageConfiguration`] settings.  
     ///
     /// Returns [`Image::Unknown`] if the data cannot be decoded or does not fit.
     pub fn from_image_data(
-        image_data: ImageData,
-        image_property: &ImageProperty,
+        image_data: &ImageData,
+        image_configuration: &ImageConfiguration,
         max_size: &Extent2D<usize>,
     ) -> Self {
         let origin_width = image_data.width as u32;
@@ -61,7 +61,7 @@ impl Image {
         let Some((width, height)) = Self::try_fit_into_restricted_space(
             image_data.width,
             image_data.height,
-            image_property,
+            image_configuration,
             max_size,
         ) else {
             warn!("The margins for image is very large! The image will not rendered!");
@@ -70,12 +70,12 @@ impl Image {
 
         if image_data.has_alpha {
             return Image::Exists {
-                file_descriptor: image_data.image_file_descriptor,
+                file_descriptor: image_data.image_file_descriptor.clone(),
                 origin_size: Extent2D::new(image_data.width, image_data.height),
                 resized_size: Extent2D::new(width, height),
-                rounding_radius: image_property.rounding as f32,
-                filter_mode: image_property.resizing_method.to_skia_value(),
-                mipmap_mode: image_property.mipmap_mode.to_skia_value(),
+                rounding_radius: image_configuration.rounding as f32,
+                filter_mode: image_configuration.resizing_method.to_skia_value(),
+                mipmap_mode: image_configuration.mipmap_mode.to_skia_value(),
             };
         }
 
@@ -109,9 +109,9 @@ impl Image {
             file_descriptor: file.into(),
             origin_size: Extent2D::new(image_data.width, image_data.height),
             resized_size: Extent2D::new(width, height),
-            rounding_radius: image_property.rounding as f32,
-            filter_mode: image_property.resizing_method.to_skia_value(),
-            mipmap_mode: image_property.mipmap_mode.to_skia_value(),
+            rounding_radius: image_configuration.rounding as f32,
+            filter_mode: image_configuration.resizing_method.to_skia_value(),
+            mipmap_mode: image_configuration.mipmap_mode.to_skia_value(),
         }
     }
 
@@ -122,13 +122,13 @@ impl Image {
     /// result as a temporary file descriptor for GPU-backed rendering.
     ///
     /// Like [`Self::from_image_data`], it respects the
-    /// size restrictions and scaling rules provided in [`ImageProperty`].
+    /// size restrictions and scaling rules provided in [`ImageConfiguration`].
     ///
     /// Returns [`Image::Unknown`] if the file is missing, unreadable,
     /// or cannot be decoded.
     pub fn from_path(
         image_path: &std::path::Path,
-        image_property: &ImageProperty,
+        image_configuration: &ImageConfiguration,
         max_size: &Extent2D<usize>,
     ) -> Image {
         let data = match std::fs::read(image_path) {
@@ -147,7 +147,7 @@ impl Image {
                     Error: {err}. Maybe it's SVG, trying to parse.",
                     image_path = image_path.display()
                 );
-                return Self::from_svg(image_path, image_property, max_size);
+                return Self::from_svg(image_path, image_configuration, max_size);
             }
         };
 
@@ -165,7 +165,7 @@ impl Image {
         let Some((width, height)) = Self::try_fit_into_restricted_space(
             image.width() as i32,
             image.height() as i32,
-            image_property,
+            image_configuration,
             max_size,
         ) else {
             warn!("The margins for image is very large! The image will not rendered!");
@@ -181,9 +181,9 @@ impl Image {
             file_descriptor: file.into(),
             origin_size: Extent2D::new(image.width() as i32, image.height() as i32),
             resized_size: Extent2D::new(width, height),
-            rounding_radius: image_property.rounding as f32,
-            filter_mode: image_property.resizing_method.to_skia_value(),
-            mipmap_mode: image_property.mipmap_mode.to_skia_value(),
+            rounding_radius: image_configuration.rounding as f32,
+            filter_mode: image_configuration.resizing_method.to_skia_value(),
+            mipmap_mode: image_configuration.mipmap_mode.to_skia_value(),
         }
     }
 
@@ -198,7 +198,7 @@ impl Image {
     /// [`Extent2D`] constraints.
     pub fn from_svg(
         image_path: &std::path::Path,
-        image_property: &ImageProperty,
+        image_configuration: &ImageConfiguration,
         max_size: &Extent2D<usize>,
     ) -> Self {
         if !image_path.is_file() {
@@ -234,7 +234,7 @@ impl Image {
         let Some((width, height)) = Self::try_fit_into_restricted_space(
             tree_size.width().round() as i32,
             tree_size.height().round() as i32,
-            image_property,
+            image_configuration,
             max_size,
         ) else {
             warn!("The margins for image is very large! The image will not rendered!");
@@ -273,9 +273,9 @@ impl Image {
             file_descriptor: file.into(),
             origin_size: Extent2D::new(width, height),
             resized_size: Extent2D::new(width, height),
-            rounding_radius: image_property.rounding as f32,
-            filter_mode: image_property.resizing_method.to_skia_value(),
-            mipmap_mode: image_property.mipmap_mode.to_skia_value(),
+            rounding_radius: image_configuration.rounding as f32,
+            filter_mode: image_configuration.resizing_method.to_skia_value(),
+            mipmap_mode: image_configuration.mipmap_mode.to_skia_value(),
         }
     }
 
@@ -339,20 +339,20 @@ impl Image {
     ///
     /// This method calculates a scaled width and height that preserve
     /// the image's aspect ratio while respecting margins and constraints
-    /// from [`ImageProperty`].  
+    /// from [`ImageConfiguration`].
     ///
     /// Returns `Some((width, height))` if the image can fit into the
     /// specified space, or `None` if it cannot be displayed at all.
     fn try_fit_into_restricted_space(
         mut width: i32,
         mut height: i32,
-        image_property: &ImageProperty,
+        image_configuration: &ImageConfiguration,
         max_size: &Extent2D<usize>,
     ) -> Option<(i32, i32)> {
-        Self::limit_size(&mut width, &mut height, image_property.max_size);
+        Self::limit_size(&mut width, &mut height, image_configuration.max_size);
         let (horizontal_spacing, vertical_spacing) = {
-            let spacing = &image_property.margin;
-            (spacing.horizontal() as usize, spacing.vertical() as usize)
+            let spacing = &image_configuration.margin;
+            (spacing.horizontal(), spacing.vertical())
         };
 
         if width as usize + horizontal_spacing > max_size.width {
@@ -429,7 +429,7 @@ impl Draw for Image {
         let src_rect =
             skia_safe::Rect::from_xywh(0., 0., image.width() as f32, image.height() as f32);
 
-        let correct_offset: Offset<f32> = (*offset).into();
+        let correct_offset: Offset<f32> = offset.into();
         let dst_rect = skia_safe::Rect::from_xywh(
             correct_offset.x,
             correct_offset.y,
@@ -458,6 +458,80 @@ impl Draw for Image {
             &paint,
         );
         canvas.restore();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ImageData {
+    pub width: i32,
+    pub height: i32,
+    pub has_alpha: bool,
+
+    /// File descriptor containing the image data in RGB byte order.
+    ///
+    /// To avoid storing large data in RAM, the image is stored in a temporary file.
+    /// The file is automatically removed when no handles reference it.
+    pub image_file_descriptor: FileDescriptor,
+}
+
+/// The algorithm used to calculate new pixels when an image is scaled.
+///
+/// This determines the visual quality of the image when it is made
+/// larger or smaller than its original size.
+#[derive(Debug, Default, Clone)]
+pub enum ResizingMethod {
+    /// Faster but "blocky" scaling. Picks the closest pixel color
+    /// without blending. Best for pixel art.
+    Nearest,
+    /// Smoother scaling. Blends neighboring pixels together to
+    /// prevent jagged edges. Standard for photos and icons.
+    #[default]
+    Linear,
+}
+
+impl TryFromValue for ResizingMethod {
+    fn try_from_string(value: String) -> Result<Self, ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "nearest" => ResizingMethod::Nearest,
+            "linear" => ResizingMethod::Linear,
+            _ => Err(shared::error::ConversionError::InvalidValue {
+                expected: "nearest or linear",
+                actual: value,
+            })?,
+        })
+    }
+}
+
+/// The technique used for choosing between different pre-scaled
+/// versions of an image.
+///
+/// Mipmapping helps prevent "shimmering" or visual noise when an
+/// image is shrunk significantly. It tells Skia how to sample
+/// from pre-calculated lower-resolution versions of the image.
+#[derive(Debug, Default, Clone)]
+pub enum MipmapMode {
+    /// No pre-scaled versions are used; the image is scaled directly
+    /// from the original.
+    None,
+    /// Picks the single best-fitting pre-scaled version.
+    Nearest,
+    /// Blends between the two best-fitting pre-scaled versions for
+    /// the smoothest possible transition.
+    #[default]
+    Linear,
+}
+
+impl TryFromValue for MipmapMode {
+    fn try_from_string(value: String) -> Result<Self, ConversionError> {
+        Ok(match value.to_lowercase().as_str() {
+            "none" => MipmapMode::None,
+            "nearest" => MipmapMode::Nearest,
+            "linear" => MipmapMode::Linear,
+            _ => Err(shared::error::ConversionError::InvalidValue {
+                expected: "none, nearest or linear",
+                actual: value,
+            })?,
+        })
     }
 }
 

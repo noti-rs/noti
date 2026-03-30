@@ -610,6 +610,7 @@ dependencies = [
  "shared",
  "shellexpand",
  "toml",
+ "widgets",
 ]
 
 [[package]]
@@ -735,11 +736,9 @@ dependencies = [
  "async-channel",
  "async-io",
  "derive_more",
- "html-escape",
  "log",
  "shared",
  "tempfile",
- "unic-segment",
  "zbus",
 ]
 
@@ -1019,7 +1018,6 @@ name = "filetype"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "config",
  "log",
  "pest",
  "pest_derive",
@@ -2402,8 +2400,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "derive_more",
+ "html-escape",
  "inotify",
  "log",
+ "unic-segment",
 ]
 
 [[package]]
@@ -3203,8 +3203,6 @@ name = "widgets"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "config",
- "dbus",
  "derive_builder",
  "derive_more",
  "image",

@@ -1,9 +1,7 @@
-use config::display::Border;
 use log::warn;
 
 use crate::{
-    color::{Bgra, Color},
-    types::{extent::Extent2D, offset::Offset},
+    types::{border::Border, extent::Extent2D, offset::Offset, Bgra, Color},
     Draw,
 };
 
@@ -85,7 +83,6 @@ impl Drawer {
         offset: Offset<f32>,
         extent: Extent2D<f32>,
         border: &Border,
-        border_color: &Color,
     ) {
         if border.size == 0 {
             return;
@@ -124,7 +121,7 @@ impl Drawer {
         }
 
         let mut paint = skia_safe::Paint::default();
-        paint.use_color(border_color, offset, extent);
+        paint.use_color(&border.color, offset, extent);
         paint.set_anti_alias(true);
 
         path.set_fill_type(skia_safe::path::FillType::EvenOdd);

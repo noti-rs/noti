@@ -1,6 +1,10 @@
-use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+use std::{
+    f32::consts::{FRAC_PI_2, FRAC_PI_4, PI},
+    slice::ChunksExact,
+    str::Chars,
+};
 
-use config::color::{Color as CfgColor, LinearGradient as CfgLinearGradient, Rgba as CfgRgba};
+use anyhow::Context;
 use shared::value::TryFromValue;
 
 /// Represents a drawable color or paint that can be applied to widgets.
@@ -8,7 +12,7 @@ use shared::value::TryFromValue;
 /// Unlike a simple RGBA value, `Color` can represent complex paint
 /// types such as linear gradients. This allows flexible and visually
 /// rich rendering while keeping a single generic type for all widgets.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Color {
     /// A linear gradient with angle, vector, and computed color stops.
     LinearGradient(LinearGradient),
@@ -44,23 +48,13 @@ impl From<Bgra<f32>> for Color {
     }
 }
 
-impl From<CfgColor> for Color {
-    fn from(value: CfgColor) -> Self {
-        match value {
-            CfgColor::Rgba(rgba) => Bgra::from(rgba).into(),
-            CfgColor::LinearGradient(linear_gradient) => {
-                LinearGradient::from(linear_gradient).into()
-            }
-        }
-    }
-}
-
 impl Default for Color {
     fn default() -> Self {
         Color::Fill(Bgra::default())
     }
 }
 
+// TODO: implement correct algorithm of parsing the color
 impl TryFromValue for Color {}
 
 /// Describes a linear gradient, including direction and computed
@@ -69,7 +63,7 @@ impl TryFromValue for Color {}
 /// This is a fully resolved gradient — all additional parameters
 /// needed for drawing (like gradient vector and per-color segment
 /// size) are already precomputed from user configuration.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct LinearGradient {
     /// The gradient’s angle in degrees, used to determine orientation.
     pub angle: f32,
@@ -90,7 +84,7 @@ impl LinearGradient {
     /// 3π/4
     const FRAC_3_PI_4: f32 = FRAC_PI_2 + FRAC_PI_4;
 
-    pub fn new(mut angle: i16, mut colors: Vec<CfgRgba>) -> Self {
+    pub fn new(mut angle: i16, mut colors: Vec<Bgra<u8>>) -> Self {
         if angle < 0 {
             angle += ((angle / 360) + 1) * 360;
         }
@@ -126,12 +120,6 @@ impl LinearGradient {
     }
 }
 
-impl From<CfgLinearGradient> for LinearGradient {
-    fn from(value: CfgLinearGradient) -> Self {
-        LinearGradient::new(value.degree, value.colors)
-    }
-}
-
 /// Represents a color in BGRA channel order, using a generic component type.
 ///
 /// This type serves as an adapter between configuration-level RGBA
@@ -142,7 +130,7 @@ impl From<CfgLinearGradient> for LinearGradient {
 /// Cairo’s `ARgb32` format) and GPU pipelines store colors in this
 /// channel order on little-endian systems, allowing direct memory
 /// mapping without conversion overhead.
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Bgra<T>
 where
     T: Copy + Default,
@@ -159,56 +147,29 @@ impl Bgra<f32> {
     }
 }
 
-impl From<&CfgRgba> for Bgra<f32> {
-    fn from(
-        &CfgRgba {
-            red,
-            green,
-            blue,
-            alpha,
-        }: &CfgRgba,
-    ) -> Self {
-        Bgra {
-            blue: blue as f32 / 255.0,
-            green: green as f32 / 255.0,
-            red: red as f32 / 255.0,
-            alpha: alpha as f32 / 255.0,
+impl Bgra<u8> {
+    fn pre_mul_alpha(self) -> Self {
+        if self.alpha == 255 {
+            return self;
+        }
+
+        let alpha = self.alpha as f32 / 255.0;
+        Self {
+            red: (self.red as f32 * alpha) as u8,
+            green: (self.green as f32 * alpha) as u8,
+            blue: (self.blue as f32 * alpha) as u8,
+            alpha: self.alpha,
         }
     }
 }
 
-impl From<CfgRgba> for Bgra<f32> {
-    fn from(
-        CfgRgba {
-            red,
-            green,
-            blue,
-            alpha,
-        }: CfgRgba,
-    ) -> Self {
-        Bgra {
-            blue: blue as f32 / 255.0,
-            green: green as f32 / 255.0,
-            red: red as f32 / 255.0,
-            alpha: alpha as f32 / 255.0,
-        }
-    }
-}
-
-impl From<CfgRgba> for Bgra<u8> {
-    fn from(
-        CfgRgba {
-            red,
-            green,
-            blue,
-            alpha,
-        }: CfgRgba,
-    ) -> Self {
-        Bgra {
-            blue,
-            green,
-            red,
-            alpha,
+impl From<Bgra<u8>> for Bgra<f32> {
+    fn from(value: Bgra<u8>) -> Self {
+        Self {
+            blue: value.blue as f32 / 255.0,
+            green: value.green as f32 / 255.0,
+            red: value.red as f32 / 255.0,
+            alpha: value.alpha as f32 / 255.0,
         }
     }
 }
@@ -226,11 +187,68 @@ impl From<Bgra<f32>> for Bgra<u8> {
 
 impl TryFromValue for Bgra<f32> {
     fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
-        <CfgRgba as TryFrom<_>>::try_from(value.clone())
+        <Bgra<u8> as TryFrom<_>>::try_from(value.clone())
             .map(Into::into)
             .map_err(|_| shared::error::ConversionError::InvalidValue {
                 expected: "#RGB, #RRGGBB or #RRGGBBAA",
                 actual: value,
             })
+    }
+}
+
+impl TryFromValue for Bgra<u8> {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        <Self as TryFrom<_>>::try_from(value.clone()).map_err(|_| {
+            shared::error::ConversionError::InvalidValue {
+                expected: "#RGB, #RRGGBB or #RRGGBBAA",
+                actual: value,
+            }
+        })
+    }
+}
+impl TryFrom<String> for Bgra<u8> {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        const BASE: u32 = 16;
+
+        if value.len() == 4 {
+            let mut chars = value.chars();
+            chars.next(); // Skip the hashtag
+            let next_digit = |chars: &mut Chars| -> Option<u8> {
+                let digit = chars.next()?.to_digit(BASE)? as u8;
+                Some(digit * BASE as u8 + digit)
+            };
+
+            const ERR_MSG: &str = "Expected valid HEX digit";
+            Ok(Bgra {
+                red: next_digit(&mut chars).with_context(|| ERR_MSG)?,
+                green: next_digit(&mut chars).with_context(|| ERR_MSG)?,
+                blue: next_digit(&mut chars).with_context(|| ERR_MSG)?,
+                alpha: 255,
+            })
+        } else {
+            let mut data = value.as_bytes()[1..].chunks_exact(2);
+
+            fn next_slice<'a>(data: &'a mut ChunksExact<u8>) -> Result<&'a str, anyhow::Error> {
+                data.next()
+                    .with_context(|| "Expected valid pair of HEX digits")
+                    .and_then(|slice| {
+                        std::str::from_utf8(slice).with_context(|| "Failed to parse color value")
+                    })
+            }
+
+            Ok(Bgra {
+                red: u8::from_str_radix(next_slice(&mut data)?, BASE)?,
+                green: u8::from_str_radix(next_slice(&mut data)?, BASE)?,
+                blue: u8::from_str_radix(next_slice(&mut data)?, BASE)?,
+                alpha: if value[1..].len() == 8 {
+                    u8::from_str_radix(next_slice(&mut data)?, BASE)?
+                } else {
+                    255
+                },
+            }
+            .pre_mul_alpha())
+        }
     }
 }

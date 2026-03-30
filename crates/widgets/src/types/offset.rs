@@ -1,6 +1,6 @@
 use std::ops::{Add, AddAssign};
 
-use config::spacing::Spacing;
+use super::spacing::Spacing;
 
 /// A set of instructions that tells a widget where to sit on the screen.
 ///
@@ -75,6 +75,15 @@ where
     }
 }
 
+impl From<&Offset<usize>> for Offset<f32> {
+    fn from(value: &Offset<usize>) -> Self {
+        Self {
+            x: value.x as f32,
+            y: value.y as f32,
+        }
+    }
+}
+
 impl From<Offset<usize>> for Offset<f32> {
     fn from(value: Offset<usize>) -> Self {
         Self {
@@ -87,8 +96,8 @@ impl From<Offset<usize>> for Offset<f32> {
 impl From<Spacing> for Offset<usize> {
     fn from(value: Spacing) -> Self {
         Offset {
-            x: value.left() as usize,
-            y: value.top() as usize,
+            x: value.left,
+            y: value.top,
         }
     }
 }
@@ -96,8 +105,8 @@ impl From<Spacing> for Offset<usize> {
 impl From<&Spacing> for Offset<usize> {
     fn from(value: &Spacing) -> Self {
         Offset {
-            x: value.left() as usize,
-            y: value.top() as usize,
+            x: value.left,
+            y: value.top,
         }
     }
 }

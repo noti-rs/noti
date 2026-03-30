@@ -1,15 +1,12 @@
 pub mod animation;
-pub mod color;
 pub mod drawer;
 pub mod events;
 pub mod image;
 pub mod types;
 pub mod widget;
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
-use config::{display::DisplayConfig, theme::Theme};
-use dbus::notification::Notification;
 use log::warn;
 use shared::value::TryFromValue;
 
@@ -21,14 +18,68 @@ use crate::{
         Easing,
     },
     drawer::Drawer,
-    events::{Action, DispatchEvent},
-    types::direction::Direction,
-    widget::container::Container,
+    events::DispatchEvent,
+    types::{
+        data::{AssociatedData, WidgetConfig, WidgetData},
+        direction::Direction,
+        widget_id::WidgetId,
+    },
+    widget::{Container, FlexContainer, Image, Text, Unknown},
 };
 
 use types::{extent::Extent2D, offset::Offset};
 
-use widget::{flex_container::FlexContainer, image::WImage, text::WText};
+/// A metadata interface for inspecting a widget's identity and dimensions.
+///
+/// This trait acts as a standardized "Request" system. It allows the
+/// layout engine or debugging tools to query essential information
+/// from any widget variant without needing to understand that
+/// widget's specific internal logic.
+pub trait WidgetInfo {
+    /// Returns the static, pre-defined category of the widget.
+    ///
+    /// This string (e.g., "text", "flex_container") is used to differentiate
+    /// between widget classes. It serves as the foundation for the
+    /// automatic ID generation system within the [`CompileCtx`],
+    /// ensuring that even unnamed widgets can be tracked and debugged.
+    fn get_type(&self) -> &'static str;
+
+    /// Returns the current calculated width of the widget.
+    ///
+    /// This value represents the horizontal space the widget occupies
+    /// after its last compilation pass.
+    fn width(&self) -> usize;
+
+    /// Returns the current calculated height of the widget.
+    ///
+    /// This value represents the vertical space the widget occupies
+    /// after its last compilation pass.
+    fn height(&self) -> usize;
+}
+
+/// Compiles this widget and computes its final layout properties.
+///
+/// During compilation, this widget calculates its post-compilation width,
+/// height, spacing, margins, fill behavior, and other layout properties.
+/// The provided [`Extent2D`] defines the available drawing space for this
+/// widget, while the [`WidgetConfiguration`] provides shared context such as
+/// theme, fonts, and notification data.
+///
+/// # Why This Matters
+/// Widgets cannot know their final size or layout until compilation is
+/// performed. Call this method before querying [`width`], [`height`],
+/// or before drawing, to ensure the widget is placed correctly on screen.
+///
+/// # Parameters
+/// - `available_extent` – The size of the available space in which this widget may fit.
+/// - `configuration` – Shared context and configuration data for the compilation.
+pub trait Compile {
+    fn compile(
+        &mut self,
+        available_extent: Extent2D<usize>,
+        compile_ctx: &mut CompileCtx,
+    ) -> CompileState;
+}
 
 /// A minimal trait for drawing any widget onto a [`Drawer`].
 ///
@@ -58,32 +109,29 @@ pub trait Draw {
 /// layouts such as a [`FlexContainer`] holding multiple widgets.
 #[derive(Clone)]
 pub enum Widget {
-    Image(WImage),
-    Text(WText),
+    Image(Image),
+    Text(Text),
     Container(Container),
     FlexContainer(FlexContainer),
-    /// Placeholder for unsupported or unrecognized widgets; safely ignored during drawing.
-    Unknown,
+    Unknown(Unknown),
+}
+
+macro_rules! delegate {
+    ($self:ident.$method_name:ident($($tokens:tt),*)) => {
+        match $self {
+            Widget::Image(image) => image.$method_name($($tokens),*),
+            Widget::Text(text) => text.$method_name($($tokens),*),
+            Widget::Container(container) => container.$method_name($($tokens),*),
+            Widget::FlexContainer(flex_container) => flex_container.$method_name($($tokens),*),
+            Widget::Unknown(unknown) => unknown.$method_name($($tokens),*),
+        }
+    };
 }
 
 impl Widget {
     /// Check whether the widget is [`Widget::Unknown`].
     pub fn is_unknown(&self) -> bool {
-        matches!(self, Widget::Unknown)
-    }
-
-    /// Returns the type of this widget as a human-readable string.
-    ///
-    /// This is primarily intended for logging and debugging, allowing developers
-    /// to inspect which kind of widget is being processed at runtime.
-    fn get_type(&self) -> &'static str {
-        match self {
-            Widget::Image(_) => "image",
-            Widget::Text(_) => "text",
-            Widget::Container(_) => "container",
-            Widget::FlexContainer(_) => "flex container",
-            Widget::Unknown => "unknown",
-        }
+        matches!(self, Widget::Unknown(_))
     }
 
     /// Returns the size of this widget along the specified [`Direction`].
@@ -96,32 +144,6 @@ impl Widget {
         match direction {
             Direction::Horizontal => self.width(),
             Direction::Vertical => self.height(),
-        }
-    }
-
-    /// Returns the fixed, post-compiled width of this widget.
-    ///
-    /// The width value is determined during widget compilation.
-    pub fn width(&self) -> usize {
-        match self {
-            Widget::Image(image) => image.width(),
-            Widget::Text(text) => text.width(),
-            Widget::Container(container) => container.width(),
-            Widget::FlexContainer(flex_container) => flex_container.max_width(),
-            Widget::Unknown => 0,
-        }
-    }
-
-    /// Returns the fixed, post-compiled height of this widget.
-    ///
-    /// The height value is determined during widget compilation.
-    pub fn height(&self) -> usize {
-        match self {
-            Widget::Image(image) => image.height(),
-            Widget::Text(text) => text.height(),
-            Widget::Container(container) => container.height(),
-            Widget::FlexContainer(flex_container) => flex_container.max_height(),
-            Widget::Unknown => 0,
         }
     }
 
@@ -184,80 +206,58 @@ impl Widget {
     }
 }
 
+impl WidgetInfo for Widget {
+    /// Returns the type of this widget as a human-readable string.
+    ///
+    /// This is primarily intended for logging and debugging, allowing developers
+    /// to inspect which kind of widget is being processed at runtime.
+    fn get_type(&self) -> &'static str {
+        delegate!(self.get_type())
+    }
+
+    /// Returns the fixed, post-compiled width of this widget.
+    ///
+    /// The width value is determined during widget compilation.
+    fn width(&self) -> usize {
+        delegate!(self.width())
+    }
+
+    /// Returns the fixed, post-compiled height of this widget.
+    ///
+    /// The height value is determined during widget compilation.
+    fn height(&self) -> usize {
+        delegate!(self.height())
+    }
+}
+
 impl Draw for Widget {
     fn draw_with_offset(&self, offset: &Offset<usize>, output: &mut Drawer) {
-        match self {
-            Widget::Image(image) => image.draw_with_offset(offset, output),
-            Widget::Text(text) => text.draw_with_offset(offset, output),
-            Widget::Container(container) => container.draw_with_offset(offset, output),
-            Widget::FlexContainer(flex_container) => {
-                flex_container.draw_with_offset(offset, output)
-            }
-            Widget::Unknown => (),
-        }
+        delegate!(self.draw_with_offset(offset, output));
     }
 }
 
 impl DispatchEvent for Widget {
     fn dispatch_event(&self, event: events::Event) -> events::Action {
-        match self {
-            Widget::Image(wimage) => wimage.dispatch_event(event),
-            Widget::Text(wtext) => wtext.dispatch_event(event),
-            Widget::Container(container) => container.dispatch_event(event),
-            Widget::FlexContainer(flex_container) => flex_container.dispatch_event(event),
-            Widget::Unknown => Action::None,
-        }
+        delegate!(self.dispatch_event(event))
     }
 }
 
 impl TryFromValue for Widget {}
 
-/// Compiles this widget and computes its final layout properties.
-///
-/// During compilation, this widget calculates its post-compilation width,
-/// height, spacing, margins, fill behavior, and other layout properties.
-/// The provided [`Extent2D`] defines the available drawing space for this
-/// widget, while the [`WidgetConfiguration`] provides shared context such as
-/// theme, fonts, and notification data.
-///
-/// # Why This Matters
-/// Widgets cannot know their final size or layout until compilation is
-/// performed. Call this method before querying [`width`], [`height`],
-/// or before drawing, to ensure the widget is placed correctly on screen.
-///
-/// # Parameters
-/// - `available_extent` – The size of the available space in which this widget may fit.
-/// - `configuration` – Shared context and configuration data for the compilation.
-pub trait Compile {
-    fn compile(
-        &mut self,
-        available_extent: Extent2D<usize>,
-        configuration: &WidgetConfiguration,
-    ) -> CompileState;
-}
-
 impl Compile for Widget {
     fn compile(
         &mut self,
         available_extent: Extent2D<usize>,
-        configuration: &WidgetConfiguration,
+        compile_ctx: &mut CompileCtx,
     ) -> CompileState {
-        let state = match self {
-            Widget::Image(image) => image.compile(available_extent, configuration),
-            Widget::Text(text) => text.compile(available_extent, configuration),
-            Widget::Container(container) => container.compile(available_extent, configuration),
-            Widget::FlexContainer(flex_container) => {
-                flex_container.compile(available_extent, configuration)
-            }
-            Widget::Unknown => CompileState::Success,
-        };
+        let state = delegate!(self.compile(available_extent, compile_ctx));
 
         if let CompileState::Failure = &state {
             warn!(
                 "A {wtype} widget is not compiled due errors!",
                 wtype = self.get_type()
             );
-            *self = Widget::Unknown;
+            *self = Widget::Unknown(Unknown);
         }
 
         state
@@ -269,30 +269,95 @@ pub enum CompileState {
     Failure,
 }
 
-/// Provides shared context and resources for widget compilation.
+/// The shared context provided to every widget during the compilation phase.
 ///
-/// This struct bundles together data such as the current notification,
-/// theme, font collection, and display configuration, so widgets can
-/// compute their layout in a consistent way.
-///
-/// Used as input to [`Widget::compile`] and other widget compilation
-/// methods to ensure all layout decisions respect the same configuration.
-pub struct WidgetConfiguration<'a> {
-    pub notification: &'a Notification,
-    pub theme: &'a Theme,
+/// Think of this as a "Resource & Identity" packet. It carries all the
+/// information that isn't part of the widget's local state, such as
+/// shared font resources, externally associated data, and the tools
+/// needed to generate unique IDs for every element in the layout.
+pub struct CompileCtx {
+    /// A lookup table for "Out-of-Band" widget information.
+    ///
+    /// This stores `AssociatedData` (pairs of WidgetData and WidgetConfig)
+    /// indexed by `WidgetId`. It allows the layout engine to inject
+    /// specific values into a widget during compilation without needing
+    /// to modify the widget tree directly.
+    pub(crate) data_pool: HashMap<WidgetId, AssociatedData>,
+
+    /// The global registry of fonts used to calculate text shapes and sizes.
     pub font_collection: skia_safe::textlayout::FontCollection,
-    pub display_config: &'a DisplayConfig,
-    pub override_properties: bool,
+
+    /// A tracking system for automatic ID generation.
+    ///
+    /// This keeps count of how many widgets of each type (e.g., "Text", "Image")
+    /// have been processed. If a widget doesn't have a manual ID, this is
+    /// used to generate a readable, numbered name (like "text#1", "text#2"),
+    /// which is vital for debugging and layout traceability.
+    pub(crate) widget_type_counters: HashMap<String, usize>,
 }
 
-impl From<WImage> for Widget {
-    fn from(value: WImage) -> Self {
+impl CompileCtx {
+    pub fn new(font_collection: skia_safe::textlayout::FontCollection) -> Self {
+        Self {
+            data_pool: HashMap::new(),
+            widget_type_counters: HashMap::new(),
+            font_collection,
+        }
+    }
+
+    pub(crate) fn generate_new_id(&mut self, widget_type: &'static str) -> WidgetId {
+        let counter = self
+            .widget_type_counters
+            .entry(widget_type.to_string())
+            .or_default();
+
+        let id: WidgetId = format!("{widget_type}#{counter}").into();
+        *counter += 1;
+
+        id
+    }
+
+    /// Links a specific piece of data struct to a Widget ID.
+    ///
+    /// These methods are the primary way for the caller to "talk" to a
+    /// specific widget from the outside. By adding information to the
+    /// `CompileCtx` before compilation begins, you ensure that the
+    /// targeted widget can pull the correct values when it needs them.
+    pub fn assign_data<Id: Into<WidgetId>>(&mut self, widget_id: Id, data: WidgetData) {
+        self.data_pool
+            .entry(widget_id.into())
+            .and_modify(|associated_data| associated_data.data = data.clone().into())
+            .or_insert_with(|| AssociatedData {
+                data: data.into(),
+                config: None,
+            });
+    }
+
+    /// Links a specific piece of a configuration struct to a Widget ID.
+    ///
+    /// These methods are the primary way for the caller to "talk" to a
+    /// specific widget from the outside. By adding information to the
+    /// `CompileCtx` before compilation begins, you ensure that the
+    /// targeted widget can pull the correct values when it needs them.
+    pub fn assign_config<Id: Into<WidgetId>>(&mut self, widget_id: Id, config: WidgetConfig) {
+        self.data_pool
+            .entry(widget_id.into())
+            .and_modify(|associated_data| associated_data.config = config.clone().into())
+            .or_insert_with(|| AssociatedData {
+                data: None,
+                config: config.into(),
+            });
+    }
+}
+
+impl From<Image> for Widget {
+    fn from(value: Image) -> Self {
         Widget::Image(value)
     }
 }
 
-impl From<WText> for Widget {
-    fn from(value: WText) -> Self {
+impl From<Text> for Widget {
+    fn from(value: Text) -> Self {
         Widget::Text(value)
     }
 }

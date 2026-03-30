@@ -1,5 +1,5 @@
 use config::{
-    display::{AnimationDefinition, AnimationStyle, Border, DisplayConfig},
+    display::{AnimationDefinition, AnimationStyle, DisplayConfig},
     Config,
 };
 use dbus::{
@@ -13,6 +13,7 @@ use indexmap::{
 };
 use log::{debug, trace, warn};
 use shared::cached_data::CachedData;
+use skia_safe::textlayout::FontCollection;
 use std::{
     cmp::Ordering,
     collections::VecDeque,
@@ -24,17 +25,9 @@ use widgets::{
     self,
     animation::{Animated, AnimatedWidget},
     drawer::Drawer,
-    types::{
-        alignment::{Alignment, Position},
-        extent::Extent2D,
-        offset::Offset,
-    },
-    widget::{
-        flex_container::FlexContainerBuilder,
-        image::WImage,
-        text::{WText, WTextKind},
-    },
-    Compile, Draw, Widget, WidgetConfiguration,
+    types::{Alignment, Border, Extent2D, Offset, Position},
+    widget::{FlexContainerBuilder, ImageBuilder, TextBuilder},
+    Compile, CompileCtx, Draw, Widget, WidgetInfo,
 };
 
 use super::CachedLayout;
@@ -255,6 +248,11 @@ pub(super) struct Banner {
 }
 
 impl Banner {
+    const NOTIFICATION_FRAME: &str = "notification_frame";
+    const NOTIFICATION_SUMMARY: &str = "notification_summary";
+    const NOTIFICATION_BODY: &str = "notification_body";
+    const NOTIFICATION_IMAGE: &str = "notification_image";
+
     pub(super) fn new(notification: Notification) -> Self {
         debug!("Banner (id={}): Created", notification.id);
 
@@ -364,23 +362,17 @@ impl Banner {
         let display = config.display_by_app(&self.notification.app_name);
 
         let mut layout = match &display.layout {
-            config::display::Layout::Default => Self::default_layout(display),
+            config::display::Layout::Default => default_layout(),
             config::display::Layout::FromPath { path_buf } => cached_layouts
                 .get(path_buf)
                 .and_then(CachedLayout::layout)
                 .cloned()
-                .unwrap_or_else(|| Self::default_layout(display)),
+                .unwrap_or_else(default_layout),
         };
 
         layout.compile(
             extent,
-            &WidgetConfiguration {
-                display_config: display,
-                theme: config.theme_by_app(&self.notification.app_name),
-                font_collection,
-                notification: &self.notification,
-                override_properties: display.layout.is_default(),
-            },
+            &mut make_compile_context(&self.notification, config, font_collection),
         );
 
         self.is_compiled = true;
@@ -410,34 +402,151 @@ impl Banner {
         debug!("Banner (id={}): Complete draw", self.notification.id);
         DrawState::Success
     }
+}
 
-    /// Returns the default widget layout if a custom layout has not been defined.
-    fn default_layout(display_config: &DisplayConfig) -> Widget {
-        FlexContainerBuilder::default()
-            .spacing(display_config.padding)
-            .border(display_config.border.clone())
-            .direction(widgets::types::direction::Direction::Horizontal)
-            .alignment(Alignment::new(Position::Start, Position::Center))
-            .children(vec![
-                WImage::new().into(),
-                FlexContainerBuilder::default()
-                    .spacing(Default::default())
-                    .border(Border::default())
-                    .direction(widgets::types::direction::Direction::Vertical)
-                    .alignment(Alignment::new(Position::Center, Position::Center))
-                    .transparent_background(true)
-                    .children(vec![
-                        WText::new(WTextKind::Summary).into(),
-                        WText::new(WTextKind::Body).into(),
-                    ])
-                    .build()
-                    .unwrap()
-                    .into(),
-            ])
-            .build()
-            .unwrap()
-            .into()
+/// Returns the default widget layout if a custom layout has not been defined.
+fn default_layout() -> Widget {
+    FlexContainerBuilder::default()
+        .id(Banner::NOTIFICATION_FRAME)
+        .direction(widgets::types::Direction::Horizontal)
+        .alignment(Alignment::new(Position::Start, Position::Center))
+        .children(vec![
+            ImageBuilder::default()
+                .id(Banner::NOTIFICATION_IMAGE)
+                .build()
+                .unwrap()
+                .into(),
+            FlexContainerBuilder::default()
+                .spacing(Default::default())
+                .border(Border::default())
+                .direction(widgets::types::direction::Direction::Vertical)
+                .alignment(Alignment::new(Position::Center, Position::Center))
+                .children(vec![
+                    TextBuilder::default()
+                        .id(Banner::NOTIFICATION_SUMMARY)
+                        .build()
+                        .unwrap()
+                        .into(),
+                    TextBuilder::default()
+                        .id(Banner::NOTIFICATION_BODY)
+                        .build()
+                        .unwrap()
+                        .into(),
+                ])
+                .build()
+                .unwrap()
+                .into(),
+        ])
+        .build()
+        .unwrap()
+        .into()
+}
+
+fn make_compile_context(
+    notification: &Notification,
+    config: &Config,
+    font_collection: FontCollection,
+) -> CompileCtx {
+    macro_rules! make_text_config {
+        (for $kind:ident use $compile_ctx:ident, $display_config:ident, $colors:ident, $id:ident) => {
+            $compile_ctx.assign_config(
+                Banner::$id,
+                widgets::types::WidgetConfig::Text(widgets::widget::TextConfiguration {
+                    font: widgets::widget::Font {
+                        name: $display_config.$kind.font.name.clone(),
+                        size: $display_config.$kind.font_size as usize,
+                        style: $display_config.$kind.style.clone().into(),
+                    },
+                    wrap: $display_config.$kind.wrap,
+                    margin: $display_config.$kind.margin.into(),
+                    alignment: $display_config.$kind.alignment.clone().into(),
+                    line_spacing: $display_config.$kind.line_spacing as usize,
+                    color: $colors.foreground.clone().into(),
+                }),
+            );
+        };
     }
+
+    let mut compile_ctx = CompileCtx::new(font_collection);
+
+    let display_config = config.display_by_app(&notification.app_name);
+    let theme = config.theme_by_app(&notification.app_name);
+    let colors = theme.by_urgency(&notification.hints.urgency);
+
+    compile_ctx.assign_config(
+        Banner::NOTIFICATION_FRAME,
+        widgets::types::WidgetConfig::Container(widgets::widget::ContainerConfiguration {
+            background_color: colors.background.clone().into(),
+            border: Border {
+                size: display_config.border.size as usize,
+                radius: display_config.border.radius as usize,
+                color: colors.border.clone().into(),
+            },
+            spacing: display_config.padding.into(),
+            alignment: Alignment::new(Position::Start, Position::Center),
+        }),
+    );
+
+    compile_ctx.assign_config(
+        Banner::NOTIFICATION_IMAGE,
+        widgets::types::WidgetConfig::Image(display_config.image.clone().into()),
+    );
+
+    if let Some(image_data) = try_get_image_data(notification, display_config) {
+        compile_ctx.assign_data(Banner::NOTIFICATION_IMAGE, image_data);
+    }
+
+    make_text_config!(for summary use compile_ctx, display_config, colors, NOTIFICATION_SUMMARY);
+    compile_ctx.assign_data(
+        Banner::NOTIFICATION_SUMMARY,
+        widgets::types::WidgetData::Text(notification.summary.clone()),
+    );
+
+    make_text_config!(for body use compile_ctx, display_config, colors, NOTIFICATION_BODY);
+    compile_ctx.assign_data(
+        Banner::NOTIFICATION_BODY,
+        widgets::types::WidgetData::Text(notification.body.clone()),
+    );
+
+    compile_ctx
+}
+
+fn try_get_image_data(
+    notification: &Notification,
+    display_config: &DisplayConfig,
+) -> Option<widgets::types::WidgetData> {
+    notification
+        .hints
+        .image_data
+        .as_ref()
+        .cloned()
+        .map(|image_data| {
+            widgets::types::WidgetData::ImageData(widgets::image::ImageData {
+                width: image_data.width,
+                height: image_data.height,
+                has_alpha: image_data.has_alpha,
+                image_file_descriptor: image_data.image_file_descriptor.clone(),
+            })
+        })
+        .or_else(|| {
+            notification
+                .hints
+                .image_path
+                .as_deref()
+                .map(std::path::PathBuf::from)
+                .map(widgets::types::WidgetData::ImagePath)
+        })
+        .or_else(|| {
+            if notification.app_icon.is_empty() {
+                return None;
+            }
+
+            Some(widgets::types::WidgetData::Icon {
+                name: notification.app_icon.clone(),
+                theme: display_config.icons.theme.clone(),
+                sizes: display_config.icons.size.clone(),
+            })
+        })
 }
 
 impl Draw for Banner {

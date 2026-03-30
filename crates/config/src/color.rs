@@ -1,8 +1,4 @@
-use std::{slice::ChunksExact, str::Chars};
-
-use anyhow::Context;
 use serde::Deserialize;
-use shared::value::TryFromValue;
 
 use super::public;
 
@@ -41,7 +37,7 @@ impl From<LinearGradient> for Color {
 }
 
 public! {
-    #[derive(Debug, Clone, Deserialize, Default)]
+    #[derive(Debug, Clone, Copy, Deserialize, Default)]
     #[serde(try_from = "String")]
     struct Rgba {
         red: u8,
@@ -79,78 +75,13 @@ impl Rgba {
             alpha: 255,
         }
     }
-
-    fn pre_mul_alpha(self) -> Self {
-        if self.alpha == 255 {
-            return self;
-        }
-
-        let alpha = self.alpha as f32 / 255.0;
-        Self {
-            red: (self.red as f32 * alpha) as u8,
-            green: (self.green as f32 * alpha) as u8,
-            blue: (self.blue as f32 * alpha) as u8,
-            alpha: self.alpha,
-        }
-    }
 }
 
 impl TryFrom<String> for Rgba {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        const BASE: u32 = 16;
-
-        if value.len() == 4 {
-            let mut chars = value.chars();
-            chars.next(); // Skip the hashtag
-            let next_digit = |chars: &mut Chars| -> Option<u8> {
-                let digit = chars.next()?.to_digit(BASE)? as u8;
-                Some(digit * BASE as u8 + digit)
-            };
-
-            const ERR_MSG: &str = "Expected valid HEX digit";
-            Ok(Rgba {
-                red: next_digit(&mut chars).with_context(|| ERR_MSG)?,
-                green: next_digit(&mut chars).with_context(|| ERR_MSG)?,
-                blue: next_digit(&mut chars).with_context(|| ERR_MSG)?,
-                alpha: 255,
-            })
-        } else {
-            let mut data = value.as_bytes()[1..].chunks_exact(2);
-
-            fn next_slice<'a>(data: &'a mut ChunksExact<u8>) -> Result<&'a str, anyhow::Error> {
-                data.next()
-                    .with_context(|| "Expected valid pair of HEX digits")
-                    .and_then(|slice| {
-                        std::str::from_utf8(slice).with_context(|| "Failed to parse color value")
-                    })
-            }
-
-            Ok(Rgba {
-                red: u8::from_str_radix(next_slice(&mut data)?, BASE)?,
-                green: u8::from_str_radix(next_slice(&mut data)?, BASE)?,
-                blue: u8::from_str_radix(next_slice(&mut data)?, BASE)?,
-                alpha: if value[1..].len() == 8 {
-                    u8::from_str_radix(next_slice(&mut data)?, BASE)?
-                } else {
-                    255
-                },
-            }
-            .pre_mul_alpha())
-        }
-    }
-}
-
-impl TryFromValue for Rgba {
-    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
-        value
-            .clone()
-            .try_into()
-            .map_err(|_| shared::error::ConversionError::InvalidValue {
-                expected: "#RGB, #RRGGBB or #RRGGBBAA",
-                actual: value,
-            })
+        <widgets::types::Bgra<u8> as TryFrom<_>>::try_from(value).map(Into::into)
     }
 }
 
@@ -159,5 +90,84 @@ public! {
     struct LinearGradient {
         degree: i16,
         colors: Vec<Rgba>,
+    }
+}
+
+impl From<Color> for widgets::types::Color {
+    fn from(value: Color) -> Self {
+        match value {
+            Color::Rgba(rgba) => widgets::types::Bgra::from(rgba).into(),
+            Color::LinearGradient(linear_gradient) => {
+                widgets::types::LinearGradient::from(linear_gradient).into()
+            }
+        }
+    }
+}
+
+impl From<LinearGradient> for widgets::types::LinearGradient {
+    fn from(value: LinearGradient) -> Self {
+        widgets::types::LinearGradient::new(
+            value.degree,
+            value
+                .colors
+                .into_iter()
+                .map(widgets::types::Bgra::from)
+                .collect(),
+        )
+    }
+}
+
+impl From<widgets::types::Bgra<u8>> for Rgba {
+    fn from(value: widgets::types::Bgra<u8>) -> Self {
+        Self {
+            red: value.red,
+            blue: value.blue,
+            green: value.green,
+            alpha: value.alpha,
+        }
+    }
+}
+
+impl From<Rgba> for widgets::types::Bgra<u8> {
+    fn from(value: Rgba) -> Self {
+        Self {
+            red: value.red,
+            blue: value.blue,
+            green: value.green,
+            alpha: value.alpha,
+        }
+    }
+}
+
+impl From<Rgba> for widgets::types::Bgra<f32> {
+    fn from(value: Rgba) -> Self {
+        Self {
+            red: value.red as f32 / 255.0,
+            blue: value.blue as f32 / 255.0,
+            green: value.green as f32 / 255.0,
+            alpha: value.alpha as f32 / 255.0,
+        }
+    }
+}
+
+impl From<&Rgba> for widgets::types::Bgra<u8> {
+    fn from(value: &Rgba) -> Self {
+        Self {
+            red: value.red,
+            blue: value.blue,
+            green: value.green,
+            alpha: value.alpha,
+        }
+    }
+}
+
+impl From<&Rgba> for widgets::types::Bgra<f32> {
+    fn from(value: &Rgba) -> Self {
+        Self {
+            red: value.red as f32 / 255.0,
+            blue: value.blue as f32 / 255.0,
+            green: value.green as f32 / 255.0,
+            alpha: value.alpha as f32 / 255.0,
+        }
     }
 }

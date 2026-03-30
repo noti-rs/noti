@@ -4,7 +4,7 @@ use skia_safe::runtime_effect::ChildPtr;
 
 use crate::{
     animation::{Animated, Easing, ShaderBuilder, UniformValue},
-    Draw, Widget,
+    Draw, Widget, WidgetInfo,
 };
 
 /// A translation animation effect for widgets.

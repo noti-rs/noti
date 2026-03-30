@@ -1,106 +1,187 @@
-use config::display::{GBuilderImageProperty, ImageProperty};
 use linicon::IconPath;
 use log::warn;
 
 use crate::{
     drawer::Drawer,
     events::{Action, DispatchEvent, Event},
-    image::Image,
-    types::{extent::Extent2D, offset::Offset},
-    Compile,
+    image::{self, MipmapMode, ResizingMethod},
+    make_configuration,
+    types::{
+        data::{Configure, ToConfig, WidgetConfig, WidgetData},
+        extent::Extent2D,
+        offset::Offset,
+        spacing::Spacing,
+        widget_id::WidgetId,
+    },
+    Compile, WidgetInfo,
 };
 
-use crate::{CompileState, Draw, WidgetConfiguration};
+use crate::{CompileCtx, CompileState, Draw};
 
 const DEFAULT_ICON_THEME: &str = "hicolor";
 
-/// A widget that displays an image within a notification layout.
+/// A widget that handles the job of showing a picture.
 ///
-/// `WImage` abstracts away the complexity of loading and preparing an image
-/// for rendering. It can handle multiple image sources as defined by the
-/// freedesktop notification specification, including application icons,
-/// raw image data, and file paths.
+/// Think of this as a "smart picture frame." Instead of you having to
+/// figure out how to open a file or decode raw data yourself, you just
+/// give this widget the "source" and it does the hard work for you.
 ///
-/// This widget is responsible for:
-/// - Selecting the most appropriate image source during compilation.
-/// - Preparing the image for rendering (decoding and sizing).
-/// - Reporting its final size after compilation so it can be positioned
-///   correctly in the layout.
+/// You can give it a picture in three ways:
+/// 1. **ImageData**: Raw bits and pieces of a picture you already have.
+/// 2. **ImagePath**: A "map" (path) to where the picture lives on the computer.
+/// 3. **Icon**: A simple symbol or a named icon.
 ///
-/// Typically used for application icons or media previews within a
-/// notification banner.
-#[derive(macros::GenericBuilder, Clone)]
-#[gbuilder(name(GBuilderWImage), derive(Clone))]
-pub struct WImage {
-    #[gbuilder(hidden, default(Image::Unknown))]
-    content: Image,
+/// This widget's main jobs are:
+/// - Choosing the right way to load the picture you provided.
+/// - Getting the picture ready to be drawn (like unpacking it and making it the right size).
+/// - Telling the rest of the layout how much space it needs so everything stays organized.
+#[derive(macros::GenericBuilder, derive_builder::Builder, Default, Clone)]
+#[gbuilder(name(ImageGBuilder), derive(Clone))]
+pub struct Image {
+    /// An optional identifier for this widget.
+    ///
+    /// If left empty, an ID will be automatically generated during
+    /// compilation. Setting this manually allows the widget to be
+    /// targeted by external configurations and makes the widget tree
+    /// significantly easier to navigate during debugging.
+    #[builder(default, setter(into))]
+    #[gbuilder(default)]
+    id: WidgetId,
 
-    #[gbuilder(hidden, default(0))]
-    width: usize,
-    #[gbuilder(hidden, default(0))]
-    height: usize,
+    /// The source data for the image being rendered.
+    ///
+    /// Unlike other widgets, this field is strictly populated via
+    /// `WidgetData::Image` during the compilation phase. It holds the
+    /// processed pixel data or file path information required to
+    /// draw the image to the screen.
+    #[builder(private, default = image::Image::Unknown)]
+    #[gbuilder(hidden, default(image::Image::Unknown))]
+    content: image::Image,
 
-    #[gbuilder(use_gbuilder(GBuilderImageProperty), default)]
-    property: ImageProperty,
+    /// The final calculated dimensions of the widget on the screen.
+    ///
+    /// This stores the actual width and height (as `Extent2D`) the
+    /// image occupies after accounting for layout constraints,
+    /// aspect ratios, and the `max_size` limit.
+    #[builder(private, default)]
+    #[gbuilder(hidden, default)]
+    extent: Extent2D<usize>,
+
+    /// The maximum allowable dimension for the image in any one direction.
+    ///
+    /// This ensures the image stays within a specific boundary. If the
+    /// available space is a square, both sides are capped at this value.
+    /// In rectangular spaces, the larger side is reduced to `max_size`,
+    /// and the other side is scaled down proportionally to maintain
+    /// the image's original aspect ratio.
+    #[builder(setter(strip_option), default)]
+    max_size: Option<u16>,
+
+    /// The corner radius applied to the image's edges.
+    ///
+    /// This allows you to create rounded corners for the picture. Since
+    /// images handle their own clipping independently of the standard
+    /// `Border` struct, this field defines how much to "curve" the
+    /// rectangular boundary of the image.
+    #[builder(setter(strip_option), default)]
+    rounding: Option<u16>,
+
+    /// The internal spacing between the widget's boundary box and its actual content.
+    ///
+    /// This field defines a buffer zone (Top, Right, Bottom, Left) that
+    /// effectively shrinks the available area for the widget's content
+    /// without changing the widget's outer dimensions. It ensures
+    /// content does not touch the edges of its container.
+    #[builder(setter(strip_option), default)]
+    margin: Option<Spacing>,
+
+    /// The mathematical approach used to scale the image up or down.
+    ///
+    /// This determines how "smooth" or "sharp" the image looks when its
+    /// final size doesn't match its original pixel dimensions. By default,
+    /// it uses a linear approach to prevent jagged edges, but can be
+    /// set to a simpler method for performance or specific aesthetic
+    /// styles (like pixel art).
+    #[builder(setter(strip_option), default)]
+    resizing_method: Option<ResizingMethod>,
+
+    /// The strategy for using pre-calculated, lower-resolution versions
+    /// of the image.
+    ///
+    /// When an image is significantly shrunk, "shimmering" or visual noise
+    /// can occur. This field tells the engine how to sample from these
+    /// pre-scaled versions (mipmaps) to ensure the image remains clean
+    /// and stable even at very small sizes.
+    #[builder(setter(strip_option), default)]
+    mipmap_mode: Option<MipmapMode>,
 }
 
-impl WImage {
+make_configuration! {
+    /// A targeted configuration set used to override or provide specific
+    /// parameters for an Image widget based on its unique identifier.
+    ///
+    /// This struct facilitates the fine-tuning of image-specific rendering
+    /// and layout properties (like resizing methods or max dimensions)
+    /// from outside the main widget tree. It is particularly useful for
+    /// applying data-driven changes to specific images during the final
+    /// layout pass without needing to manually find and update the widget node.
+    #[derive(Debug, Clone)]
+    pub struct ImageConfiguration {
+        pub max_size: u16,
+        pub rounding: u16,
+        pub margin: Spacing,
+        pub resizing_method: ResizingMethod,
+        pub mipmap_mode: MipmapMode,
+    } <<= Image
+}
+
+impl Image {
     pub fn new() -> Self {
         Self {
-            content: Image::Unknown,
-            width: 0,
-            height: 0,
-            property: Default::default(),
+            content: image::Image::Unknown,
+            ..Default::default()
         }
     }
+}
 
-    /// Returns the width of the compiled image.
+impl WidgetInfo for Image {
+    fn get_type(&self) -> &'static str {
+        "image"
+    }
+
+    /// Returns the width of the image widget.
     ///
     /// This value is only meaningful after [`Self::compile`] has been called.
     /// If the widget has not been compiled yet, this will typically return
     /// an undefined or default value.
-    pub fn width(&self) -> usize {
-        self.width
+    fn width(&self) -> usize {
+        self.extent.width
     }
 
-    /// Returns the height of the compiled image.
+    /// Returns the height of the image widget.
     ///
     /// Like [`Self::width`], this is only meaningful after [`Self::compile`] has been
     /// successfully called.
-    pub fn height(&self) -> usize {
-        self.height
+    fn height(&self) -> usize {
+        self.extent.height
     }
 }
 
-impl Default for WImage {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Compile for WImage {
-    /// Compiles the image widget by selecting and preparing the image to display.
+impl Compile for Image {
+    /// Prepares the image for rendering by resolving its data and calculating
+    /// the final layout dimensions.
     ///
-    /// This method chooses the most appropriate image source (icon, raw data,
-    /// or file path) based on the notification data and the freedesktop
-    /// specification. After selection, it decodes the image and determines
-    /// whether it can fit in the available space defined by [`Extent2D`].
+    /// This method attempts to retrieve image data from the provided [`CompileCtx`].
+    /// Once the image is obtained, the widget calculates the optimal scale
+    /// to fit within the provided [`Extent2D`] boundary, ensuring that
+    /// `max_size` and aspect ratio constraints are respected.
     ///
-    /// # Returns
-    /// Returns [`CompileState::Success`] if the image was successfully compiled.
-    /// If the image cannot fit into the given space, [`CompileState::Failure`] is returned,
-    /// allowing the caller to handle the case gracefully (e.g. omit the image).
-    ///
-    /// Call this before drawing or querying [`width`] and [`height`].
+    /// This must be called before attempting to draw the widget or querying its
+    /// final width and height.
     fn compile(
         &mut self,
         available_extent: Extent2D<usize>,
-        WidgetConfiguration {
-            notification,
-            display_config,
-            override_properties,
-            ..
-        }: &WidgetConfiguration,
+        compile_ctx: &mut CompileCtx,
     ) -> CompileState {
         /// Look's up nearest freedesktop icons.
         fn lookup_freedesktop_icon(icon_name: &str, theme: &str, size: u16) -> Option<IconPath> {
@@ -111,70 +192,75 @@ impl Compile for WImage {
                 .and_then(|icon| icon.ok())
         }
 
-        if *override_properties {
-            self.property = display_config.image.clone();
+        if self.id.is_empty() {
+            self.id = compile_ctx.generate_new_id(self.get_type());
         }
 
-        self.content = notification
-            .hints
-            .image_data
-            .as_ref()
-            .cloned()
-            .map(|image_data| Image::from_image_data(image_data, &self.property, &available_extent))
-            .or_else(|| {
-                notification
-                    .hints
-                    .image_path
-                    .as_deref()
-                    .map(std::path::Path::new)
-                    .map(|svg_path| Image::from_svg(svg_path, &self.property, &available_extent))
-            })
-            .or_else(|| {
-                if notification.app_icon.is_empty() {
-                    return None;
-                }
+        let Some(associated_data) = compile_ctx.data_pool.get(&self.id) else {
+            return CompileState::Failure;
+        };
 
-                display_config
-                    .icons
-                    .size
-                    .iter()
+        if let Some(WidgetConfig::Image(image_config)) = &associated_data.config {
+            self.configure(image_config.clone());
+        }
+
+        let Some(widget_data) = &associated_data.data else {
+            return CompileState::Failure;
+        };
+
+        let image_configuration = self.to_config();
+        self.content = match widget_data {
+            WidgetData::ImageData(image_data) => {
+                image::Image::from_image_data(image_data, &image_configuration, &available_extent)
+            }
+            WidgetData::ImagePath(image_path) => {
+                image::Image::from_path(image_path, &image_configuration, &available_extent)
+            }
+            WidgetData::Icon { name, theme, sizes } => {
+                let mut sizes = sizes.clone();
+                sizes.sort();
+                sizes
+                    .into_iter()
+                    .rev()
                     .find_map(|size| {
-                        lookup_freedesktop_icon(
-                            &notification.app_icon,
-                            &display_config.icons.theme,
-                            *size,
-                        )
-                        .or_else(|| {
-                            lookup_freedesktop_icon(
-                                &notification.app_icon,
-                                DEFAULT_ICON_THEME,
-                                *size,
-                            )
-                        })
+                        lookup_freedesktop_icon(name, theme, size)
+                            .or_else(|| lookup_freedesktop_icon(name, DEFAULT_ICON_THEME, size))
                     })
                     .map(|icon_path| {
-                        Image::from_path(&icon_path.path, &self.property, &available_extent)
+                        image::Image::from_path(
+                            &icon_path.path,
+                            &image_configuration,
+                            &available_extent,
+                        )
                     })
-            })
-            .unwrap_or(Image::Unknown);
+                    .unwrap_or(image::Image::Unknown)
+            }
+            _ => return CompileState::Failure,
+        };
 
-        self.width = self
+        let margin = self.margin.unwrap_or_default();
+        self.extent.width = self
             .content
             .width()
-            .map(|width| width + self.property.margin.horizontal() as usize)
+            .map(|width| width + margin.horizontal())
             .unwrap_or(0);
-        self.height = self
+        self.extent.height = self
             .content
             .height()
-            .map(|height| height + self.property.margin.vertical() as usize)
+            .map(|height| height + margin.vertical())
             .unwrap_or(0);
 
-        if self.width > available_extent.width || self.height > available_extent.height {
+        if self.extent.width > available_extent.width
+            || self.extent.height > available_extent.height
+        {
             warn!(
                 "The image doesn't fit to available space.\
                 \nThe image size: width={}, height={}.\
                 \nAvailable space: width={}, height={}.",
-                self.width, self.height, available_extent.width, available_extent.height
+                self.extent.width,
+                self.extent.height,
+                available_extent.width,
+                available_extent.height
             );
             return CompileState::Failure;
         }
@@ -187,18 +273,18 @@ impl Compile for WImage {
     }
 }
 
-impl Draw for WImage {
+impl Draw for Image {
     fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer) {
         if !self.content.is_exists() {
             return;
         }
 
-        let offset = Offset::from(&self.property.margin) + *offset;
+        let offset = Offset::from(&self.margin.unwrap_or_default()) + *offset;
         self.content.draw_with_offset(&offset, drawer)
     }
 }
 
-impl DispatchEvent for WImage {
+impl DispatchEvent for Image {
     fn dispatch_event(&self, _event: Event) -> Action {
         Action::None
     }

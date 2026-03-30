@@ -2,7 +2,7 @@ use skia_safe::runtime_effect::ChildPtr;
 use std::{collections::HashMap, time::Duration};
 
 use super::{Animated, ShaderBuilder, UniformValue};
-use crate::{animation::Easing, Draw, Widget};
+use crate::{animation::Easing, Draw, Widget, WidgetInfo};
 
 pub trait PopDirection {
     fn percentage(elapsed_ns: u64, duration: Duration) -> f32;

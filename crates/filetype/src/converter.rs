@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 
 use anyhow::bail;
-use config::{
-    display::{Border, GBuilderBorder},
-    spacing::{GBuilderSpacing, Spacing},
-};
 use log::warn;
 use pest::iterators::{Pair, Pairs};
 use shared::{
@@ -12,10 +8,8 @@ use shared::{
     value::{TryDowncast, Value},
 };
 use widgets::{
-    types::alignment::{Alignment, GBuilderAlignment},
-    widget::flex_container::GBuilderFlexContainer,
-    widget::image::GBuilderWImage,
-    widget::text::GBuilderWText,
+    types::{Alignment, AlignmentGBuilder, Border, BorderGBuilder, Spacing, SpacingGBuilder},
+    widget::{FlexContainerGBuilder, ImageGBuilder, TextGBuilder},
     Widget,
 };
 
@@ -253,13 +247,13 @@ fn convert_type_value<'a>(
 
 #[derive(Clone)]
 enum GBuilder {
-    FlexContainer(GBuilderFlexContainer),
-    WImage(GBuilderWImage),
-    WText(GBuilderWText),
+    FlexContainer(FlexContainerGBuilder),
+    WImage(ImageGBuilder),
+    WText(TextGBuilder),
 
-    Spacing(GBuilderSpacing),
-    Alignment(GBuilderAlignment),
-    Border(GBuilderBorder),
+    Spacing(SpacingGBuilder),
+    Alignment(AlignmentGBuilder),
+    Border(BorderGBuilder),
 }
 
 impl GBuilder {
@@ -342,12 +336,12 @@ impl TryFrom<(&str, &HashMap<&str, GBuilder>)> for GBuilder {
         (identifier, alias_storage): (&str, &HashMap<&str, GBuilder>),
     ) -> Result<Self, Self::Error> {
         Ok(match identifier {
-            "FlexContainer" => GBuilder::FlexContainer(GBuilderFlexContainer::new()),
-            "Image" => GBuilder::WImage(GBuilderWImage::new()),
-            "Text" => GBuilder::WText(GBuilderWText::new()),
-            "Spacing" => GBuilder::Spacing(GBuilderSpacing::new()),
-            "Alignment" => GBuilder::Alignment(GBuilderAlignment::new()),
-            "Border" => GBuilder::Border(GBuilderBorder::new()),
+            "FlexContainer" => GBuilder::FlexContainer(FlexContainerGBuilder::new()),
+            "Image" => GBuilder::WImage(ImageGBuilder::new()),
+            "Text" => GBuilder::WText(TextGBuilder::new()),
+            "Spacing" => GBuilder::Spacing(SpacingGBuilder::new()),
+            "Alignment" => GBuilder::Alignment(AlignmentGBuilder::new()),
+            "Border" => GBuilder::Border(BorderGBuilder::new()),
             other => {
                 if let Some(aliased_gbuilder) = alias_storage.get(other).cloned() {
                     aliased_gbuilder

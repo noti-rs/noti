@@ -1,6 +1,6 @@
 use std::ops::{Add, AddAssign, Mul};
 
-use config::spacing::Spacing;
+use super::spacing::Spacing;
 
 /// A simple way to describe the **size** of a flat area.
 ///
@@ -62,12 +62,8 @@ where
 
 impl Extent2D<usize> {
     pub fn shrink_by(&mut self, spacing: &Spacing) {
-        self.width = self
-            .width
-            .saturating_sub((spacing.left() + spacing.right()) as usize);
-        self.height = self
-            .height
-            .saturating_sub((spacing.top() + spacing.bottom()) as usize);
+        self.width = self.width.saturating_sub(spacing.horizontal());
+        self.height = self.height.saturating_sub(spacing.vertical());
     }
 }
 

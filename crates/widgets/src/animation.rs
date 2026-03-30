@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use config::display::EasingType;
 use skia_safe::runtime_effect::ChildPtr;
 
 use crate::{
@@ -125,15 +124,15 @@ impl Easing {
     }
 }
 
-impl From<EasingType> for Easing {
-    fn from(value: EasingType) -> Self {
-        match value {
-            EasingType::Linear => Easing::Linear,
-            EasingType::EaseOut => Easing::EaseOut,
-            EasingType::EaseInOut => Easing::EaseInOut,
-        }
-    }
-}
+// impl From<EasingType> for Easing {
+//     fn from(value: EasingType) -> Self {
+//         match value {
+//             EasingType::Linear => Easing::Linear,
+//             EasingType::EaseOut => Easing::EaseOut,
+//             EasingType::EaseInOut => Easing::EaseInOut,
+//         }
+//     }
+// }
 
 struct ShaderBuilder {
     effect: skia_safe::RuntimeEffect,

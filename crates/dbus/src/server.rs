@@ -1,8 +1,9 @@
 use super::{
     actions::{Action, ClosingReason, Signal},
     notification::{Hints, Notification, NotificationAction, Timeout},
-    text::Text,
 };
+
+use shared::text::Text;
 
 use std::{
     collections::HashMap,
@@ -106,7 +107,7 @@ impl Handler {
             id,
             app_name,
             app_icon,
-            summary,
+            summary: Text::parse(summary),
             body,
             hints,
             actions,

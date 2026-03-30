@@ -3,7 +3,6 @@ use std::{collections::HashMap, marker::PhantomData, path::PathBuf, time::Durati
 use dbus::notification::Urgency;
 use macros::{ConfigProperty, GenericBuilder};
 use serde::{de::Visitor, Deserialize};
-use shared::{error::ConversionError, value::TryFromValue};
 
 use crate::{
     public,
@@ -220,6 +219,16 @@ pub enum EasingType {
     EaseInOut,
 }
 
+impl From<EasingType> for widgets::animation::Easing {
+    fn from(value: EasingType) -> Self {
+        match value {
+            EasingType::Linear => widgets::animation::Easing::Linear,
+            EasingType::EaseOut => widgets::animation::Easing::EaseOut,
+            EasingType::EaseInOut => widgets::animation::Easing::EaseInOut,
+        }
+    }
+}
+
 public! {
     #[derive(ConfigProperty, Debug)]
     #[cfg_prop(name(IconInfoProperty), derive(Debug, Deserialize, Clone, Default))]
@@ -233,24 +242,18 @@ public! {
 }
 
 public! {
-    #[derive(ConfigProperty, GenericBuilder, Debug, Clone)]
+    #[derive(ConfigProperty, Debug, Clone)]
     #[cfg_prop(name(TomlImageProperty), derive(Debug, Clone, Default, Deserialize))]
-    #[gbuilder(name(GBuilderImageProperty), derive(Clone))]
     struct ImageProperty {
         #[cfg_prop(default(64))]
-        #[gbuilder(default(64))]
         max_size: u16,
 
         #[cfg_prop(default(0))]
-        #[gbuilder(default(0))]
         rounding: u16,
 
-        #[gbuilder(default)]
         margin: Spacing,
 
-        #[gbuilder(default)]
         resizing_method: ResizingMethod,
-        #[gbuilder(default)]
         mipmap_mode: MipmapMode,
     }
 }
@@ -261,7 +264,17 @@ impl Default for ImageProperty {
     }
 }
 
-impl TryFromValue for ImageProperty {}
+impl From<ImageProperty> for widgets::widget::ImageConfiguration {
+    fn from(value: ImageProperty) -> Self {
+        Self {
+            max_size: value.max_size,
+            rounding: value.rounding,
+            margin: value.margin.into(),
+            resizing_method: value.resizing_method.into(),
+            mipmap_mode: value.mipmap_mode.into(),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub enum ResizingMethod {
@@ -272,16 +285,12 @@ pub enum ResizingMethod {
     Linear,
 }
 
-impl TryFromValue for ResizingMethod {
-    fn try_from_string(value: String) -> Result<Self, ConversionError> {
-        Ok(match value.to_lowercase().as_str() {
-            "nearest" => ResizingMethod::Nearest,
-            "linear" => ResizingMethod::Linear,
-            _ => Err(shared::error::ConversionError::InvalidValue {
-                expected: "nearest or linear",
-                actual: value,
-            })?,
-        })
+impl From<ResizingMethod> for widgets::image::ResizingMethod {
+    fn from(value: ResizingMethod) -> Self {
+        match value {
+            ResizingMethod::Nearest => widgets::image::ResizingMethod::Nearest,
+            ResizingMethod::Linear => widgets::image::ResizingMethod::Linear,
+        }
     }
 }
 
@@ -296,17 +305,13 @@ pub enum MipmapMode {
     Linear,
 }
 
-impl TryFromValue for MipmapMode {
-    fn try_from_string(value: String) -> Result<Self, ConversionError> {
-        Ok(match value.to_lowercase().as_str() {
-            "none" => MipmapMode::None,
-            "nearest" => MipmapMode::Nearest,
-            "linear" => MipmapMode::Linear,
-            _ => Err(shared::error::ConversionError::InvalidValue {
-                expected: "none, nearest or linear",
-                actual: value,
-            })?,
-        })
+impl From<MipmapMode> for widgets::image::MipmapMode {
+    fn from(value: MipmapMode) -> Self {
+        match value {
+            MipmapMode::None => widgets::image::MipmapMode::None,
+            MipmapMode::Nearest => widgets::image::MipmapMode::Nearest,
+            MipmapMode::Linear => widgets::image::MipmapMode::Linear,
+        }
     }
 }
 
@@ -324,8 +329,6 @@ public! {
         radius: u32,
     }
 }
-
-impl TryFromValue for Border {}
 
 #[derive(Debug, Default, Clone)]
 pub struct Timeout {
