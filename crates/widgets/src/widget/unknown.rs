@@ -1,6 +1,7 @@
 use crate::{
     events::{Action, DispatchEvent},
-    Compile, CompileState, Draw, WidgetInfo,
+    types::{constraints::Constraints, Extent2D},
+    Compile, CompileResult, Draw, WidgetInfo,
 };
 
 /// A zero-sized, "no-op" widget used as a structural placeholder.
@@ -42,6 +43,15 @@ impl WidgetInfo for Unknown {
     fn height(&self) -> usize {
         0
     }
+
+    /// Always returns [`SizingMode::Fixed`] value.
+    ///
+    /// For the purposes of layout math (like sums in a `FlexContainer`),
+    /// this widget contributes nothing to the total dimensions,
+    /// effectively making it invisible to its parent containers.
+    fn sizing_mode(&self) -> crate::types::constraints::SizingMode {
+        crate::types::constraints::SizingMode::Fixed
+    }
 }
 
 impl Compile for Unknown {
@@ -53,10 +63,12 @@ impl Compile for Unknown {
     /// stable and unaffected.
     fn compile(
         &mut self,
-        _available_extent: crate::types::extent::Extent2D<usize>,
+        _constraints: Constraints<f32>,
         _compile_ctx: &mut crate::CompileCtx,
-    ) -> crate::CompileState {
-        CompileState::Success
+    ) -> crate::CompileResult {
+        CompileResult::Success {
+            used_extent: Extent2D::new(0., 0.),
+        }
     }
 }
 

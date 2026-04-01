@@ -7,6 +7,7 @@ use crate::{
     types::{
         alignment::Alignment,
         border::{Border, BorderGBuilder},
+        constraints::{Constraints, SizingMode},
         data::{Configure, ToConfig, WidgetConfig},
         extent::Extent2D,
         offset::Offset,
@@ -15,7 +16,7 @@ use crate::{
         Color,
     },
     widget::{flex_container::FlexContainer, unknown::Unknown},
-    Compile, CompileCtx, CompileState, Draw, Widget, WidgetInfo,
+    Compile, CompileCtx, CompileResult, Draw, Widget, WidgetInfo,
 };
 
 /// A simple box that stays the same size.
@@ -170,6 +171,10 @@ impl WidgetInfo for Container {
     fn height(&self) -> usize {
         self.height
     }
+
+    fn sizing_mode(&self) -> SizingMode {
+        SizingMode::Fixed
+    }
 }
 
 impl Compile for Container {
@@ -192,15 +197,15 @@ impl Compile for Container {
     ///    surrounding layout does not collapse or shift unexpectedly.
     fn compile(
         &mut self,
-        available_extent: Extent2D<usize>,
+        constraints: Constraints<f32>,
         compile_ctx: &mut CompileCtx,
-    ) -> CompileState {
-        if self.width > available_extent.width
-            || self.height > available_extent.height
+    ) -> CompileResult {
+        if self.width as f32 > constraints.max.width
+            || self.height as f32 > constraints.max.height
             || self.width == 0
             || self.height == 0
         {
-            return CompileState::Failure;
+            return CompileResult::Failure;
         }
 
         if self.id.is_empty() {
@@ -217,14 +222,20 @@ impl Compile for Container {
 
         let mut restricted_extent = Extent2D::new(self.width, self.height);
         restricted_extent.shrink_by(&self.inner_spacing());
+        let constraints_for_child = Constraints::new_soft(
+            restricted_extent.width as f32,
+            restricted_extent.height as f32,
+        );
 
-        self.child.compile(restricted_extent, compile_ctx);
+        self.child.compile(constraints_for_child, compile_ctx);
 
         if self.child.is_unknown() {
             warn!("{} container is empty because there is missing child widget or it doesn't fits to available space.", self.id);
         }
 
-        CompileState::Success
+        CompileResult::Success {
+            used_extent: Extent2D::new(self.width as f32, self.height as f32),
+        }
     }
 }
 

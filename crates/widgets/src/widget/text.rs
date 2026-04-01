@@ -9,6 +9,7 @@ use crate::{
     events::{Action, DispatchEvent, Event},
     make_configuration,
     types::{
+        constraints::{Constraints, SizingMode},
         data::{Configure, ToConfig, WidgetConfig, WidgetData},
         extent::Extent2D,
         offset::Offset,
@@ -16,7 +17,7 @@ use crate::{
         widget_id::WidgetId,
         Color,
     },
-    Compile, CompileCtx, CompileState, Draw, WidgetInfo,
+    Compile, CompileCtx, CompileResult, Draw, WidgetInfo,
 };
 
 /// A text widget that manages layout, styling, and rendering of text
@@ -367,6 +368,10 @@ impl WidgetInfo for Text {
             .map(|para| para.height() + self.margin.unwrap_or_default().vertical() as f32)
             .unwrap_or(0.) as usize
     }
+
+    fn sizing_mode(&self) -> SizingMode {
+        SizingMode::Dynamic
+    }
 }
 
 impl Compile for Text {
@@ -378,9 +383,9 @@ impl Compile for Text {
     /// and ID-linked configurations.
     fn compile(
         &mut self,
-        mut available_extent: Extent2D<usize>,
+        constraints: Constraints<f32>,
         compile_ctx: &mut CompileCtx,
-    ) -> CompileState {
+    ) -> CompileResult {
         if self.id.is_empty() {
             self.id = compile_ctx.generate_new_id(self.get_type());
         }
@@ -401,9 +406,13 @@ impl Compile for Text {
 
         if self.content.body.as_str().trim().is_empty() {
             warn!("The text is blank");
-            return CompileState::Failure;
+            return CompileResult::Failure;
         }
 
+        let mut available_extent = Extent2D::new(
+            constraints.max.width.round() as usize,
+            constraints.max.height.round() as usize,
+        );
         available_extent.shrink_by(&self.margin.unwrap_or_default());
 
         let font = self.font.clone().unwrap_or_default();
@@ -431,14 +440,21 @@ impl Compile for Text {
                 Available space: width={}, height={}.",
                         available_extent.width, available_extent.height
                     );
-                    return CompileState::Failure;
+                    return CompileResult::Failure;
                 }
             }
         }
 
-        self.extent = available_extent;
+        let used_extent = Extent2D::new(
+            constraints.max.width.round(),
+            paragraph.height() + self.margin.unwrap_or_default().vertical() as f32,
+        );
+        self.extent = used_extent.into();
         self.paragraph = Some(paragraph);
-        CompileState::Success
+
+        CompileResult::Success {
+            used_extent: self.extent.into(),
+        }
     }
 }
 

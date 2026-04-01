@@ -20,6 +20,7 @@
 pub mod alignment;
 pub mod border;
 pub mod color;
+pub mod constraints;
 pub mod data;
 pub mod direction;
 pub mod extent;

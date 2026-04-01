@@ -1,3 +1,5 @@
+use std::ops::{Add, AddAssign, Sub, SubAssign};
+
 use log::warn;
 
 use crate::{
@@ -6,6 +8,7 @@ use crate::{
     types::{
         alignment::{Alignment, Position},
         border::{Border, BorderGBuilder},
+        constraints::{Constraints, SizingMode},
         data::{Configure, WidgetConfig},
         direction::Direction,
         extent::Extent2D,
@@ -14,7 +17,7 @@ use crate::{
         widget_id::WidgetId,
         Color,
     },
-    Compile, CompileCtx, CompileState, Draw, Widget, WidgetInfo,
+    Compile, CompileCtx, CompileResult, Draw, Widget, WidgetInfo,
 };
 
 /// A container widget that arranges its child widgets along a single
@@ -53,39 +56,9 @@ pub struct FlexContainer {
     #[gbuilder(hidden, default(None))]
     extent: Option<Extent2D<usize>>,
 
-    /// An upper boundary used to cap the container's expansion.
-    ///
-    /// The container's final size is determined by comparing the available
-    /// space provided during compilation against this limit. The widget
-    /// will attempt to fill the available space, but it will never expand
-    /// beyond this value.
-    ///
-    /// **Logic:**
-    /// - If `available_space` < `max_limit`, the widget takes the available space.
-    /// - If `available_space` > `max_limit`, the widget restricts itself to the limit.
-    ///
-    /// This is particularly useful for ensuring that a flexible layout doesn't
-    /// become unreadably wide or tall on large displays.
-    #[builder(default = "usize::MAX")]
-    #[gbuilder(default(usize::MAX))]
-    max_width: usize,
-
-    /// An upper boundary used to cap the container's expansion.
-    ///
-    /// The container's final size is determined by comparing the available
-    /// space provided during compilation against this limit. The widget
-    /// will attempt to fill the available space, but it will never expand
-    /// beyond this value.
-    ///
-    /// **Logic:**
-    /// - If `available_space` < `max_limit`, the widget takes the available space.
-    /// - If `available_space` > `max_limit`, the widget restricts itself to the limit.
-    ///
-    /// This is particularly useful for ensuring that a flexible layout doesn't
-    /// become unreadably wide or tall on large displays.
-    #[builder(default = "usize::MAX")]
-    #[gbuilder(default(usize::MAX))]
-    max_height: usize,
+    #[builder(default = false)]
+    #[gbuilder(default(false))]
+    expand: bool,
 
     /// The fill color or gradient applied to the entire area of the container.
     ///
@@ -256,13 +229,15 @@ impl FlexContainer {
     /// pre-loaded with the current inner spacing and extents, enabling
     /// the layout engine to map generic "offsets" to actual screen
     /// coordinates regardless of whether the container is a row or a column.
-    fn get_plane(&self) -> FCPlane {
-        let Some(mut extent) = self.extent.as_ref().cloned() else {
-            panic!(
-                "The rectangle size must be computed by `compile()` method of parent container!"
-            );
-        };
-
+    fn get_plane<T>(&self, mut extent: Extent2D<T>) -> FCPlane<T>
+    where
+        T: Default
+            + Copy
+            + Add<Output = T>
+            + Sub<Output = T>
+            + num_traits::FromPrimitive
+            + std::cmp::PartialOrd,
+    {
         let inner_spacing = self.inner_spacing();
         extent.shrink_by(&inner_spacing);
 
@@ -277,6 +252,12 @@ impl FlexContainer {
     /// These values are only calculated for the main axis, as cross-axis
     /// positioning is handled independently.
     fn get_start_and_incrementor(&self, restricted_extent: usize) -> (usize, usize) {
+        // INFO: if flex container is not expands, then arrange children consecutively without
+        // gaps.
+        if !self.expand {
+            return (0, 0);
+        }
+
         let start = self
             .main_axis_alignment()
             .get_start(restricted_extent, self.main_inner_extent());
@@ -323,6 +304,10 @@ impl WidgetInfo for FlexContainer {
             .map(|extent| extent.height)
             .unwrap_or_default()
     }
+
+    fn sizing_mode(&self) -> SizingMode {
+        SizingMode::Dynamic
+    }
 }
 
 impl Compile for FlexContainer {
@@ -342,9 +327,9 @@ impl Compile for FlexContainer {
     /// unavailable until compilation is complete.
     fn compile(
         &mut self,
-        mut available_extent: Extent2D<usize>,
+        constraints: Constraints<f32>,
         compile_ctx: &mut CompileCtx,
-    ) -> CompileState {
+    ) -> CompileResult {
         if self.id.is_empty() {
             self.id = compile_ctx.generate_new_id(self.get_type());
         }
@@ -357,23 +342,49 @@ impl Compile for FlexContainer {
             self.configure(container_config.clone());
         }
 
-        available_extent = Extent2D {
-            width: self.max_width.min(available_extent.width),
-            height: self.max_height.min(available_extent.height),
-        };
-        self.extent = Some(available_extent);
+        let available_space = Extent2D::new(constraints.max.width, constraints.max.height);
+        let mut plane = self.get_plane(available_space);
 
-        let mut plane = self.get_plane();
+        self.children
+            .iter_mut()
+            .filter(|widget| widget.sizing_mode().is_fixed())
+            .for_each(|child| {
+                let constraints_for_child = Constraints::from_extent_soft(plane.as_extent());
+                match child.compile(constraints_for_child, compile_ctx) {
+                    CompileResult::Success { used_extent } => {
+                        plane.cut_front(used_extent.by_direction(&self.direction));
+                    }
+                    CompileResult::Failure => {
+                        warn!("Widget failed to compile in {}.", self.id);
+                    }
+                }
+            });
 
-        self.children.iter_mut().for_each(|child| {
-            child.compile(plane.as_extent(), compile_ctx);
+        let mut total_dynamic_childs = self
+            .children
+            .iter()
+            .filter(|child| !child.sizing_mode().is_fixed())
+            .count();
 
-            plane.saturating_cut_front(child.len_by_direction(&self.direction));
+        self.children
+            .iter_mut()
+            .filter(|widget| !widget.sizing_mode().is_fixed())
+            .for_each(|child| {
+                let fair_share = plane.main.extent / total_dynamic_childs as f32;
+                let fair_extent =
+                    Extent2D::new_from_direction(fair_share, plane.cross.extent, &self.direction);
+                let constraints_for_child = Constraints::from_extent_soft(fair_extent);
 
-            if child.is_unknown() {
-                warn!("Widget failed to compile in {}.", self.id);
-            }
-        });
+                match child.compile(constraints_for_child, compile_ctx) {
+                    CompileResult::Success { used_extent } => {
+                        plane.cut_front(used_extent.by_direction(&self.direction));
+                        total_dynamic_childs -= 1;
+                    }
+                    CompileResult::Failure => {
+                        warn!("Widget failed to compile in {}.", self.id);
+                    }
+                }
+            });
 
         if self.children.iter().all(|child| child.is_unknown()) {
             warn!(
@@ -381,7 +392,26 @@ impl Compile for FlexContainer {
             );
         }
 
-        CompileState::Success
+        let used_extent = if self.expand {
+            Extent2D::new(constraints.max.width, constraints.max.height).into()
+        } else {
+            let inner_spacing = self.inner_spacing();
+            Extent2D::new(
+                std::cmp::max(
+                    inner_spacing.horizontal() + self.inner_width(),
+                    constraints.min.width as usize,
+                ),
+                std::cmp::max(
+                    inner_spacing.vertical() + self.inner_height(),
+                    constraints.min.height as usize,
+                ),
+            )
+        };
+        self.extent = Some(used_extent);
+
+        CompileResult::Success {
+            used_extent: used_extent.into(),
+        }
     }
 }
 
@@ -402,7 +432,7 @@ impl Draw for FlexContainer {
             drawer.fill_background(offset.into(), extent.into(), &border, &background_color);
         }
 
-        let mut plane = self.get_plane();
+        let mut plane = self.get_plane(extent);
         let (start, incrementor) = self.get_start_and_incrementor(plane.main.extent);
         plane.main.start += start;
 
@@ -417,7 +447,7 @@ impl Draw for FlexContainer {
 
             child.draw_with_offset(&(plane.as_offset() + *offset), drawer);
 
-            plane.saturating_cut_front(child.len_by_direction(&self.direction) + incrementor);
+            plane.cut_front(child.len_by_direction(&self.direction) + incrementor);
         }
 
         drawer.outline_border(offset.into(), extent.into(), &border);
@@ -448,7 +478,7 @@ impl DispatchEvent for FlexContainer {
             (event.local_coord.y, event.local_coord.x)
         };
 
-        let mut plane = self.get_plane();
+        let mut plane = self.get_plane(extent);
         let (start, incrementor) = self.get_start_and_incrementor(plane.main.extent);
         plane.main.start += start;
 
@@ -488,7 +518,7 @@ impl DispatchEvent for FlexContainer {
                 return Action::None;
             }
 
-            plane.saturating_cut_front(child_main_len + incrementor);
+            plane.cut_front(child_main_len + incrementor);
         }
 
         Action::None
@@ -504,20 +534,26 @@ impl DispatchEvent for FlexContainer {
 /// This prevents code duplication — layout math can be written once
 /// for a generic axis, and converted back into X/Y coordinates on
 /// demand.
-struct FCPlane {
-    main: AxisSegment,
-    cross: AxisSegment,
+struct FCPlane<T>
+where
+    T: Default + Copy,
+{
+    main: AxisSegment<T>,
+    cross: AxisSegment<T>,
 
     direction: Direction,
 }
 
-impl FCPlane {
+impl<T> FCPlane<T>
+where
+    T: Default + Copy,
+{
     /// Creates a new [`FCPlane`] from an offset and container extent, mapping
     /// corresponding main/cross axis values depending on [`Direction`].
     fn new<O, R>(offset: O, extent: R, direction: Direction) -> Self
     where
-        O: Into<Offset<usize>>,
-        R: Into<Extent2D<usize>>,
+        O: Into<Offset<T>>,
+        R: Into<Extent2D<T>>,
     {
         let mut offset = offset.into();
         let mut extent = extent.into();
@@ -536,14 +572,28 @@ impl FCPlane {
 
     /// Uses the provided cut length to increase offset and decrease
     /// extent of main axis.
-    fn saturating_cut_front(&mut self, cut_len: usize) {
-        self.main.start = self.main.start.saturating_add(cut_len);
-        self.main.extent = self.main.extent.saturating_sub(cut_len);
+    fn cut_front(&mut self, cut_len: T)
+    where
+        T: Add<Output = T> + Sub<Output = T> + AddAssign + SubAssign + PartialOrd,
+    {
+        let new_start = self.main.start + cut_len;
+        if new_start >= self.main.start {
+            self.main.start = new_start;
+        } // INFO: otherwise a number wraps around and better do nothing, because we don't know
+        // which is the number type. In case of signed number (like i32), need to use formula
+        // `start += cut_len + new_start`, but in case of unsigned number (like u32), the formula
+        // changes to `start += cut_len - new_start`.
+
+        if self.main.extent < cut_len {
+            self.main.extent -= self.main.extent;
+        } else {
+            self.main.extent -= cut_len;
+        }
     }
 
     /// Converts the plane’s main/cross extents back into a standard
     /// [`Extent2D`] in X/Y coordinates.
-    fn as_extent(&self) -> Extent2D<usize> {
+    fn as_extent(&self) -> Extent2D<T> {
         let (mut width, mut height) = (self.main.extent, self.cross.extent);
 
         if let Direction::Vertical = self.direction {
@@ -555,7 +605,7 @@ impl FCPlane {
 
     /// Converts the plane’s main/cross offsets back into a standard
     /// [`Offset`] in X/Y coordinates.
-    fn as_offset(&self) -> Offset<usize> {
+    fn as_offset(&self) -> Offset<T> {
         let (mut x, mut y) = (self.main.start, self.cross.start);
 
         if let Direction::Vertical = self.direction {
@@ -576,15 +626,21 @@ impl FCPlane {
 /// By turning 2D coordinates into these simple segments, we can apply
 /// the same logic to both the "main" direction and the "cross" direction
 /// without getting confused.
-struct AxisSegment {
+struct AxisSegment<T>
+where
+    T: Default + Copy,
+{
     /// Where the segment begins on the axis.
-    start: usize,
+    start: T,
     /// How far the segment reaches from the start.
-    extent: usize,
+    extent: T,
 }
 
-impl AxisSegment {
-    fn new(start: usize, extent: usize) -> Self {
+impl<T> AxisSegment<T>
+where
+    T: Default + Copy,
+{
+    fn new(start: T, extent: T) -> Self {
         Self { start, extent }
     }
 }

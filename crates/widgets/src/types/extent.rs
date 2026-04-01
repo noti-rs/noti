@@ -1,4 +1,9 @@
-use std::ops::{Add, AddAssign, Mul};
+use std::{
+    cmp::Ordering,
+    ops::{Add, AddAssign, Mul, Sub},
+};
+
+use crate::types::Direction;
 
 use super::spacing::Spacing;
 
@@ -38,6 +43,19 @@ where
         }
     }
 
+    pub fn new_from_direction(main: T, cross: T, direction: &Direction) -> Self {
+        match direction {
+            Direction::Horizontal => Self {
+                width: main,
+                height: cross,
+            },
+            Direction::Vertical => Self {
+                width: cross,
+                height: main,
+            },
+        }
+    }
+
     pub fn new_width(width: T) -> Self {
         Self {
             width,
@@ -58,12 +76,31 @@ where
     {
         self.width * self.height
     }
+
+    pub fn by_direction(&self, direction: &Direction) -> T {
+        match direction {
+            Direction::Horizontal => self.width,
+            Direction::Vertical => self.height,
+        }
+    }
 }
 
-impl Extent2D<usize> {
+impl<T> Extent2D<T>
+where
+    T: Default + Copy + PartialOrd + Sub<Output = T> + num_traits::FromPrimitive,
+{
     pub fn shrink_by(&mut self, spacing: &Spacing) {
-        self.width = self.width.saturating_sub(spacing.horizontal());
-        self.height = self.height.saturating_sub(spacing.vertical());
+        let mut width = self.width - T::from_usize(spacing.horizontal()).unwrap_or_default();
+        if let Some(Ordering::Less) = width.partial_cmp(&Default::default()) {
+            width = Default::default();
+        }
+        self.width = width;
+
+        let mut height = self.height - T::from_usize(spacing.horizontal()).unwrap_or_default();
+        if let Some(Ordering::Less) = height.partial_cmp(&Default::default()) {
+            height = Default::default();
+        }
+        self.height = height;
     }
 }
 
@@ -76,8 +113,8 @@ impl From<Extent2D<usize>> for Extent2D<f32> {
     }
 }
 
-impl From<Extent2D<f64>> for Extent2D<usize> {
-    fn from(value: Extent2D<f64>) -> Self {
+impl From<Extent2D<f32>> for Extent2D<usize> {
+    fn from(value: Extent2D<f32>) -> Self {
         Self {
             width: value.width.round() as usize,
             height: value.height.round() as usize,

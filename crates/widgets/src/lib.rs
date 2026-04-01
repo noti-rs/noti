@@ -20,6 +20,7 @@ use crate::{
     drawer::Drawer,
     events::DispatchEvent,
     types::{
+        constraints::{Constraints, SizingMode},
         data::{AssociatedData, WidgetConfig, WidgetData},
         direction::Direction,
         widget_id::WidgetId,
@@ -55,6 +56,11 @@ pub trait WidgetInfo {
     /// This value represents the vertical space the widget occupies
     /// after its last compilation pass.
     fn height(&self) -> usize;
+
+    /// Returns the sizing policy of the widget.
+    ///
+    /// This method is used to distinguish between widgets with pre-defined (fixed) dimensions and those that adapt their size dynamically based on the layout context.
+    fn sizing_mode(&self) -> SizingMode;
 }
 
 /// Compiles this widget and computes its final layout properties.
@@ -76,9 +82,9 @@ pub trait WidgetInfo {
 pub trait Compile {
     fn compile(
         &mut self,
-        available_extent: Extent2D<usize>,
+        constraints: Constraints<f32>,
         compile_ctx: &mut CompileCtx,
-    ) -> CompileState;
+    ) -> CompileResult;
 }
 
 /// A minimal trait for drawing any widget onto a [`Drawer`].
@@ -228,6 +234,10 @@ impl WidgetInfo for Widget {
     fn height(&self) -> usize {
         delegate!(self.height())
     }
+
+    fn sizing_mode(&self) -> SizingMode {
+        delegate!(self.sizing_mode())
+    }
 }
 
 impl Draw for Widget {
@@ -247,12 +257,12 @@ impl TryFromValue for Widget {}
 impl Compile for Widget {
     fn compile(
         &mut self,
-        available_extent: Extent2D<usize>,
+        constraints: Constraints<f32>,
         compile_ctx: &mut CompileCtx,
-    ) -> CompileState {
-        let state = delegate!(self.compile(available_extent, compile_ctx));
+    ) -> CompileResult {
+        let state = delegate!(self.compile(constraints, compile_ctx));
 
-        if let CompileState::Failure = &state {
+        if let CompileResult::Failure = &state {
             warn!(
                 "A {wtype} widget is not compiled due errors!",
                 wtype = self.get_type()
@@ -264,8 +274,8 @@ impl Compile for Widget {
     }
 }
 
-pub enum CompileState {
-    Success,
+pub enum CompileResult {
+    Success { used_extent: Extent2D<f32> },
     Failure,
 }
 

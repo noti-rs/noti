@@ -7,6 +7,7 @@ use crate::{
     image::{self, MipmapMode, ResizingMethod},
     make_configuration,
     types::{
+        constraints::{Constraints, SizingMode},
         data::{Configure, ToConfig, WidgetConfig, WidgetData},
         extent::Extent2D,
         offset::Offset,
@@ -16,7 +17,7 @@ use crate::{
     Compile, WidgetInfo,
 };
 
-use crate::{CompileCtx, CompileState, Draw};
+use crate::{CompileCtx, CompileResult, Draw};
 
 const DEFAULT_ICON_THEME: &str = "hicolor";
 
@@ -165,6 +166,10 @@ impl WidgetInfo for Image {
     fn height(&self) -> usize {
         self.extent.height
     }
+
+    fn sizing_mode(&self) -> SizingMode {
+        SizingMode::Dynamic
+    }
 }
 
 impl Compile for Image {
@@ -180,9 +185,9 @@ impl Compile for Image {
     /// final width and height.
     fn compile(
         &mut self,
-        available_extent: Extent2D<usize>,
+        constraints: Constraints<f32>,
         compile_ctx: &mut CompileCtx,
-    ) -> CompileState {
+    ) -> CompileResult {
         /// Look's up nearest freedesktop icons.
         fn lookup_freedesktop_icon(icon_name: &str, theme: &str, size: u16) -> Option<IconPath> {
             linicon::lookup_icon(icon_name)
@@ -197,7 +202,7 @@ impl Compile for Image {
         }
 
         let Some(associated_data) = compile_ctx.data_pool.get(&self.id) else {
-            return CompileState::Failure;
+            return CompileResult::Failure;
         };
 
         if let Some(WidgetConfig::Image(image_config)) = &associated_data.config {
@@ -205,10 +210,14 @@ impl Compile for Image {
         }
 
         let Some(widget_data) = &associated_data.data else {
-            return CompileState::Failure;
+            return CompileResult::Failure;
         };
 
         let image_configuration = self.to_config();
+        let available_extent = Extent2D::new(
+            constraints.max.width.round() as usize,
+            constraints.max.height.round() as usize,
+        );
         self.content = match widget_data {
             WidgetData::ImageData(image_data) => {
                 image::Image::from_image_data(image_data, &image_configuration, &available_extent)
@@ -235,7 +244,7 @@ impl Compile for Image {
                     })
                     .unwrap_or(image::Image::Unknown)
             }
-            _ => return CompileState::Failure,
+            _ => return CompileResult::Failure,
         };
 
         let margin = self.margin.unwrap_or_default();
@@ -262,13 +271,15 @@ impl Compile for Image {
                 available_extent.width,
                 available_extent.height
             );
-            return CompileState::Failure;
+            return CompileResult::Failure;
         }
 
         if self.content.is_exists() {
-            CompileState::Success
+            CompileResult::Success {
+                used_extent: self.extent.into(),
+            }
         } else {
-            CompileState::Failure
+            CompileResult::Failure
         }
     }
 }

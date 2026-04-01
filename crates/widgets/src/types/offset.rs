@@ -1,5 +1,7 @@
 use std::ops::{Add, AddAssign};
 
+use num_traits::FromPrimitive;
+
 use super::spacing::Spacing;
 
 /// A set of instructions that tells a widget where to sit on the screen.
@@ -18,7 +20,7 @@ use super::spacing::Spacing;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Offset<T>
 where
-    T: Add<Output = T> + Default + Copy,
+    T: Default + Copy,
 {
     pub x: T,
     pub y: T,
@@ -26,7 +28,7 @@ where
 
 impl<T> Offset<T>
 where
-    T: Add<Output = T> + Default + Copy,
+    T: Default + Copy,
 {
     pub fn new(x: T, y: T) -> Self {
         Self { x, y }
@@ -93,20 +95,26 @@ impl From<Offset<usize>> for Offset<f32> {
     }
 }
 
-impl From<Spacing> for Offset<usize> {
+impl<T> From<Spacing> for Offset<T>
+where
+    T: Add<Output = T> + Default + Copy + FromPrimitive,
+{
     fn from(value: Spacing) -> Self {
         Offset {
-            x: value.left,
-            y: value.top,
+            x: T::from_usize(value.left).unwrap_or_default(),
+            y: T::from_usize(value.top).unwrap_or_default(),
         }
     }
 }
 
-impl From<&Spacing> for Offset<usize> {
+impl<T> From<&Spacing> for Offset<T>
+where
+    T: Add<Output = T> + Default + Copy + FromPrimitive,
+{
     fn from(value: &Spacing) -> Self {
         Offset {
-            x: value.left,
-            y: value.top,
+            x: T::from_usize(value.left).unwrap_or_default(),
+            y: T::from_usize(value.top).unwrap_or_default(),
         }
     }
 }

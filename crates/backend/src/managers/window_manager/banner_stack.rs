@@ -25,7 +25,7 @@ use widgets::{
     self,
     animation::{Animated, AnimatedWidget},
     drawer::Drawer,
-    types::{Alignment, Border, Extent2D, Offset, Position},
+    types::{constraints::Constraints, Alignment, Border, Extent2D, Offset, Position},
     widget::{FlexContainerBuilder, ImageBuilder, TextBuilder},
     Compile, CompileCtx, Draw, Widget, WidgetInfo,
 };
@@ -371,7 +371,7 @@ impl Banner {
         };
 
         layout.compile(
-            extent,
+            Constraints::from_extent_soft(extent.into()),
             &mut make_compile_context(&self.notification, config, font_collection),
         );
 

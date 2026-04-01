@@ -3209,6 +3209,7 @@ dependencies = [
  "linicon",
  "log",
  "macros",
+ "num-traits",
  "resvg",
  "shared",
  "skia-safe",
