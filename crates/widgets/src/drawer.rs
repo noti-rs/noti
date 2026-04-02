@@ -1,8 +1,8 @@
 use log::warn;
 
 use crate::{
-    types::{border::Border, extent::Extent2D, offset::Offset, Bgra, Color},
-    Draw,
+    types::{border::Border, extent::Extent, offset::Offset, Bgra, Color},
+    widget::{Draw, Widget},
 };
 
 /// A simple wrapper around [`skia_safe::Surface`] used as the main
@@ -24,8 +24,8 @@ impl Drawer {
 
     pub(crate) fn draw_into_offscreen(
         &mut self,
-        offset: &Offset<usize>,
-        widget: &crate::Widget,
+        offset: &Offset<f32>,
+        widget: &Widget,
     ) -> skia_safe::Image {
         let image_info = self.surface.image_info();
         let mut offscreen = skia_safe::surfaces::raster(&image_info, None, None).unwrap();
@@ -44,7 +44,7 @@ impl Drawer {
     pub(crate) fn fill_background(
         &mut self,
         offset: Offset<f32>,
-        extent: Extent2D<f32>,
+        extent: Extent<f32>,
         border: &Border,
         background_color: &Color,
     ) {
@@ -81,7 +81,7 @@ impl Drawer {
     pub(crate) fn outline_border(
         &mut self,
         offset: Offset<f32>,
-        extent: Extent2D<f32>,
+        extent: Extent<f32>,
         border: &Border,
     ) {
         if border.size == 0 {
@@ -135,11 +135,11 @@ impl Drawer {
 /// (solid fills, gradients, etc.) into Skia's low-level representation,
 /// making it easy to consistently apply colors across drawing code.
 pub trait UseColor {
-    fn use_color(&mut self, color: &Color, offset: Offset<f32>, frame_size: Extent2D<f32>);
+    fn use_color(&mut self, color: &Color, offset: Offset<f32>, extent: Extent<f32>);
 }
 
 impl UseColor for skia_safe::Paint {
-    fn use_color(&mut self, color: &Color, offset: Offset<f32>, frame_size: Extent2D<f32>) {
+    fn use_color(&mut self, color: &Color, offset: Offset<f32>, extent: Extent<f32>) {
         self.set_anti_alias(true);
 
         match color {
@@ -148,7 +148,7 @@ impl UseColor for skia_safe::Paint {
                     vec1[0] * vec2[0] + vec1[1] * vec2[1]
                 }
 
-                let (half_width, half_height) = (frame_size.width / 2.0, frame_size.height / 2.0);
+                let (half_width, half_height) = (extent.width / 2.0, extent.height / 2.0);
 
                 // INFO: need to find a factor to multiply the x/y offsets to that distance where
                 // prependicular line hits top left and top right corners. Without it part of area

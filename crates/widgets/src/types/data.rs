@@ -2,11 +2,10 @@ use std::path::PathBuf;
 
 use shared::text::Text;
 
-use crate::{
-    image::ImageData,
-    widget::{
-        container::ContainerConfiguration, image::ImageConfiguration, text::TextConfiguration,
-    },
+use crate::widget::{
+    container::ContainerStyle,
+    image::{ImageInfo, ImageStyle},
+    text::TextStyle,
 };
 
 /// A container for the external state and settings tied to a specific widget.
@@ -15,11 +14,11 @@ use crate::{
 /// phase, a widget uses its ID to look up this struct. It may contain
 /// the raw content to display (`data`), the visual settings (`config`),
 /// or both.
-pub struct AssociatedData {
+pub struct WidgetDependency {
     /// The primary content for the widget (e.g., text strings or image paths).
     pub data: Option<WidgetData>,
     /// The secondary visual or layout settings (e.g., alignment or colors).
-    pub config: Option<WidgetConfig>,
+    pub style: Option<WidgetStyle>,
 }
 
 /// A strictly defined set of content types that widgets can display.
@@ -33,7 +32,7 @@ pub enum WidgetData {
     /// Content for text-based widgets.
     Text(Text),
     /// Raw byte data for an image.
-    ImageData(ImageData),
+    ImageData(ImageInfo),
     /// A filesystem path to an image file.
     ImagePath(PathBuf),
     /// Instructions for looking up a system icon.
@@ -50,10 +49,10 @@ pub enum WidgetData {
 /// of their corresponding widget. They allow the caller to override
 /// or set properties externally through the `CompileCtx`.
 #[derive(Debug, Clone)]
-pub enum WidgetConfig {
-    Text(TextConfiguration),
-    Image(ImageConfiguration),
-    Container(ContainerConfiguration),
+pub enum WidgetStyle {
+    Text(TextStyle),
+    Image(ImageStyle),
+    Container(ContainerStyle),
 }
 
 /// Internal trait for updating a widget's state via a configuration struct.
@@ -74,6 +73,24 @@ pub(crate) trait Configure<C> {
 /// layout engine.
 pub(crate) trait ToConfig<C> {
     fn to_config(&self) -> C;
+}
+
+impl From<WidgetData> for WidgetDependency {
+    fn from(value: WidgetData) -> Self {
+        WidgetDependency {
+            data: Some(value),
+            style: None,
+        }
+    }
+}
+
+impl From<WidgetStyle> for WidgetDependency {
+    fn from(value: WidgetStyle) -> Self {
+        WidgetDependency {
+            data: None,
+            style: Some(value),
+        }
+    }
 }
 
 /// A syntax sugar macro for bridging Configuration structs with Widgets.

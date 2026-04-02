@@ -10,7 +10,7 @@ use shared::{
 use widgets::{
     types::{Alignment, AlignmentGBuilder, Border, BorderGBuilder, Spacing, SpacingGBuilder},
     widget::{FlexContainerGBuilder, ImageGBuilder, TextGBuilder},
-    Widget,
+    widget::Widget,
 };
 
 use crate::parser::Rule;

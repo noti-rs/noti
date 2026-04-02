@@ -255,6 +255,7 @@ public! {
 
         resizing_method: ResizingMethod,
         mipmap_mode: MipmapMode,
+        fit_mode: FitMode,
     }
 }
 
@@ -264,7 +265,7 @@ impl Default for ImageProperty {
     }
 }
 
-impl From<ImageProperty> for widgets::widget::ImageConfiguration {
+impl From<ImageProperty> for widgets::widget::ImageStyle {
     fn from(value: ImageProperty) -> Self {
         Self {
             max_size: value.max_size,
@@ -272,6 +273,7 @@ impl From<ImageProperty> for widgets::widget::ImageConfiguration {
             margin: value.margin.into(),
             resizing_method: value.resizing_method.into(),
             mipmap_mode: value.mipmap_mode.into(),
+            fit_mode: value.fit_mode.into()
         }
     }
 }
@@ -285,11 +287,11 @@ pub enum ResizingMethod {
     Linear,
 }
 
-impl From<ResizingMethod> for widgets::image::ResizingMethod {
+impl From<ResizingMethod> for widgets::widget::ResizingMethod {
     fn from(value: ResizingMethod) -> Self {
         match value {
-            ResizingMethod::Nearest => widgets::image::ResizingMethod::Nearest,
-            ResizingMethod::Linear => widgets::image::ResizingMethod::Linear,
+            ResizingMethod::Nearest => widgets::widget::ResizingMethod::Nearest,
+            ResizingMethod::Linear => widgets::widget::ResizingMethod::Linear,
         }
     }
 }
@@ -305,12 +307,36 @@ pub enum MipmapMode {
     Linear,
 }
 
-impl From<MipmapMode> for widgets::image::MipmapMode {
+impl From<MipmapMode> for widgets::widget::MipmapMode {
     fn from(value: MipmapMode) -> Self {
         match value {
-            MipmapMode::None => widgets::image::MipmapMode::None,
-            MipmapMode::Nearest => widgets::image::MipmapMode::Nearest,
-            MipmapMode::Linear => widgets::image::MipmapMode::Linear,
+            MipmapMode::None => widgets::widget::MipmapMode::None,
+            MipmapMode::Nearest => widgets::widget::MipmapMode::Nearest,
+            MipmapMode::Linear => widgets::widget::MipmapMode::Linear,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub enum FitMode {
+    #[default]
+    #[serde(rename = "contain")]
+    Contain,
+    #[serde(rename = "cover")]
+    Cover,
+    #[serde(rename = "fill")]
+    Fill,
+    #[serde(rename = "scale-down")]
+    ScaleDown,
+}
+
+impl From<FitMode> for widgets::widget::FitMode {
+    fn from(value: FitMode) -> Self {
+        match value {
+            FitMode::Contain => widgets::widget::FitMode::Contain,
+            FitMode::Cover => widgets::widget::FitMode::Cover,
+            FitMode::Fill => widgets::widget::FitMode::Fill,
+            FitMode::ScaleDown => widgets::widget::FitMode::ScaleDown,
         }
     }
 }

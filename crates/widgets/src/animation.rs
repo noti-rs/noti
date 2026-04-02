@@ -8,7 +8,7 @@ use crate::{
         pop::{PopIn, PopOut},
         translate::Translate,
     },
-    Draw, Widget,
+    widget::{Draw, Widget},
 };
 
 pub mod fade;
@@ -68,7 +68,7 @@ impl Animated for AnimatedWidget {
 impl Draw for AnimatedWidget {
     fn draw_with_offset(
         &self,
-        offset: &crate::types::offset::Offset<usize>,
+        offset: &crate::types::offset::Offset<f32>,
         drawer: &mut crate::drawer::Drawer,
     ) {
         delegate!(self.draw_with_offset(offset, drawer));
@@ -123,16 +123,6 @@ impl Easing {
         }
     }
 }
-
-// impl From<EasingType> for Easing {
-//     fn from(value: EasingType) -> Self {
-//         match value {
-//             EasingType::Linear => Easing::Linear,
-//             EasingType::EaseOut => Easing::EaseOut,
-//             EasingType::EaseInOut => Easing::EaseInOut,
-//         }
-//     }
-// }
 
 struct ShaderBuilder {
     effect: skia_safe::RuntimeEffect,

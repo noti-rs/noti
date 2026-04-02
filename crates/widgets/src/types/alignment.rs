@@ -65,10 +65,10 @@ impl Position {
     ///
     /// This is the core helper for placing children at `Start`, `Center`,
     /// `End`, or evenly with `SpaceBetween`.
-    pub fn get_start(&self, width: usize, element_width: usize) -> usize {
+    pub fn get_start(&self, width: f32, element_width: f32) -> f32 {
         match self {
-            Position::Start | Position::SpaceBetween => 0,
-            Position::Center => width / 2 - element_width / 2,
+            Position::Start | Position::SpaceBetween => 0.0,
+            Position::Center => width / 2.0 - element_width / 2.0,
             Position::End => width - element_width,
         }
     }

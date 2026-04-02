@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use widgets::Widget;
+use widgets::widget::Widget;
 
 mod converter;
 mod parser;

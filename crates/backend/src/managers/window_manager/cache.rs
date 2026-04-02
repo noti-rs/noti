@@ -5,7 +5,7 @@ use shared::{
     cached_data::{CacheUpdate, CachedValueError},
     file_watcher::{FileState, FilesWatcher},
 };
-use widgets::Widget;
+use widgets::widget::Widget;
 
 /// Represents a custom widget layout loaded into memory. This wrapper allows detecting
 /// changes to the layout file and reloading it on demand.

@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use log::warn;
 use shared::{
     text::{self, Entity, EntityKind},
@@ -5,19 +7,20 @@ use shared::{
 };
 
 use crate::{
+    context::{GenerateId, GetData, GetFont, GetStyle, LoadExtent, SaveExtent},
     drawer::{Drawer, UseColor},
     events::{Action, DispatchEvent, Event},
     make_configuration,
     types::{
-        constraints::{Constraints, SizingMode},
-        data::{Configure, ToConfig, WidgetConfig, WidgetData},
-        extent::Extent2D,
+        data::{Configure, ToConfig, WidgetData, WidgetStyle},
+        extent::Extent,
+        identifiers::{WidgetClass, WidgetId},
+        measure::{self, Constraints, ExtentManagement, IntrinsicManagement, Measure, SizingMode},
         offset::Offset,
         spacing::Spacing,
-        widget_id::WidgetId,
         Color,
     },
-    Compile, CompileCtx, CompileResult, Draw, WidgetInfo,
+    widget::{Compile, CompileCtx, CompileResult, Draw, Initialize, Layout, WidgetInfo},
 };
 
 /// A text widget that manages layout, styling, and rendering of text
@@ -35,9 +38,13 @@ pub struct Text {
     /// compilation. Setting this manually allows the widget to be
     /// targeted by external configurations and makes the widget tree
     /// significantly easier to navigate during debugging.
+    #[builder(private, default)]
+    #[gbuilder(hidden, default)]
+    id: WidgetId,
+
     #[builder(default, setter(into))]
     #[gbuilder(default)]
-    id: WidgetId,
+    class: WidgetClass,
 
     /// The specific typeface and sizing rules used to render this text.
     ///
@@ -129,7 +136,7 @@ pub struct Text {
     /// character.
     #[builder(private, default = None)]
     #[gbuilder(hidden, default(None))]
-    paragraph: Option<skia_safe::textlayout::Paragraph>,
+    paragraph: Option<RefCell<skia_safe::textlayout::Paragraph>>,
 
     /// A cached count of the lines required to display the current text.
     ///
@@ -151,7 +158,7 @@ pub struct Text {
     /// positioned correctly relative to its neighbors.
     #[builder(private, default)]
     #[gbuilder(hidden, default)]
-    extent: Extent2D<usize>,
+    extent: Extent<f32>,
 }
 
 make_configuration! {
@@ -165,7 +172,7 @@ make_configuration! {
     /// initial construction, ensuring a clean separation between the
     /// layout structure and the final styling data.
     #[derive(Debug, Clone)]
-    pub struct TextConfiguration {
+    pub struct TextStyle {
         pub font: Font,
         pub wrap: bool,
         pub margin: Spacing,
@@ -291,7 +298,8 @@ impl Clone for Text {
     fn clone(&self) -> Self {
         // INFO: we shouldn't clone compiled info about text
         Self {
-            id: self.id.clone(),
+            id: self.id,
+            class: self.class.clone(),
             font: self.font.clone(),
             wrap: self.wrap,
             margin: self.margin,
@@ -302,7 +310,7 @@ impl Clone for Text {
             font_collection: None,
             paragraph: None,
             total_lines: None,
-            extent: Extent2D::default(),
+            extent: Extent::default(),
         }
     }
 }
@@ -310,7 +318,8 @@ impl Clone for Text {
 impl Clone for TextGBuilder {
     fn clone(&self) -> Self {
         Self {
-            id: self.id.clone(),
+            id: self.id,
+            class: self.class.clone(),
             font: self.font.clone(),
             wrap: self.wrap,
             margin: self.margin,
@@ -321,7 +330,7 @@ impl Clone for TextGBuilder {
             font_collection: None,
             paragraph: None,
             total_lines: None,
-            extent: Some(Extent2D::default()),
+            extent: Some(Extent::default()),
         }
     }
 }
@@ -336,13 +345,17 @@ impl Text {
         Self {
             content: text::Text::new_empty(),
             paragraph: None,
-            extent: Extent2D::default(),
+            extent: Extent::default(),
             ..Default::default()
         }
     }
 }
 
 impl WidgetInfo for Text {
+    fn get_class(&self) -> WidgetClass {
+        self.class.clone()
+    }
+
     fn get_type(&self) -> &'static str {
         "text"
     }
@@ -352,21 +365,21 @@ impl WidgetInfo for Text {
     /// Unlike [`Self::height`], this does not reflect the intrinsic text width,
     /// but rather the allocated width for text layout, since text widgets
     /// are expected to fill the entire available horizontal space.
-    fn width(&self) -> usize {
+    fn width(&self) -> f32 {
         // INFO: the width should get all available width but height should get only renderable
         // rows.
-        self.extent.width + self.margin.unwrap_or_default().horizontal()
+        self.extent.width + self.margin.unwrap_or_default().horizontal() as f32
     }
 
     /// Returns the computed height of the text after compilation.
     ///
     /// The result reflects the actual paragraph height + vertical margins, which may be
     /// smaller than the available area if the text fits without overflow.
-    fn height(&self) -> usize {
+    fn height(&self) -> f32 {
         self.paragraph
             .as_ref()
-            .map(|para| para.height() + self.margin.unwrap_or_default().vertical() as f32)
-            .unwrap_or(0.) as usize
+            .map(|para| para.borrow().height() + self.margin.unwrap_or_default().vertical() as f32)
+            .unwrap_or(0.)
     }
 
     fn sizing_mode(&self) -> SizingMode {
@@ -374,49 +387,25 @@ impl WidgetInfo for Text {
     }
 }
 
-impl Compile for Text {
-    /// Prepares the widget for rendering by applying layout constraints
-    /// and external data.
-    ///
-    /// This step computes the final layout using the provided [`Extent2D<usize>`]
-    /// for spatial limits and the [`CompileCtx`] for shared resources
-    /// and ID-linked configurations.
-    fn compile(
-        &mut self,
-        constraints: Constraints<f32>,
-        compile_ctx: &mut CompileCtx,
-    ) -> CompileResult {
-        if self.id.is_empty() {
-            self.id = compile_ctx.generate_new_id(self.get_type());
+impl<C> Initialize<C> for Text
+where
+    C: GenerateId + GetData + GetStyle + GetFont,
+{
+    fn initialize(&mut self, context: &mut C) {
+        if *self.id == 0 {
+            self.id = context.generate_id();
         }
 
-        let associated_data = compile_ctx.data_pool.get(&self.id);
-
-        if let Some(WidgetData::Text(text)) =
-            associated_data.and_then(|associated| associated.data.as_ref())
-        {
+        if let Some(WidgetData::Text(text)) = context.get_data(&self.class) {
             self.content = text.clone();
         }
 
-        if let Some(WidgetConfig::Text(text_config)) =
-            associated_data.and_then(|associated| associated.config.as_ref())
-        {
-            self.configure(text_config.clone());
+        if let Some(WidgetStyle::Text(text_style)) = context.get_style(&self.class) {
+            self.configure(text_style.clone());
         }
-
-        if self.content.body.as_str().trim().is_empty() {
-            warn!("The text is blank");
-            return CompileResult::Failure;
-        }
-
-        let mut available_extent = Extent2D::new(
-            constraints.max.width.round() as usize,
-            constraints.max.height.round() as usize,
-        );
-        available_extent.shrink_by(&self.margin.unwrap_or_default());
 
         let font = self.font.clone().unwrap_or_default();
-        self.font_collection = compile_ctx.font_collection.clone().into();
+        self.font_collection = context.get_font().into();
 
         let mut text_style = skia_safe::textlayout::TextStyle::new();
         text_style.set_font_families(&[&font.name]);
@@ -429,11 +418,184 @@ impl Compile for Text {
         });
 
         let mut paragraph = self.build_paragraph(&text_style, Self::MAX_LINES);
+        paragraph.layout(paragraph.max_intrinsic_width());
+
+        self.paragraph = Some(RefCell::new(paragraph));
+    }
+}
+
+impl Measure<f32, WidgetId> for Text {
+    fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
+    where
+        C: IntrinsicManagement<f32, WidgetId>,
+    {
+        if let Some(intrinsic) = context.load(self.id) {
+            return intrinsic;
+        }
+
+        let inner_spacing = self.margin.unwrap_or_default();
+        let spacing_size = Extent::new(
+            inner_spacing.horizontal() as f32,
+            inner_spacing.vertical() as f32,
+        );
+
+        let Some(mut paragraph) = self.paragraph.as_ref().map(RefCell::borrow_mut) else {
+            return measure::Intrinsic::new(spacing_size, spacing_size);
+        };
+
+        let min_width = paragraph.min_intrinsic_width();
+        let max_width = paragraph.max_intrinsic_width();
+
+        let min_height = {
+            paragraph.layout(max_width);
+            paragraph.height()
+        };
+        let max_height = {
+            paragraph.layout(min_width);
+            paragraph.height()
+        };
+
+        paragraph.layout(max_width);
+
+        let intrinsic = measure::Intrinsic::new(
+            Extent::new(min_width, min_height) + spacing_size,
+            Extent::new(max_width, max_height) + spacing_size,
+        );
+
+        context.save(self.id, intrinsic);
+        intrinsic
+    }
+
+    fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
+    where
+        C: IntrinsicManagement<f32, WidgetId> + ExtentManagement<f32, WidgetId>,
+    {
+        if let Some(extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) {
+            return extent;
+        }
+
+        let inner_spacing = self.margin.unwrap_or_default();
+        let spacing_size = Extent::new(
+            inner_spacing.horizontal() as f32,
+            inner_spacing.vertical() as f32,
+        );
+
+        let Some(mut paragraph) = self.paragraph.as_ref().map(RefCell::borrow_mut) else {
+            return spacing_size.clamp_with(constraints.min, constraints.max);
+        };
+
+        let width = constraints.max.width - spacing_size.width;
+        paragraph.layout(width);
+        let height = paragraph.height() + spacing_size.height;
+
+        let max_intrinsic_width = paragraph.max_intrinsic_width();
+        paragraph.layout(max_intrinsic_width);
+
+        let requested_extent = (Extent::new(width, height) + spacing_size)
+            .clamp_with(constraints.min, constraints.max);
+
+        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, requested_extent);
+        requested_extent
+    }
+}
+
+impl<C> Layout<C, f32, WidgetId> for Text
+where
+    C: LoadExtent<f32, WidgetId>,
+{
+    fn layout(&mut self, context: &C) {
+        let Some(extent) = context.load(self.id) else {
+            warn!(
+                "Text widget with id {} isn't measured! The widget may be incorrectly drawn.",
+                *self.id
+            );
+            return;
+        };
+
+        let inner_spacing = self.margin.unwrap_or_default();
+        let inner_extent = Extent::new(
+            extent.width - inner_spacing.horizontal() as f32,
+            extent.height - inner_spacing.vertical() as f32,
+        );
+
+        let text_style = self.base_text_style();
+
+        if let Some(mut paragraph) = self.paragraph.as_ref().map(|para| para.borrow_mut()) {
+            paragraph.layout(inner_extent.width);
+
+            if paragraph.height() > inner_extent.height {
+                match self.try_fit_paragraph(&paragraph, inner_extent, &text_style) {
+                    Some((new_paragraph, total_lines)) => {
+                        *paragraph = new_paragraph;
+                        self.total_lines = Some(total_lines);
+                    }
+                    None => {
+                        warn!(
+                            "Text widght with id {} didn't fit in provided inner_extent.",
+                            *self.id
+                        );
+                    }
+                }
+            }
+        }
+
+        self.extent = extent;
+    }
+}
+
+impl Compile for Text {
+    /// Prepares the widget for rendering by applying layout constraints
+    /// and external data.
+    ///
+    /// This step computes the final layout using the provided [`Extent2D<usize>`]
+    /// for spatial limits and the [`CompileCtx`] for shared resources
+    /// and ID-linked configurations.
+    fn compile(
+        &mut self,
+        constraints: Constraints<Extent<f32>>,
+        compile_ctx: &mut CompileCtx,
+    ) -> CompileResult {
+        if self.class.is_empty() {
+            self.class = compile_ctx.generate_new_class(self.get_type());
+        }
+
+        let associated_data = compile_ctx.data_pool.get(&self.class);
+
+        if let Some(WidgetData::Text(text)) =
+            associated_data.and_then(|associated| associated.data.as_ref())
+        {
+            self.content = text.clone();
+        }
+
+        if let Some(WidgetStyle::Text(text_config)) =
+            associated_data.and_then(|associated| associated.style.as_ref())
+        {
+            self.configure(text_config.clone());
+        }
+
+        if self.content.body.as_str().trim().is_empty() {
+            warn!("The text is blank");
+            return CompileResult::Failure;
+        }
+
+        let mut available_extent = Extent::new(
+            constraints.max.width.round() as usize,
+            constraints.max.height.round() as usize,
+        );
+        available_extent.shrink_by(&self.margin.unwrap_or_default());
+
+        self.font_collection = compile_ctx.font_collection.clone().into();
+
+        let text_style = self.base_text_style();
+        let mut paragraph = self.build_paragraph(&text_style, Self::MAX_LINES);
         paragraph.layout(available_extent.width as f32);
 
         if paragraph.height() > available_extent.height as f32 {
-            paragraph = match self.try_fit_paragraph(paragraph, available_extent, &text_style) {
-                Some(paragraph) => paragraph,
+            match self.try_fit_paragraph(&paragraph, available_extent.into(), &text_style) {
+                Some((new_paragraph, total_lines)) => {
+                    paragraph = new_paragraph;
+                    self.total_lines = Some(total_lines);
+                }
                 None => {
                     warn!(
                         "The text doesn't fit to available space. \
@@ -445,20 +607,34 @@ impl Compile for Text {
             }
         }
 
-        let used_extent = Extent2D::new(
+        let used_extent = Extent::new(
             constraints.max.width.round(),
             paragraph.height() + self.margin.unwrap_or_default().vertical() as f32,
         );
-        self.extent = used_extent.into();
-        self.paragraph = Some(paragraph);
+        self.extent = used_extent;
+        self.paragraph = Some(RefCell::new(paragraph));
 
-        CompileResult::Success {
-            used_extent: self.extent.into(),
-        }
+        CompileResult::Success { used_extent }
     }
 }
 
 impl Text {
+    fn base_text_style(&self) -> skia_safe::textlayout::TextStyle {
+        let font = self.font.clone().unwrap_or_default();
+
+        let mut text_style = skia_safe::textlayout::TextStyle::new();
+        text_style.set_font_families(&[&font.name]);
+        text_style.set_color(skia_safe::Color::BLACK);
+        text_style.set_font_style(match font.style {
+            FontStyle::Regular => skia_safe::FontStyle::normal(),
+            FontStyle::Bold => skia_safe::FontStyle::bold(),
+            FontStyle::Italic => skia_safe::FontStyle::italic(),
+            FontStyle::BoldItalic => skia_safe::FontStyle::bold_italic(),
+        });
+
+        text_style
+    }
+
     /// Attempts to make the current paragraph layout fit within the available
     /// vertical space by iteratively removing the last lines until it fits.
     ///
@@ -469,11 +645,11 @@ impl Text {
     ///   available width.
     /// * Called after paragraph construction and layout calculation.
     fn try_fit_paragraph(
-        &mut self,
-        paragraph: skia_safe::textlayout::Paragraph,
-        available_space: Extent2D<usize>,
+        &self,
+        paragraph: &skia_safe::textlayout::Paragraph,
+        available_space: Extent<f32>,
         base_text_style: &skia_safe::textlayout::TextStyle,
-    ) -> Option<skia_safe::textlayout::Paragraph> {
+    ) -> Option<(skia_safe::textlayout::Paragraph, usize)> {
         let mut height = paragraph.height();
         let line_metrics = paragraph.get_line_metrics();
         let mut total_lines = line_metrics.len();
@@ -482,7 +658,7 @@ impl Text {
             height -= last_line.height as f32;
             total_lines -= 1;
 
-            if height <= available_space.height as f32 {
+            if height <= available_space.height {
                 break;
             }
         }
@@ -490,10 +666,9 @@ impl Text {
         if total_lines == 0 {
             None
         } else {
-            self.total_lines = Some(total_lines);
             let mut fitted_paragraph = self.build_paragraph(base_text_style, total_lines);
-            fitted_paragraph.layout(available_space.width as f32);
-            Some(fitted_paragraph)
+            fitted_paragraph.layout(available_space.width);
+            Some((fitted_paragraph, total_lines))
         }
     }
 
@@ -604,13 +779,16 @@ impl Text {
 }
 
 impl Draw for Text {
-    fn draw_with_offset(&self, offset: &Offset<usize>, drawer: &mut Drawer) {
-        let correct_offset: Offset<f32> = offset.into();
-
+    fn draw_with_offset(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
         // INFO: as you see, there's re-building paragraph. Since I want to use `Paint` type for
         // coloring the text, it requires the exact position on surface, and because of this I
         // cannot determine once the position. Especially when a banner moves from one place to
         // another.
+
+        let inner_extent = self.extent.shrink_to_with(&self.margin.unwrap_or_default());
+        if inner_extent.width <= 0.0 || inner_extent.height <= 0.0 {
+            return;
+        }
 
         let font = self.font.clone().unwrap_or_default();
         let mut base_text_style = skia_safe::textlayout::TextStyle::new();
@@ -625,8 +803,8 @@ impl Draw for Text {
         let mut paint = skia_safe::Paint::default();
         paint.use_color(
             &self.color.as_ref().cloned().unwrap_or_default(),
-            correct_offset,
-            self.extent.into(),
+            *offset,
+            self.extent,
         );
 
         base_text_style.set_foreground_paint(&paint);
@@ -636,10 +814,20 @@ impl Draw for Text {
         } else {
             self.build_paragraph(&base_text_style, Self::MAX_LINES)
         };
-        paragraph.layout(self.extent.width as f32);
+        paragraph.layout(self.extent.width);
 
         let canvas = drawer.surface.canvas();
-        paragraph.paint(canvas, (correct_offset.x, correct_offset.y));
+
+        canvas.save();
+        canvas.clip_rect(
+            skia_safe::Rect::from_xywh(offset.x, offset.y, self.extent.width, self.extent.height),
+            skia_safe::ClipOp::Intersect,
+            true,
+        );
+
+        paragraph.paint(canvas, (offset.x, offset.y));
+
+        canvas.restore();
     }
 }
 

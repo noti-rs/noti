@@ -2,7 +2,10 @@ use skia_safe::runtime_effect::ChildPtr;
 use std::{collections::HashMap, time::Duration};
 
 use super::{Animated, ShaderBuilder, UniformValue};
-use crate::{animation::Easing, Draw, Widget, WidgetInfo};
+use crate::{
+    animation::Easing,
+    widget::{Draw, Widget, WidgetInfo},
+};
 
 pub trait PopDirection {
     fn percentage(elapsed_ns: u64, duration: Duration) -> f32;
@@ -123,7 +126,7 @@ impl<D: PopDirection> Animated for Pop<D> {
 impl<D: PopDirection> Draw for Pop<D> {
     fn draw_with_offset(
         &self,
-        offset: &crate::types::offset::Offset<usize>,
+        offset: &crate::types::offset::Offset<f32>,
         drawer: &mut crate::drawer::Drawer,
     ) {
         let widget_image = drawer.draw_into_offscreen(offset, &self.widget);
@@ -131,11 +134,11 @@ impl<D: PopDirection> Draw for Pop<D> {
         let additional_uniforms = HashMap::from([
             (
                 "offset".to_string(),
-                UniformValue::Float2(offset.x as f32, offset.y as f32),
+                UniformValue::Float2(offset.x, offset.y),
             ),
             (
                 "resolution".to_string(),
-                UniformValue::Float2(self.widget.width() as f32, self.widget.height() as f32),
+                UniformValue::Float2(self.widget.width(), self.widget.height()),
             ),
         ]);
 

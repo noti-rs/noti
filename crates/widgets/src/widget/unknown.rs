@@ -1,7 +1,12 @@
 use crate::{
+    context::{GenerateId, GetData, GetFont, GetStyle, LoadExtent},
+    drawer::Drawer,
     events::{Action, DispatchEvent},
-    types::{constraints::Constraints, Extent2D},
-    Compile, CompileResult, Draw, WidgetInfo,
+    types::{
+        measure::{self, Constraints, Measure},
+        Extent, Offset, WidgetClass, WidgetId,
+    },
+    widget::{Compile, CompileCtx, CompileResult, Draw, Initialize, Layout, WidgetInfo},
 };
 
 /// A zero-sized, "no-op" widget used as a structural placeholder.
@@ -22,6 +27,10 @@ use crate::{
 pub struct Unknown;
 
 impl WidgetInfo for Unknown {
+    fn get_class(&self) -> WidgetClass {
+        WidgetClass::default()
+    }
+
     fn get_type(&self) -> &'static str {
         "unknown"
     }
@@ -31,8 +40,8 @@ impl WidgetInfo for Unknown {
     /// For the purposes of layout math (like sums in a `FlexContainer`),
     /// this widget contributes nothing to the total dimensions,
     /// effectively making it invisible to its parent containers.
-    fn width(&self) -> usize {
-        0
+    fn width(&self) -> f32 {
+        0.0
     }
 
     /// Returns a constant value of 0.
@@ -40,8 +49,8 @@ impl WidgetInfo for Unknown {
     /// For the purposes of layout math (like sums in a `FlexContainer`),
     /// this widget contributes nothing to the total dimensions,
     /// effectively making it invisible to its parent containers.
-    fn height(&self) -> usize {
-        0
+    fn height(&self) -> f32 {
+        0.0
     }
 
     /// Always returns [`SizingMode::Fixed`] value.
@@ -49,8 +58,34 @@ impl WidgetInfo for Unknown {
     /// For the purposes of layout math (like sums in a `FlexContainer`),
     /// this widget contributes nothing to the total dimensions,
     /// effectively making it invisible to its parent containers.
-    fn sizing_mode(&self) -> crate::types::constraints::SizingMode {
-        crate::types::constraints::SizingMode::Fixed
+    fn sizing_mode(&self) -> crate::types::measure::SizingMode {
+        crate::types::measure::SizingMode::Fixed
+    }
+}
+
+impl<C> Initialize<C> for Unknown
+where
+    C: GenerateId + GetData + GetStyle + GetFont,
+{
+    fn initialize(&mut self, _context: &mut C) {}
+}
+
+impl Measure<f32, WidgetId> for Unknown {
+    fn get_intrinsic<C>(&self, _context: &mut C) -> measure::Intrinsic<f32> {
+        measure::Intrinsic::new(Extent::default(), Extent::default())
+    }
+
+    fn measure<C>(&self, _context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32> {
+        constraints.min
+    }
+}
+
+impl<C> Layout<C, f32, WidgetId> for Unknown
+where
+    C: LoadExtent<f32, WidgetId>,
+{
+    fn layout(&mut self, _context: &C) {
+        // Do nothing
     }
 }
 
@@ -63,11 +98,11 @@ impl Compile for Unknown {
     /// stable and unaffected.
     fn compile(
         &mut self,
-        _constraints: Constraints<f32>,
-        _compile_ctx: &mut crate::CompileCtx,
-    ) -> crate::CompileResult {
+        _constraints: Constraints<Extent<f32>>,
+        _compile_ctx: &mut CompileCtx,
+    ) -> CompileResult {
         CompileResult::Success {
-            used_extent: Extent2D::new(0., 0.),
+            used_extent: Extent::new(0., 0.),
         }
     }
 }
@@ -78,11 +113,7 @@ impl Draw for Unknown {
     /// Calling draw on this widget is a "no-op" (no operation). It
     /// consumes no GPU resources and leaves the canvas exactly
     /// as it found it.
-    fn draw_with_offset(
-        &self,
-        _offset: &crate::types::offset::Offset<usize>,
-        _drawer: &mut crate::drawer::Drawer,
-    ) {
+    fn draw_with_offset(&self, _offset: &Offset<f32>, _drawer: &mut Drawer) {
         // Do nothing
     }
 }

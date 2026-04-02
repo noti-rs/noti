@@ -22,8 +22,8 @@ impl EventKind {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Point {
-    pub x: usize,
-    pub y: usize,
+    pub x: f32,
+    pub y: f32,
 }
 
 #[derive(Debug, Clone)]

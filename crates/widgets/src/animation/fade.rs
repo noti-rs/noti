@@ -2,7 +2,10 @@ use skia_safe::runtime_effect::ChildPtr;
 use std::time::Duration;
 
 use super::{Animated, ShaderBuilder, UniformValue};
-use crate::{animation::Easing, Draw, Widget};
+use crate::{
+    animation::Easing,
+    widget::{Draw, Widget},
+};
 
 pub trait FadeDirection {
     fn alpha_value(elapsed_ns: u64, duration: Duration) -> f32;
@@ -109,7 +112,7 @@ impl<D: FadeDirection> Animated for Fade<D> {
 impl<D: FadeDirection> Draw for Fade<D> {
     fn draw_with_offset(
         &self,
-        offset: &crate::types::offset::Offset<usize>,
+        offset: &crate::types::offset::Offset<f32>,
         drawer: &mut crate::drawer::Drawer,
     ) {
         let widget_image = drawer.draw_into_offscreen(offset, &self.widget);

@@ -20,22 +20,22 @@
 pub mod alignment;
 pub mod border;
 pub mod color;
-pub mod constraints;
 pub mod data;
 pub mod direction;
 pub mod extent;
+pub mod identifiers;
+pub mod measure;
 pub mod offset;
 pub mod spacing;
-pub mod widget_id;
 
 pub use {
     alignment::{Alignment, AlignmentGBuilder, Position},
     border::{Border, BorderGBuilder},
     color::{Bgra, Color, LinearGradient},
-    data::{AssociatedData, WidgetConfig, WidgetData},
+    data::{WidgetDependency, WidgetStyle, WidgetData},
     direction::Direction,
-    extent::Extent2D,
+    extent::Extent,
+    identifiers::{WidgetClass, WidgetId},
     offset::Offset,
     spacing::{Spacing, SpacingGBuilder},
-    widget_id::WidgetId,
 };
