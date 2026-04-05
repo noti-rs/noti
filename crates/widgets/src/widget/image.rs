@@ -1,23 +1,31 @@
-use std::io::{Read, Seek, Write};
+use std::{
+    io::{Read, Seek, Write},
+    path::PathBuf,
+};
 
 use linicon::IconPath;
 use log::{debug, error, warn};
 use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::TryFromValue};
 
 use crate::{
-    context::{GenerateId, GetData, GetFont, GetStyle, LoadExtent, SaveExtent},
+    context::{
+        GenerateId, GetFont, GetState, GetStyle, LoadExtent, ManageDirtyFlags, ManageIntrinsic,
+        RegisterKey, SaveExtent, Subscribe,
+    },
     drawer::Drawer,
     events::{Action, DispatchEvent, Event},
     make_configuration,
+    state::State,
     types::{
-        data::{Configure, ToConfig, WidgetData, WidgetStyle},
+        data::{Configure, ToConfig, WidgetStyle},
+        dirty_flags::DirtyFlags,
         extent::Extent,
-        identifiers::{WidgetClass, WidgetId},
-        measure::{self, Constraints, ExtentManagement, IntrinsicManagement, Measure, SizingMode},
+        identifiers::{WidgetClass, WidgetId, WidgetKey},
+        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
     },
-    widget::{Compile, CompileCtx, CompileResult, Draw, Initialize, Layout, WidgetInfo},
+    widget::{Draw, Initialize, Invalidate, Layout, WidgetInfo},
 };
 
 const DEFAULT_ICON_THEME: &str = "hicolor";
@@ -50,6 +58,10 @@ pub struct Image {
     #[gbuilder(hidden, default)]
     id: WidgetId,
 
+    #[builder(setter(strip_option, into), default)]
+    #[gbuilder(default)]
+    key: Option<WidgetKey>,
+
     #[builder(default, setter(into))]
     #[gbuilder(default)]
     class: WidgetClass,
@@ -62,7 +74,11 @@ pub struct Image {
     /// draw the image to the screen.
     #[builder(private, default = None)]
     #[gbuilder(hidden, default(None))]
-    content: Option<ImageData>,
+    value: Option<ImageData>,
+
+    #[builder(setter(strip_option), default)]
+    #[gbuilder(hidden, default(None))]
+    state: Option<State<ImageProvider>>,
 
     #[builder(setter(strip_option), default)]
     width: Option<usize>,
@@ -120,10 +136,6 @@ pub struct Image {
     /// and stable even at very small sizes.
     #[builder(setter(strip_option), default)]
     mipmap_mode: Option<MipmapMode>,
-
-    #[builder(private, default)]
-    #[gbuilder(hidden, default)]
-    extent: Extent<f32>,
 }
 
 make_configuration! {
@@ -146,42 +158,8 @@ make_configuration! {
     } <<= Image
 }
 
-impl WidgetInfo for Image {
-    fn get_class(&self) -> WidgetClass {
-        self.class.clone()
-    }
-
-    fn get_type(&self) -> &'static str {
-        "image"
-    }
-
-    /// Returns the width of the image widget.
-    ///
-    /// This value is only meaningful after [`Self::compile`] has been called.
-    /// If the widget has not been compiled yet, this will typically return
-    /// an undefined or default value.
-    fn width(&self) -> f32 {
-        self.extent.width
-    }
-
-    /// Returns the height of the image widget.
-    ///
-    /// Like [`Self::width`], this is only meaningful after [`Self::compile`] has been
-    /// successfully called.
-    fn height(&self) -> f32 {
-        self.extent.height
-    }
-
-    fn sizing_mode(&self) -> SizingMode {
-        SizingMode::Dynamic
-    }
-}
-
-impl<C> Initialize<C> for Image
-where
-    C: GenerateId + GetData + GetStyle + GetFont,
-{
-    fn initialize(&mut self, context: &mut C) {
+impl Image {
+    fn load_image(&mut self, provider: &ImageProvider) {
         /// Look's up nearest freedesktop icons.
         fn lookup_freedesktop_icon(icon_name: &str, theme: &str, size: u16) -> Option<IconPath> {
             linicon::lookup_icon(icon_name)
@@ -191,22 +169,10 @@ where
                 .and_then(|icon| icon.ok())
         }
 
-        if *self.id == 0 {
-            self.id = context.generate_id();
-        }
-
-        if let Some(WidgetStyle::Image(image_config)) = context.get_style(&self.class) {
-            self.configure(image_config.clone());
-        }
-
-        let Some(widget_data) = context.get_data(&self.class) else {
-            return;
-        };
-
-        self.content = match widget_data {
-            WidgetData::ImageData(image_data) => ImageData::from_image_data(image_data),
-            WidgetData::ImagePath(image_path) => ImageData::from_path(image_path),
-            WidgetData::Icon { name, theme, sizes } => {
+        self.value = match provider {
+            ImageProvider::ImageInfo(image_data) => ImageData::from_image_data(image_data),
+            ImageProvider::ImagePath(image_path) => ImageData::from_path(image_path),
+            ImageProvider::Icon { name, theme, sizes } => {
                 let mut sizes = sizes.clone();
                 sizes.sort();
                 sizes
@@ -218,11 +184,79 @@ where
                     })
                     .and_then(|icon_path| ImageData::from_path(&icon_path.path))
             }
-            _ => {
-                warn!("Data wasn't provided for image widget with id {}", *self.id);
-                return;
-            }
         };
+    }
+}
+
+impl WidgetInfo for Image {
+    fn get_id(&self) -> WidgetId {
+        self.id
+    }
+
+    fn get_class(&self) -> WidgetClass {
+        self.class.clone()
+    }
+
+    fn get_type(&self) -> &'static str {
+        "image"
+    }
+
+    fn sizing_mode(&self) -> SizingMode {
+        SizingMode::Dynamic
+    }
+}
+
+impl<C> Invalidate<C> for Image
+where
+    C: ManageDirtyFlags<WidgetId> + GetState,
+{
+    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
+        let mut dirty_flags = context.get_dirty_flags(self.id);
+
+        if dirty_flags.contains(DirtyFlags::NEEDS_REBUILD) {
+            if let Some(image_provider) = self.state.and_then(|state| context.get(state)) {
+                self.load_image(image_provider);
+
+                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
+            }
+
+            dirty_flags -= DirtyFlags::NEEDS_REBUILD;
+        }
+
+        context.set_dirty_flags(self.id, dirty_flags);
+        dirty_flags
+    }
+}
+
+impl<C> Initialize<C> for Image
+where
+    C: GenerateId
+        + RegisterKey<WidgetKey, WidgetId>
+        + GetState
+        + Subscribe<WidgetId>
+        + GetStyle
+        + GetFont,
+{
+    fn initialize(&mut self, context: &mut C) {
+        if *self.id == 0 {
+            self.id = context.generate_id();
+        }
+
+        if let Some(key) = self.key.as_ref() {
+            context.register_key(key.clone(), self.id);
+        }
+
+        if let Some(WidgetStyle::Image(image_config)) = context.get_style(&self.class) {
+            self.configure(image_config.clone());
+        }
+
+        if let Some(state) = self.state {
+            context.subscribe(self.id, state);
+
+            if let Some(image_provider) = context.get(state) {
+                self.load_image(image_provider);
+            }
+        }
     }
 }
 
@@ -240,7 +274,7 @@ impl Measure<f32, WidgetId> for Image {
     /// - Intention: Tells the parent container (like a Flex) the native resolution of the asset plus its required offsets.
     fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
-        C: IntrinsicManagement<f32, WidgetId>,
+        C: ManageIntrinsic<f32, WidgetId>,
     {
         if let Some(intrinsic) = context.load(self.id) {
             return intrinsic;
@@ -252,7 +286,7 @@ impl Measure<f32, WidgetId> for Image {
             inner_spacing.vertical() as f32,
         );
 
-        let Some(content) = &self.content else {
+        let Some(content) = &self.value else {
             return measure::Intrinsic::new(spacing_size, spacing_size);
         };
 
@@ -326,7 +360,7 @@ impl Measure<f32, WidgetId> for Image {
     /// a specific size.
     fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
     where
-        C: IntrinsicManagement<f32, WidgetId> + ExtentManagement<f32, WidgetId>,
+        C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
         if let Some(extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) {
             return extent;
@@ -343,7 +377,7 @@ impl Measure<f32, WidgetId> for Image {
             return spacing_size.clamp_with(constraints.min, constraints.max);
         }
 
-        let Some(content) = &self.content else {
+        let Some(content) = &self.value else {
             return spacing_size.clamp_with(constraints.min, constraints.max);
         };
 
@@ -388,9 +422,7 @@ where
     C: LoadExtent<f32, WidgetId>,
 {
     fn layout(&mut self, context: &C) {
-        if let Some(extent) = context.load(self.id) {
-            self.extent = extent;
-        } else {
+        if context.load(self.id).is_none() {
             warn!(
                 "Image widget with id {} didn't measured! The widget may be incorrectly drawn.",
                 *self.id
@@ -399,114 +431,21 @@ where
     }
 }
 
-impl Compile for Image {
-    /// Prepares the image for rendering by resolving its data and calculating
-    /// the final layout dimensions.
-    ///
-    /// This method attempts to retrieve image data from the provided [`CompileCtx`].
-    /// Once the image is obtained, the widget calculates the optimal scale
-    /// to fit within the provided [`Extent2D`] boundary, ensuring that
-    /// `max_size` and aspect ratio constraints are respected.
-    ///
-    /// This must be called before attempting to draw the widget or querying its
-    /// final width and height.
-    fn compile(
-        &mut self,
-        constraints: Constraints<Extent<f32>>,
-        compile_ctx: &mut CompileCtx,
-    ) -> CompileResult {
-        /// Look's up nearest freedesktop icons.
-        fn lookup_freedesktop_icon(icon_name: &str, theme: &str, size: u16) -> Option<IconPath> {
-            linicon::lookup_icon(icon_name)
-                .from_theme(theme)
-                .with_size(size)
-                .next()
-                .and_then(|icon| icon.ok())
-        }
-
-        if self.class.is_empty() {
-            self.class = compile_ctx.generate_new_class(self.get_type());
-        }
-
-        if let Some(width) = self.width {
-            if width as f32 > constraints.max.width {
-                return CompileResult::Failure;
-            }
-        }
-
-        if let Some(height) = self.height {
-            if height as f32 > constraints.max.height {
-                return CompileResult::Failure;
-            }
-        }
-
-        let Some(associated_data) = compile_ctx.data_pool.get(&self.class) else {
-            return CompileResult::Failure;
+impl<C> Draw<C, f32> for Image
+where
+    C: LoadExtent<f32, WidgetId>,
+{
+    fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
+        let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
+            warn!(
+                "Image widget with id {} didn't measured! Refused to draw.",
+                *self.id
+            );
+            return;
         };
 
-        if let Some(WidgetStyle::Image(image_config)) = &associated_data.style {
-            self.configure(image_config.clone());
-        }
-
-        let Some(widget_data) = &associated_data.data else {
-            return CompileResult::Failure;
-        };
-
-        let image_configuration = self.to_config();
-        let available_extent = Extent::new(
-            constraints.max.width.round() as usize,
-            constraints.max.height.round() as usize,
-        );
-        self.content = match widget_data {
-            WidgetData::ImageData(image_data) => ImageData::from_image_data(image_data),
-            WidgetData::ImagePath(image_path) => ImageData::from_path(image_path),
-            WidgetData::Icon { name, theme, sizes } => {
-                let mut sizes = sizes.clone();
-                sizes.sort();
-                sizes
-                    .into_iter()
-                    .rev()
-                    .find_map(|size| {
-                        lookup_freedesktop_icon(name, theme, size)
-                            .or_else(|| lookup_freedesktop_icon(name, DEFAULT_ICON_THEME, size))
-                    })
-                    .and_then(|icon_path| ImageData::from_path(&icon_path.path))
-            }
-            _ => return CompileResult::Failure,
-        };
-
-        let margin = self.margin.unwrap_or_default();
-        todo!()
-
-        // if self.extent.width > available_extent.width
-        //     || self.extent.height > available_extent.height
-        // {
-        //     warn!(
-        //         "The image doesn't fit to available space.\
-        //         \nThe image size: width={}, height={}.\
-        //         \nAvailable space: width={}, height={}.",
-        //         self.extent.width,
-        //         self.extent.height,
-        //         available_extent.width,
-        //         available_extent.height
-        //     );
-        //     return CompileResult::Failure;
-        // }
-        //
-        // if self.content.is_exists() {
-        //     CompileResult::Success {
-        //         used_extent: self.extent.into(),
-        //     }
-        // } else {
-        //     CompileResult::Failure
-        // }
-    }
-}
-
-impl Draw for Image {
-    fn draw_with_offset(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
         let inner_spacing = self.margin.unwrap_or_default();
-        let inner_extent = self.extent.shrink_to_with(&inner_spacing);
+        let inner_extent = provided_extent.shrink_to_with(&inner_spacing);
 
         if inner_extent.width <= 0.0 || inner_extent.height <= 0.0 {
             return;
@@ -516,7 +455,7 @@ impl Draw for Image {
             image_file_descriptor,
             extent: image_extent,
             ..
-        }) = &self.content
+        }) = &self.value
         else {
             return;
         };
@@ -616,10 +555,27 @@ impl Draw for Image {
     }
 }
 
-impl DispatchEvent for Image {
-    fn dispatch_event(&self, _event: Event) -> Action {
+impl<C> DispatchEvent<C, f32> for Image
+where
+    C: LoadExtent<f32, WidgetId>,
+{
+    fn dispatch_event(&self, _context: &C, _event: Event) -> Action {
         Action::None
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum ImageProvider {
+    /// Raw byte data for an image.
+    ImageInfo(ImageInfo),
+    /// A filesystem path to an image file.
+    ImagePath(PathBuf),
+    /// Instructions for looking up a system icon.
+    Icon {
+        name: String,
+        theme: String,
+        sizes: Vec<u16>,
+    },
 }
 
 /// Represents a GPU-ready image used by [`Image`] widget during rendering.

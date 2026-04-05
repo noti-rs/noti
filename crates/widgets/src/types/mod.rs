@@ -22,6 +22,7 @@ pub mod border;
 pub mod color;
 pub mod data;
 pub mod direction;
+pub mod dirty_flags;
 pub mod extent;
 pub mod identifiers;
 pub mod measure;
@@ -32,7 +33,7 @@ pub use {
     alignment::{Alignment, AlignmentGBuilder, Position},
     border::{Border, BorderGBuilder},
     color::{Bgra, Color, LinearGradient},
-    data::{WidgetDependency, WidgetStyle, WidgetData},
+    data::{WidgetDependency, WidgetStyle},
     direction::Direction,
     extent::Extent,
     identifiers::{WidgetClass, WidgetId},

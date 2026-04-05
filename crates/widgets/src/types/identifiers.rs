@@ -2,6 +2,8 @@ use std::{fmt::Display, ops::Deref};
 
 use shared::value::TryFromValue;
 
+/// A unique, auto-generated identifier for the widget.
+/// IDs start at 1; a value of 0 represents an "unknown" or "empty" state.
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Default)]
 pub struct WidgetId(u64);
 
@@ -19,12 +21,41 @@ impl From<u64> for WidgetId {
     }
 }
 
-impl TryFromValue for WidgetId {
-    fn try_from_uint(value: usize) -> Result<Self, shared::error::ConversionError> {
-        Ok(Self(value as u64))
+/// A unique access key for external control. While the system defaults to
+/// the last instance found in the tree if keys are duplicated, you should
+/// ensure each key is unique to avoid selection conflicts.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
+pub struct WidgetKey(String);
+
+impl Deref for WidgetKey {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
+impl From<&str> for WidgetKey {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl From<String> for WidgetKey {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl TryFromValue for WidgetKey {
+    fn try_from_string(value: String) -> Result<Self, shared::error::ConversionError> {
+        Ok(Self(value))
+    }
+}
+
+/// A stylistic grouping similar to CSS classes. Use this
+/// to apply shared styles to multiple widgets of the same
+/// category simultaneously.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Default)]
 pub struct WidgetClass(String);
 

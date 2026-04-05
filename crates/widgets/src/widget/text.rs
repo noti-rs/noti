@@ -7,20 +7,25 @@ use shared::{
 };
 
 use crate::{
-    context::{GenerateId, GetData, GetFont, GetStyle, LoadExtent, SaveExtent},
+    context::{
+        GenerateId, GetFont, GetState, GetStyle, LoadExtent, ManageDirtyFlags, ManageIntrinsic,
+        RegisterKey, SaveExtent, Subscribe,
+    },
     drawer::{Drawer, UseColor},
     events::{Action, DispatchEvent, Event},
     make_configuration,
+    state::State,
     types::{
-        data::{Configure, ToConfig, WidgetData, WidgetStyle},
+        data::{Configure, ToConfig, WidgetStyle},
+        dirty_flags::DirtyFlags,
         extent::Extent,
-        identifiers::{WidgetClass, WidgetId},
-        measure::{self, Constraints, ExtentManagement, IntrinsicManagement, Measure, SizingMode},
+        identifiers::{WidgetClass, WidgetId, WidgetKey},
+        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
         Color,
     },
-    widget::{Compile, CompileCtx, CompileResult, Draw, Initialize, Layout, WidgetInfo},
+    widget::{Draw, Initialize, Invalidate, Layout, WidgetInfo},
 };
 
 /// A text widget that manages layout, styling, and rendering of text
@@ -41,6 +46,10 @@ pub struct Text {
     #[builder(private, default)]
     #[gbuilder(hidden, default)]
     id: WidgetId,
+
+    #[builder(setter(strip_option, into), default)]
+    #[gbuilder(default)]
+    key: Option<WidgetKey>,
 
     #[builder(default, setter(into))]
     #[gbuilder(default)]
@@ -113,7 +122,11 @@ pub struct Text {
     /// information the widget uses to draw glyphs on the screen.
     #[builder(default)]
     #[gbuilder(default)]
-    content: text::Text,
+    value: text::Text,
+
+    #[builder(setter(strip_option), default)]
+    #[gbuilder(hidden, default(None))]
+    state: Option<State<text::Text>>,
 
     /// A shared reference to the system's global font registry.
     ///
@@ -148,17 +161,6 @@ pub struct Text {
     #[builder(private, default)]
     #[gbuilder(hidden, default)]
     total_lines: Option<usize>,
-
-    /// The final dimensions that the text widget occupies within the layout.
-    ///
-    /// While a widget might start by trying to fill all available space,
-    /// this field tracks the actual footprint the text takes up after
-    /// accounting for constraints and internal margins. It serves as the
-    /// source of truth for the layout engine to ensure the widget is
-    /// positioned correctly relative to its neighbors.
-    #[builder(private, default)]
-    #[gbuilder(hidden, default)]
-    extent: Extent<f32>,
 }
 
 make_configuration! {
@@ -299,18 +301,19 @@ impl Clone for Text {
         // INFO: we shouldn't clone compiled info about text
         Self {
             id: self.id,
+            key: self.key.clone(),
             class: self.class.clone(),
             font: self.font.clone(),
             wrap: self.wrap,
             margin: self.margin,
             alignment: self.alignment.clone(),
             color: self.color.clone(),
-            content: self.content.clone(),
+            value: self.value.clone(),
+            state: self.state,
             line_spacing: self.line_spacing,
             font_collection: None,
             paragraph: None,
             total_lines: None,
-            extent: Extent::default(),
         }
     }
 }
@@ -319,18 +322,19 @@ impl Clone for TextGBuilder {
     fn clone(&self) -> Self {
         Self {
             id: self.id,
+            key: self.key.clone(),
             class: self.class.clone(),
             font: self.font.clone(),
             wrap: self.wrap,
             margin: self.margin,
             alignment: self.alignment.clone(),
             color: self.color.clone(),
-            content: self.content.clone(),
+            value: self.value.clone(),
+            state: self.state,
             line_spacing: self.line_spacing,
             font_collection: None,
             paragraph: None,
             total_lines: None,
-            extent: Some(Extent::default()),
         }
     }
 }
@@ -343,15 +347,18 @@ impl Text {
 
     pub fn new() -> Self {
         Self {
-            content: text::Text::new_empty(),
+            value: text::Text::new_empty(),
             paragraph: None,
-            extent: Extent::default(),
             ..Default::default()
         }
     }
 }
 
 impl WidgetInfo for Text {
+    fn get_id(&self) -> WidgetId {
+        self.id
+    }
+
     fn get_class(&self) -> WidgetClass {
         self.class.clone()
     }
@@ -360,44 +367,66 @@ impl WidgetInfo for Text {
         "text"
     }
 
-    /// Returns the width + horizontal margins of the text container.
-    ///
-    /// Unlike [`Self::height`], this does not reflect the intrinsic text width,
-    /// but rather the allocated width for text layout, since text widgets
-    /// are expected to fill the entire available horizontal space.
-    fn width(&self) -> f32 {
-        // INFO: the width should get all available width but height should get only renderable
-        // rows.
-        self.extent.width + self.margin.unwrap_or_default().horizontal() as f32
-    }
-
-    /// Returns the computed height of the text after compilation.
-    ///
-    /// The result reflects the actual paragraph height + vertical margins, which may be
-    /// smaller than the available area if the text fits without overflow.
-    fn height(&self) -> f32 {
-        self.paragraph
-            .as_ref()
-            .map(|para| para.borrow().height() + self.margin.unwrap_or_default().vertical() as f32)
-            .unwrap_or(0.)
-    }
-
     fn sizing_mode(&self) -> SizingMode {
         SizingMode::Dynamic
     }
 }
 
+impl<C> Invalidate<C> for Text
+where
+    C: ManageDirtyFlags<WidgetId> + GetState,
+{
+    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
+        let mut dirty_flags = context.get_dirty_flags(self.id);
+
+        if dirty_flags.contains(DirtyFlags::NEEDS_REBUILD) {
+            if let Some(text) = self
+                .state
+                .and_then(|state| context.get(state))
+                .take_if(|text| **text != self.value)
+            {
+                self.value = text.clone();
+
+                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
+            }
+
+            dirty_flags -= DirtyFlags::NEEDS_REBUILD;
+        }
+
+        if dirty_flags.is_empty() {
+            context.remove_dirty_flags(self.id);
+        } else {
+            context.set_dirty_flags(self.id, dirty_flags);
+        }
+
+        dirty_flags
+    }
+}
+
 impl<C> Initialize<C> for Text
 where
-    C: GenerateId + GetData + GetStyle + GetFont,
+    C: GenerateId
+        + RegisterKey<WidgetKey, WidgetId>
+        + GetState
+        + Subscribe<WidgetId>
+        + GetStyle
+        + GetFont,
 {
     fn initialize(&mut self, context: &mut C) {
         if *self.id == 0 {
             self.id = context.generate_id();
         }
 
-        if let Some(WidgetData::Text(text)) = context.get_data(&self.class) {
-            self.content = text.clone();
+        if let Some(key) = self.key.as_ref() {
+            context.register_key(key.clone(), self.id);
+        }
+
+        if let Some(state) = self.state {
+            context.subscribe(self.id, state);
+
+            if let Some(text) = context.get(state) {
+                self.value = text.clone();
+            }
         }
 
         if let Some(WidgetStyle::Text(text_style)) = context.get_style(&self.class) {
@@ -427,7 +456,7 @@ where
 impl Measure<f32, WidgetId> for Text {
     fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
-        C: IntrinsicManagement<f32, WidgetId>,
+        C: ManageIntrinsic<f32, WidgetId>,
     {
         if let Some(intrinsic) = context.load(self.id) {
             return intrinsic;
@@ -468,7 +497,7 @@ impl Measure<f32, WidgetId> for Text {
 
     fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
     where
-        C: IntrinsicManagement<f32, WidgetId> + ExtentManagement<f32, WidgetId>,
+        C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
         if let Some(extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) {
             return extent;
@@ -538,83 +567,6 @@ where
                 }
             }
         }
-
-        self.extent = extent;
-    }
-}
-
-impl Compile for Text {
-    /// Prepares the widget for rendering by applying layout constraints
-    /// and external data.
-    ///
-    /// This step computes the final layout using the provided [`Extent2D<usize>`]
-    /// for spatial limits and the [`CompileCtx`] for shared resources
-    /// and ID-linked configurations.
-    fn compile(
-        &mut self,
-        constraints: Constraints<Extent<f32>>,
-        compile_ctx: &mut CompileCtx,
-    ) -> CompileResult {
-        if self.class.is_empty() {
-            self.class = compile_ctx.generate_new_class(self.get_type());
-        }
-
-        let associated_data = compile_ctx.data_pool.get(&self.class);
-
-        if let Some(WidgetData::Text(text)) =
-            associated_data.and_then(|associated| associated.data.as_ref())
-        {
-            self.content = text.clone();
-        }
-
-        if let Some(WidgetStyle::Text(text_config)) =
-            associated_data.and_then(|associated| associated.style.as_ref())
-        {
-            self.configure(text_config.clone());
-        }
-
-        if self.content.body.as_str().trim().is_empty() {
-            warn!("The text is blank");
-            return CompileResult::Failure;
-        }
-
-        let mut available_extent = Extent::new(
-            constraints.max.width.round() as usize,
-            constraints.max.height.round() as usize,
-        );
-        available_extent.shrink_by(&self.margin.unwrap_or_default());
-
-        self.font_collection = compile_ctx.font_collection.clone().into();
-
-        let text_style = self.base_text_style();
-        let mut paragraph = self.build_paragraph(&text_style, Self::MAX_LINES);
-        paragraph.layout(available_extent.width as f32);
-
-        if paragraph.height() > available_extent.height as f32 {
-            match self.try_fit_paragraph(&paragraph, available_extent.into(), &text_style) {
-                Some((new_paragraph, total_lines)) => {
-                    paragraph = new_paragraph;
-                    self.total_lines = Some(total_lines);
-                }
-                None => {
-                    warn!(
-                        "The text doesn't fit to available space. \
-                Available space: width={}, height={}.",
-                        available_extent.width, available_extent.height
-                    );
-                    return CompileResult::Failure;
-                }
-            }
-        }
-
-        let used_extent = Extent::new(
-            constraints.max.width.round(),
-            paragraph.height() + self.margin.unwrap_or_default().vertical() as f32,
-        );
-        self.extent = used_extent;
-        self.paragraph = Some(RefCell::new(paragraph));
-
-        CompileResult::Success { used_extent }
     }
 }
 
@@ -697,7 +649,7 @@ impl Text {
         );
         paragraph_builder.push_style(base_text_style);
 
-        let text = &self.content.body;
+        let text = &self.value.body;
 
         let mut cursor = 0;
         let mut end_stack = vec![text.len()];
@@ -705,7 +657,7 @@ impl Text {
 
         while cursor < text.len() {
             let nearest_end = unsafe { *end_stack.last().unwrap_unchecked() };
-            let entity = match self.content.entities.get(current_entity_index) {
+            let entity = match self.value.entities.get(current_entity_index) {
                 Some(entity) => entity,
                 None => {
                     paragraph_builder.add_text(&text[cursor..nearest_end]);
@@ -778,14 +730,25 @@ impl Text {
     }
 }
 
-impl Draw for Text {
-    fn draw_with_offset(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
+impl<C> Draw<C, f32> for Text
+where
+    C: LoadExtent<f32, WidgetId>,
+{
+    fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
+        let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
+            warn!(
+                "Text widget with id {} didn't measured! Refused to draw.",
+                *self.id
+            );
+            return;
+        };
+
         // INFO: as you see, there's re-building paragraph. Since I want to use `Paint` type for
         // coloring the text, it requires the exact position on surface, and because of this I
         // cannot determine once the position. Especially when a banner moves from one place to
         // another.
 
-        let inner_extent = self.extent.shrink_to_with(&self.margin.unwrap_or_default());
+        let inner_extent = provided_extent.shrink_to_with(&self.margin.unwrap_or_default());
         if inner_extent.width <= 0.0 || inner_extent.height <= 0.0 {
             return;
         }
@@ -804,7 +767,7 @@ impl Draw for Text {
         paint.use_color(
             &self.color.as_ref().cloned().unwrap_or_default(),
             *offset,
-            self.extent,
+            provided_extent,
         );
 
         base_text_style.set_foreground_paint(&paint);
@@ -814,13 +777,18 @@ impl Draw for Text {
         } else {
             self.build_paragraph(&base_text_style, Self::MAX_LINES)
         };
-        paragraph.layout(self.extent.width);
+        paragraph.layout(provided_extent.width);
 
         let canvas = drawer.surface.canvas();
 
         canvas.save();
         canvas.clip_rect(
-            skia_safe::Rect::from_xywh(offset.x, offset.y, self.extent.width, self.extent.height),
+            skia_safe::Rect::from_xywh(
+                offset.x,
+                offset.y,
+                provided_extent.width,
+                provided_extent.height,
+            ),
             skia_safe::ClipOp::Intersect,
             true,
         );
@@ -831,8 +799,11 @@ impl Draw for Text {
     }
 }
 
-impl DispatchEvent for Text {
-    fn dispatch_event(&self, _event: Event) -> Action {
+impl<C> DispatchEvent<C, f32> for Text
+where
+    C: LoadExtent<f32, WidgetId>,
+{
+    fn dispatch_event(&self, _context: &C, _event: Event) -> Action {
         // TODO: implement link click
         Action::None
     }

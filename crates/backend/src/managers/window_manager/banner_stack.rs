@@ -22,10 +22,13 @@ use std::{
     time::{self, Duration},
 };
 use widgets::{
-    self, UiRoot, animation::{Animated, AnimatedWidget}, context::{Context, InjectDependency}, drawer::Drawer, types::{Alignment, Border, Extent, Offset, Position, measure::Constraints}, widget::{
-        Compile, CompileCtx, Draw, FlexContainerBuilder, ImageBuilder, TextBuilder, Widget,
-        WidgetInfo,
-    }
+    self,
+    context::{Context, InjectDependency},
+    drawer::Drawer,
+    presence::Animated,
+    types::{measure::Constraints, Alignment, Border, Extent, Offset, Position},
+    widget::{FlexContainerBuilder, ImageBuilder, TextBuilder, Widget, WidgetInfo},
+    UiRoot,
 };
 
 use super::CachedLayout;
@@ -418,7 +421,7 @@ impl Banner {
         //     return DrawState::Failure;
         // };
 
-        ui_root.draw_with_offset(offset, &mut drawer);
+        ui_root.draw(offset, &mut drawer);
 
         debug!("Banner (id={}): Complete draw", self.notification.id);
         DrawState::Success
@@ -463,74 +466,6 @@ fn default_layout() -> Widget {
         .into()
 }
 
-fn make_compile_context(
-    notification: &Notification,
-    config: &Config,
-    font_collection: FontCollection,
-) -> CompileCtx {
-    macro_rules! make_text_config {
-        (for $kind:ident use $compile_ctx:ident, $display_config:ident, $colors:ident, $id:ident) => {
-            $compile_ctx.assign_config(
-                Banner::$id,
-                widgets::types::WidgetStyle::Text(widgets::widget::TextStyle {
-                    font: widgets::widget::Font {
-                        name: $display_config.$kind.font.name.clone(),
-                        size: $display_config.$kind.font_size as usize,
-                        style: $display_config.$kind.style.clone().into(),
-                    },
-                    wrap: $display_config.$kind.wrap,
-                    margin: $display_config.$kind.margin.into(),
-                    alignment: $display_config.$kind.alignment.clone().into(),
-                    line_spacing: $display_config.$kind.line_spacing as usize,
-                    color: $colors.foreground.clone().into(),
-                }),
-            );
-        };
-    }
-
-    let mut compile_ctx = CompileCtx::new(font_collection);
-
-    let display_config = config.display_by_app(&notification.app_name);
-    let theme = config.theme_by_app(&notification.app_name);
-    let colors = theme.by_urgency(&notification.hints.urgency);
-
-    compile_ctx.assign_config(
-        Banner::NOTIFICATION_FRAME,
-        widgets::types::WidgetStyle::Container(widgets::widget::ContainerStyle {
-            background_color: colors.background.clone().into(),
-            border: Border {
-                size: display_config.border.size as usize,
-                radius: display_config.border.radius as usize,
-                color: colors.border.clone().into(),
-            },
-            spacing: display_config.padding.into(),
-            alignment: Alignment::new(Position::Start, Position::Center),
-        }),
-    );
-
-    compile_ctx.assign_config(
-        Banner::NOTIFICATION_IMAGE,
-        widgets::types::WidgetStyle::Image(display_config.image.clone().into()),
-    );
-
-    if let Some(image_data) = try_get_image_data(notification, display_config) {
-        compile_ctx.assign_data(Banner::NOTIFICATION_IMAGE, image_data);
-    }
-
-    make_text_config!(for summary use compile_ctx, display_config, colors, NOTIFICATION_SUMMARY);
-    compile_ctx.assign_data(
-        Banner::NOTIFICATION_SUMMARY,
-        widgets::types::WidgetData::Text(notification.summary.clone()),
-    );
-
-    make_text_config!(for body use compile_ctx, display_config, colors, NOTIFICATION_BODY);
-    compile_ctx.assign_data(
-        Banner::NOTIFICATION_BODY,
-        widgets::types::WidgetData::Text(notification.body.clone()),
-    );
-
-    compile_ctx
-}
 fn inject_dependencies(context: &mut Context, notification: &Notification, config: &Config) {
     macro_rules! make_text_config {
         (for $kind:ident use $compile_ctx:ident, $display_config:ident, $colors:ident, $id:ident) => {
@@ -630,19 +565,19 @@ fn try_get_image_data(
         })
 }
 
-impl Draw for Banner {
-    // TODO: add `Result` type for these methods to handle possible errors
-    fn draw_with_offset(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
-        // let Some(layout) = &self.base_layout else {
-        //     return;
-        // };
-        let Some(layout) = &self.ui_root else {
-            return;
-        };
-
-        layout.draw_with_offset(offset, drawer);
-    }
-}
+// impl Draw for Banner {
+//     // TODO: add `Result` type for these methods to handle possible errors
+//     fn draw_on(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
+//         // let Some(layout) = &self.base_layout else {
+//         //     return;
+//         // };
+//         let Some(layout) = &self.ui_root else {
+//             return;
+//         };
+//
+//         layout.draw_on(offset, drawer);
+//     }
+// }
 
 impl Animated for Banner {
     fn is_finished(&self) -> bool {
@@ -850,20 +785,20 @@ impl BannerStage {
     }
 }
 
-impl Draw for BannerStage {
-    fn draw_with_offset(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
-        match self {
-            BannerStage::Appearing(animated_widget) => {
-                animated_widget.draw_with_offset(offset, drawer)
-            }
-            BannerStage::Showing { widget, .. } => widget.draw_with_offset(offset, drawer),
-            BannerStage::Disappearing(animated_widget) => {
-                animated_widget.draw_with_offset(offset, drawer)
-            }
-            BannerStage::Allocation(_) | BannerStage::Free(_) => (),
-        }
-    }
-}
+// impl Draw for BannerStage {
+//     fn draw_on(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
+//         match self {
+//             BannerStage::Appearing(animated_widget) => {
+//                 animated_widget.draw_with_offset(offset, drawer)
+//             }
+//             BannerStage::Showing { widget, .. } => widget.draw_on(offset, drawer),
+//             BannerStage::Disappearing(animated_widget) => {
+//                 animated_widget.draw_with_offset(offset, drawer)
+//             }
+//             BannerStage::Allocation(_) | BannerStage::Free(_) => (),
+//         }
+//     }
+// }
 
 #[derive(Default)]
 enum CloseStatus {

@@ -1,3 +1,5 @@
+use crate::{context::LoadExtent, types::WidgetId};
+
 #[derive(Debug, Clone)]
 pub struct Event {
     pub kind: EventKind,
@@ -40,6 +42,10 @@ pub enum Action {
     None,
 }
 
-pub trait DispatchEvent {
-    fn dispatch_event(&self, event: Event) -> Action;
+pub(crate) trait DispatchEvent<C, T>
+where
+    C: LoadExtent<T, WidgetId>,
+    T: Default + Copy,
+{
+    fn dispatch_event(&self, context: &C, event: Event) -> Action;
 }

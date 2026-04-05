@@ -1,12 +1,4 @@
-use std::path::PathBuf;
-
-use shared::text::Text;
-
-use crate::widget::{
-    container::ContainerStyle,
-    image::{ImageInfo, ImageStyle},
-    text::TextStyle,
-};
+use crate::widget::{container::ContainerStyle, image::ImageStyle, text::TextStyle};
 
 /// A container for the external state and settings tied to a specific widget.
 ///
@@ -15,32 +7,8 @@ use crate::widget::{
 /// the raw content to display (`data`), the visual settings (`config`),
 /// or both.
 pub struct WidgetDependency {
-    /// The primary content for the widget (e.g., text strings or image paths).
-    pub data: Option<WidgetData>,
     /// The secondary visual or layout settings (e.g., alignment or colors).
     pub style: Option<WidgetStyle>,
-}
-
-/// A strictly defined set of content types that widgets can display.
-///
-/// By using an enum instead of an open-ended trait, the engine ensures
-/// type safety and prevents "obscure" data injection. Each variant
-/// maps to a specific widget's needs—for example, a `Text` widget
-/// will only ever look for the `Text` variant.
-#[derive(Debug, Clone)]
-pub enum WidgetData {
-    /// Content for text-based widgets.
-    Text(Text),
-    /// Raw byte data for an image.
-    ImageData(ImageInfo),
-    /// A filesystem path to an image file.
-    ImagePath(PathBuf),
-    /// Instructions for looking up a system icon.
-    Icon {
-        name: String,
-        theme: String,
-        sizes: Vec<u16>,
-    },
 }
 
 /// A collection of specific configuration structs for specialized widgets.
@@ -75,21 +43,9 @@ pub(crate) trait ToConfig<C> {
     fn to_config(&self) -> C;
 }
 
-impl From<WidgetData> for WidgetDependency {
-    fn from(value: WidgetData) -> Self {
-        WidgetDependency {
-            data: Some(value),
-            style: None,
-        }
-    }
-}
-
 impl From<WidgetStyle> for WidgetDependency {
     fn from(value: WidgetStyle) -> Self {
-        WidgetDependency {
-            data: None,
-            style: Some(value),
-        }
+        WidgetDependency { style: Some(value) }
     }
 }
 

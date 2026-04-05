@@ -45,7 +45,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
 };
 use widgets::{
-    animation::Animated,
+    presence::Animated,
     types::{extent::Extent, offset::Offset},
 };
 

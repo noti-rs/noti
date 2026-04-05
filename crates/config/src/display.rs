@@ -219,12 +219,12 @@ pub enum EasingType {
     EaseInOut,
 }
 
-impl From<EasingType> for widgets::animation::Easing {
+impl From<EasingType> for widgets::presence::Easing {
     fn from(value: EasingType) -> Self {
         match value {
-            EasingType::Linear => widgets::animation::Easing::Linear,
-            EasingType::EaseOut => widgets::animation::Easing::EaseOut,
-            EasingType::EaseInOut => widgets::animation::Easing::EaseInOut,
+            EasingType::Linear => widgets::presence::Easing::Linear,
+            EasingType::EaseOut => widgets::presence::Easing::EaseOut,
+            EasingType::EaseInOut => widgets::presence::Easing::EaseInOut,
         }
     }
 }

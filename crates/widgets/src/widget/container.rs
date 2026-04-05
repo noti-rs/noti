@@ -1,7 +1,10 @@
 use log::warn;
 
 use crate::{
-    context::{GenerateId, GetData, GetFont, GetStyle, LoadExtent, SaveExtent},
+    context::{
+        GenerateId, GetFont, GetState, GetStyle, LoadExtent, ManageDirtyFlags, ManageIntrinsic,
+        RegisterKey, SaveExtent, Subscribe,
+    },
     drawer::Drawer,
     events::{Action, DispatchEvent, Event, Point},
     make_configuration,
@@ -9,16 +12,16 @@ use crate::{
         alignment::Alignment,
         border::{Border, BorderGBuilder},
         data::{Configure, ToConfig, WidgetStyle},
+        dirty_flags::DirtyFlags,
         extent::Extent,
-        identifiers::{WidgetClass, WidgetId},
-        measure::{self, Constraints, ExtentManagement, IntrinsicManagement, Measure, SizingMode},
+        identifiers::{WidgetClass, WidgetId, WidgetKey},
+        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
         Color,
     },
     widget::{
-        flex_container::FlexContainer, unknown::Unknown, Compile, CompileCtx, CompileResult, Draw,
-        Initialize, Layout, Widget, WidgetInfo,
+        flex_container::FlexContainer, Draw, Initialize, Invalidate, Layout, Widget, WidgetInfo,
     },
 };
 
@@ -47,6 +50,10 @@ pub struct Container {
     #[builder(private, default)]
     #[gbuilder(hidden, default)]
     id: WidgetId,
+
+    #[builder(setter(strip_option, into), default)]
+    #[gbuilder(default)]
+    key: Option<WidgetKey>,
 
     #[builder(default, setter(into))]
     #[gbuilder(default)]
@@ -113,12 +120,8 @@ pub struct Container {
     /// As a single-child provider, the container acts as a wrapper,
     /// applying its own alignment, background, and border rules to
     /// this inner element.
-    #[gbuilder(default(Widget::Unknown(Unknown)))]
-    child: Widget,
-
-    #[builder(private, default)]
-    #[gbuilder(hidden, default)]
-    extent: Extent<f32>,
+    #[gbuilder(default(None))]
+    child: Option<Widget>,
 }
 
 make_configuration! {
@@ -171,6 +174,10 @@ impl Container {
 }
 
 impl WidgetInfo for Container {
+    fn get_id(&self) -> WidgetId {
+        self.id
+    }
+
     fn get_class(&self) -> WidgetClass {
         self.class.clone()
     }
@@ -179,40 +186,68 @@ impl WidgetInfo for Container {
         "container"
     }
 
-    fn width(&self) -> f32 {
-        self.extent.width
-    }
-
-    fn height(&self) -> f32 {
-        self.extent.height
-    }
-
     fn sizing_mode(&self) -> SizingMode {
         SizingMode::Fixed
     }
 }
 
+impl<C> Invalidate<C> for Container
+where
+    C: ManageDirtyFlags<WidgetId> + GetState,
+{
+    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
+        let mut dirty_flags = context.get_dirty_flags(self.id);
+
+        if let Some(child) = &mut self.child {
+            let child_flags = child.invalidate(context);
+
+            if child_flags.intersects(DirtyFlags::NEEDS_MEASURE | DirtyFlags::CHILD_NEEDS_MEASURE) {
+                dirty_flags |= DirtyFlags::CHILD_NEEDS_MEASURE;
+            }
+        }
+
+        context.set_dirty_flags(self.id, dirty_flags);
+
+        if dirty_flags.intersects(DirtyFlags::CHILD_NEEDS_MEASURE) {
+            DirtyFlags::CHILD_NEEDS_MEASURE
+        } else {
+            DirtyFlags::empty()
+        }
+    }
+}
+
 impl<C> Initialize<C> for Container
 where
-    C: GenerateId + GetData + GetStyle + GetFont,
+    C: GenerateId
+        + RegisterKey<WidgetKey, WidgetId>
+        + GetState
+        + Subscribe<WidgetId>
+        + GetStyle
+        + GetFont,
 {
     fn initialize(&mut self, context: &mut C) {
         if *self.id == 0 {
             self.id = context.generate_id();
         }
 
+        if let Some(key) = self.key.as_ref() {
+            context.register_key(key.clone(), self.id);
+        }
+
         if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
             self.configure(container_style.clone());
         }
 
-        self.child.initialize(context)
+        if let Some(child) = &mut self.child {
+            child.initialize(context);
+        }
     }
 }
 
 impl Measure<f32, WidgetId> for Container {
     fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
-        C: IntrinsicManagement<f32, WidgetId>,
+        C: ManageIntrinsic<f32, WidgetId>,
     {
         if let Some(intrinsic) = context.load(self.id) {
             return intrinsic;
@@ -227,7 +262,7 @@ impl Measure<f32, WidgetId> for Container {
 
     fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
     where
-        C: IntrinsicManagement<f32, WidgetId> + ExtentManagement<f32, WidgetId>,
+        C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
         if let Some(extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) {
             return extent;
@@ -246,84 +281,33 @@ where
     C: LoadExtent<f32, WidgetId>,
 {
     fn layout(&mut self, context: &C) {
-        if let Some(extent) = context.load(self.id) {
-            self.extent = extent;
-        } else {
+        if context.load(self.id).is_none() {
             warn!("Container widget with id {} didn't measured!", *self.id);
         }
 
-        self.child.layout(context);
-    }
-}
-
-impl Compile for Container {
-    /// Prepares the container and its nested child for rendering by
-    /// validating spatial constraints.
-    ///
-    /// This method checks if the container's required dimensions (either
-    /// fixed or determined by its content) fit within the provided
-    /// [`Extent2D`] available space.
-    ///
-    /// **Compilation Logic:**
-    /// 1. **Constraint Check:** If the container's size exceeds the
-    ///    available space, the method returns [`CompileState::Failure`].
-    /// 2. **Child Propagation:** If it fits, the container calculates the
-    ///    remaining internal area (using [`inner_spacing`]) and attempts
-    ///    to compile its child widget.
-    /// 3. **Layout Preservation:** Even if the child fails to compile
-    ///    (becoming an "unknown" or empty widget), the container remains
-    ///    successful and maintains its own dimensions to ensure the
-    ///    surrounding layout does not collapse or shift unexpectedly.
-    fn compile(
-        &mut self,
-        constraints: Constraints<Extent<f32>>,
-        compile_ctx: &mut CompileCtx,
-    ) -> CompileResult {
-        if self.width as f32 > constraints.max.width
-            || self.height as f32 > constraints.max.height
-            || self.width == 0
-            || self.height == 0
-        {
-            return CompileResult::Failure;
-        }
-
-        if self.class.is_empty() {
-            self.class = compile_ctx.generate_new_class(self.get_type());
-        }
-
-        if let Some(WidgetStyle::Container(container_config)) = compile_ctx
-            .data_pool
-            .get(&self.class)
-            .and_then(|associated_data| associated_data.style.as_ref())
-        {
-            self.configure(container_config.clone());
-        }
-
-        let mut restricted_extent = Extent::new(self.width, self.height);
-        restricted_extent.shrink_by(&self.inner_spacing());
-        let constraints_for_child = Constraints::new_soft(
-            Extent::new(self.width as f32, self.height as f32)
-                .shrink_to_with(&self.inner_spacing()),
-        );
-
-        self.child.compile(constraints_for_child, compile_ctx);
-
-        if self.child.is_unknown() {
-            warn!("{} container is empty because there is missing child widget or it doesn't fits to available space.", self.class);
-        }
-
-        CompileResult::Success {
-            used_extent: Extent::new(self.width as f32, self.height as f32),
+        if let Some(child) = &mut self.child {
+            child.layout(context);
         }
     }
 }
 
-impl Draw for Container {
-    fn draw_with_offset(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
+impl<C> Draw<C, f32> for Container
+where
+    C: LoadExtent<f32, WidgetId>,
+{
+    fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
+        let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
+            warn!(
+                "Container with id {} wasn't measured. Refused to draw.",
+                *self.id
+            );
+            return;
+        };
+
         let actual_extent = Extent::new(self.width as f32, self.height as f32);
 
-        if self.extent.width < actual_extent.width
-            || self.extent.height < actual_extent.height
+        if provided_extent.width < actual_extent.width
+            || provided_extent.height < actual_extent.height
             || self.width == 0
             || self.height == 0
         {
@@ -332,8 +316,8 @@ impl Draw for Container {
 
         let actual_offset = *offset
             + Offset::new(
-                (self.extent.width - actual_extent.width) / 2.0,
-                (self.extent.height - actual_extent.height) / 2.0,
+                (provided_extent.width - actual_extent.width) / 2.0,
+                (provided_extent.height - actual_extent.height) / 2.0,
             );
 
         let canvas = drawer.surface.canvas();
@@ -358,20 +342,22 @@ impl Draw for Container {
         let mut inner_extent = actual_extent;
         inner_extent.shrink_by(&inner_spacing);
 
-        if !self.child.is_unknown() {
+        if let Some(child) = &self.child {
             let alignment = self.alignment.as_ref().cloned().unwrap_or_default();
+            let child_extent =
+                <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id()).unwrap_or_default();
 
             let horizontal_start = alignment
                 .horizontal
-                .get_start(inner_extent.width, self.child.width())
+                .get_start(inner_extent.width, child_extent.width)
                 + inner_spacing.left as f32;
             let vertical_start = alignment
                 .vertical
-                .get_start(inner_extent.height, self.child.height())
+                .get_start(inner_extent.height, child_extent.height)
                 + inner_spacing.top as f32;
 
             let offset_for_child = actual_offset + Offset::new(horizontal_start, vertical_start);
-            self.child.draw_with_offset(&offset_for_child, drawer);
+            child.draw(context, &offset_for_child, drawer);
         }
 
         drawer.outline_border(actual_offset, actual_extent, &border);
@@ -380,11 +366,18 @@ impl Draw for Container {
     }
 }
 
-impl DispatchEvent for Container {
-    fn dispatch_event(&self, event: Event) -> Action {
-        if self.child.is_unknown() || !event.kind.is_mouse() {
+impl<C> DispatchEvent<C, f32> for Container
+where
+    C: LoadExtent<f32, WidgetId>,
+{
+    fn dispatch_event(&self, context: &C, event: Event) -> Action {
+        if !event.kind.is_mouse() {
             return Action::None;
         }
+
+        let Some(child) = &self.child else {
+            return Action::None;
+        };
 
         if event.local_coord.x > self.width as f32 || event.local_coord.y > self.height as f32 {
             return Action::None;
@@ -395,7 +388,7 @@ impl DispatchEvent for Container {
         inner_extent.shrink_by(&inner_spacing);
 
         let alignment = self.alignment.as_ref().cloned().unwrap_or_default();
-        let child_extent = Extent::new(self.child.width(), self.child.height());
+        let child_extent = context.load(child.get_id()).unwrap_or_default();
         let horizontal_start = alignment
             .horizontal
             .get_start(inner_extent.width, child_extent.width)
@@ -419,6 +412,6 @@ impl DispatchEvent for Container {
             y: vertical_start - event.local_coord.y,
         };
 
-        self.child.dispatch_event(modified_event)
+        child.dispatch_event(context, modified_event)
     }
 }

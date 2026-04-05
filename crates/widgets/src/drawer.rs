@@ -1,7 +1,8 @@
 use log::warn;
 
 use crate::{
-    types::{border::Border, extent::Extent, offset::Offset, Bgra, Color},
+    context::LoadExtent,
+    types::{border::Border, extent::Extent, offset::Offset, Bgra, Color, WidgetId},
     widget::{Draw, Widget},
 };
 
@@ -22,17 +23,21 @@ impl Drawer {
         }
     }
 
-    pub(crate) fn draw_into_offscreen(
+    pub(crate) fn draw_into_offscreen<C>(
         &mut self,
+        context: &C,
         offset: &Offset<f32>,
         widget: &Widget,
-    ) -> skia_safe::Image {
+    ) -> skia_safe::Image
+    where
+        C: LoadExtent<f32, WidgetId>,
+    {
         let image_info = self.surface.image_info();
         let mut offscreen = skia_safe::surfaces::raster(&image_info, None, None).unwrap();
         offscreen.canvas().clear(skia_safe::Color::TRANSPARENT);
 
         let mut offscreen_drawer = Drawer::use_surface(offscreen);
-        widget.draw_with_offset(offset, &mut offscreen_drawer);
+        widget.draw_on(context, offset, &mut offscreen_drawer);
         offscreen_drawer.surface.image_snapshot()
     }
 

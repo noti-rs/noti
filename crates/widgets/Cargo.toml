@@ -19,3 +19,4 @@ resvg = "0.45.1"
 image = { version = "0.25.2"}
 linicon = "2.3.0"
 skia-safe = { version = "0.87.0", features = ["gl", "textlayout"] }
+bitflags = "2.11.0"

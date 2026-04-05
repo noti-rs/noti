@@ -1,5 +1,5 @@
 use crate::{
-    context::{LoadExtent, LoadIntrinsic, SaveExtent, SaveIntrinsic},
+    context::{ManageConstraints, ManageDirtyFlags, ManageExtent, ManageIntrinsic},
     types::{Extent, WidgetId},
 };
 
@@ -14,48 +14,34 @@ impl SizingMode {
     }
 }
 
-pub trait IntrinsicManagement<T, Id>: SaveIntrinsic<T, Id> + LoadIntrinsic<T, Id>
+pub(crate) trait MeasureContext<T, Id>:
+    ManageIntrinsic<T, Id> + ManageExtent<T, Id> + ManageConstraints<T, Id>
 where
     T: Default + Copy,
     Id: Into<WidgetId>,
 {
 }
 
-impl<C, T, Id> IntrinsicManagement<T, Id> for C
+impl<C, T, Id> MeasureContext<T, Id> for C
 where
     T: Default + Copy,
     Id: Into<WidgetId>,
-    C: SaveIntrinsic<T, Id> + LoadIntrinsic<T, Id>,
+    C: ManageIntrinsic<T, Id> + ManageExtent<T, Id> + ManageConstraints<T, Id>,
 {
 }
 
-pub trait ExtentManagement<T, Id>: SaveExtent<T, Id> + LoadExtent<T, Id>
-where
-    T: Default + Copy,
-    Id: Into<WidgetId>,
-{
-}
-
-impl<C, T, Id> ExtentManagement<T, Id> for C
-where
-    T: Default + Copy,
-    Id: Into<WidgetId>,
-    C: SaveExtent<T, Id> + LoadExtent<T, Id>,
-{
-}
-
-pub trait Measure<T, Id>
+pub(crate) trait Measure<T, Id>
 where
     T: Default + Copy,
     Id: Into<WidgetId>,
 {
     fn get_intrinsic<C>(&self, context: &mut C) -> Intrinsic<T>
     where
-        C: IntrinsicManagement<T, Id>;
+        C: ManageIntrinsic<T, Id>;
 
     fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<T>>) -> Extent<T>
     where
-        C: IntrinsicManagement<T, Id> + ExtentManagement<T, Id>;
+        C: MeasureContext<T, Id> + ManageDirtyFlags<Id>;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -83,7 +69,7 @@ where
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Constraints<T>
 where
     T: Default + Copy,

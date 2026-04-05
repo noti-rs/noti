@@ -1,82 +1,19 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use skia_safe::runtime_effect::ChildPtr;
 
-use crate::{
-    animation::{
-        fade::{FadeIn, FadeOut},
-        pop::{PopIn, PopOut},
-        translate::Translate,
-    },
-    widget::{Draw, Widget},
+use crate::presence::{
+    fade::{FadeIn, FadeOut},
+    pop::{PopIn, PopOut},
+    translate::Translate,
 };
 
 pub mod fade;
 pub mod pop;
 pub mod translate;
 
-/// A wrapper enum for all supported animation effects.
-///
-/// This type groups different animations under a single handle, making it
-/// easier to manage them dynamically in code.
-pub enum AnimatedWidget {
-    FadeIn(FadeIn),
-    FadeOut(FadeOut),
-    PopIn(PopIn),
-    PopOut(PopOut),
-    Translate(Translate),
-}
-
-macro_rules! delegate {
-    ($self:ident.$method_name:ident($($tokens:tt),*)) => {
-        match $self {
-            AnimatedWidget::FadeIn(fade) => fade.$method_name($($tokens),*),
-            AnimatedWidget::FadeOut(fade) => fade.$method_name($($tokens),*),
-            AnimatedWidget::PopIn(pop) => pop.$method_name($($tokens),*),
-            AnimatedWidget::PopOut(pop) => pop.$method_name($($tokens),*),
-            AnimatedWidget::Translate(translate) => translate.$method_name($($tokens),*),
-        }
-    };
-}
-
-impl AnimatedWidget {
-    /// Swaps out the widget inside the animation.
-    pub fn replace_widget(&mut self, widget: Widget) {
-        delegate!(self.replace_widget(widget));
-    }
-
-    /// Consumes the animation and returns the underlying widget.
-    pub fn into_widget(self) -> Widget {
-        delegate!(self.into_widget())
-    }
-
-    pub fn as_widget(&self) -> &Widget {
-        delegate!(self.as_widget())
-    }
-}
-
-impl Animated for AnimatedWidget {
-    fn is_finished(&self) -> bool {
-        delegate!(self.is_finished())
-    }
-
-    fn update(&mut self, delta_time_ns: u64) {
-        delegate!(self.update(delta_time_ns));
-    }
-}
-
-impl Draw for AnimatedWidget {
-    fn draw_with_offset(
-        &self,
-        offset: &crate::types::offset::Offset<f32>,
-        drawer: &mut crate::drawer::Drawer,
-    ) {
-        delegate!(self.draw_with_offset(offset, drawer));
-    }
-}
-
 /// A minimal trait for time-based animations.
-pub trait Animated: Draw {
+pub trait Animated {
     /// Advances the animation by a given time delta.
     fn update(&mut self, delta_time_ns: u64);
 
@@ -84,21 +21,152 @@ pub trait Animated: Draw {
     fn is_finished(&self) -> bool;
 }
 
-macro_rules! from_impl {
-    ($variant:ident => $struct:ty) => {
-        impl From<$variant> for $struct {
-            fn from(value: $variant) -> Self {
-                Self::$variant(value)
-            }
-        }
-    };
+pub(crate) struct PresenceState {
+    pub(crate) phase: PresencePhase,
+    pub(crate) elapsed_ns: u64,
+    pub(crate) duration: Duration,
+    pub(crate) easing: Easing,
+    pub(crate) kind: PresenceKind,
 }
 
-from_impl!(FadeIn => AnimatedWidget);
-from_impl!(FadeOut => AnimatedWidget);
-from_impl!(PopIn => AnimatedWidget);
-from_impl!(PopOut => AnimatedWidget);
-from_impl!(Translate => AnimatedWidget);
+#[derive(Debug, Default)]
+pub(crate) enum PresencePhase {
+    Allocating,
+    Appearing,
+    #[default]
+    Showing,
+    Disappearing,
+    Releasing,
+}
+
+impl PresencePhase {
+    pub(crate) fn next(&self) -> Option<Self> {
+        match self {
+            PresencePhase::Allocating => Some(PresencePhase::Appearing),
+            PresencePhase::Appearing => Some(PresencePhase::Showing),
+            PresencePhase::Showing => Some(PresencePhase::Disappearing),
+            PresencePhase::Disappearing => Some(PresencePhase::Releasing),
+            PresencePhase::Releasing => None,
+        }
+    }
+}
+
+pub(crate) enum PresenceKind {
+    FadeIn(FadeIn),
+    FadeOut(FadeOut),
+    PopIn(PopIn),
+    PopOut(PopOut),
+    Translate(Translate),
+}
+
+impl Animated for PresenceState {
+    fn update(&mut self, delta_time_ns: u64) {
+        if self.is_finished() {
+            return;
+        }
+
+        self.elapsed_ns += delta_time_ns;
+    }
+
+    fn is_finished(&self) -> bool {
+        self.elapsed_ns as u128 > self.duration.as_nanos()
+    }
+}
+
+pub trait Direction {
+    fn map(progress: f32) -> f32;
+}
+
+pub struct Forward;
+pub struct Reverse;
+
+impl Direction for Forward {
+    fn map(progress: f32) -> f32 {
+        progress
+    }
+}
+
+impl Direction for Reverse {
+    fn map(progress: f32) -> f32 {
+        1.0 - progress
+    }
+}
+
+// /// A wrapper enum for all supported animation effects.
+// ///
+// /// This type groups different animations under a single handle, making it
+// /// easier to manage them dynamically in code.
+// pub enum AnimatedWidget {
+//     FadeIn(FadeIn),
+//     FadeOut(FadeOut),
+//     PopIn(PopIn),
+//     PopOut(PopOut),
+//     Translate(Translate),
+// }
+//
+// macro_rules! delegate {
+//     ($self:ident.$method_name:ident($($tokens:tt),*)) => {
+//         match $self {
+//             AnimatedWidget::FadeIn(fade) => fade.$method_name($($tokens),*),
+//             AnimatedWidget::FadeOut(fade) => fade.$method_name($($tokens),*),
+//             AnimatedWidget::PopIn(pop) => pop.$method_name($($tokens),*),
+//             AnimatedWidget::PopOut(pop) => pop.$method_name($($tokens),*),
+//             AnimatedWidget::Translate(translate) => translate.$method_name($($tokens),*),
+//         }
+//     };
+// }
+//
+// impl AnimatedWidget {
+//     /// Swaps out the widget inside the animation.
+//     pub fn replace_widget(&mut self, widget: Widget) {
+//         delegate!(self.replace_widget(widget));
+//     }
+//
+//     /// Consumes the animation and returns the underlying widget.
+//     pub fn into_widget(self) -> Widget {
+//         delegate!(self.into_widget())
+//     }
+//
+//     pub fn as_widget(&self) -> &Widget {
+//         delegate!(self.as_widget())
+//     }
+// }
+//
+// impl Animated for AnimatedWidget {
+//     fn is_finished(&self) -> bool {
+//         delegate!(self.is_finished())
+//     }
+//
+//     fn update(&mut self, delta_time_ns: u64) {
+//         delegate!(self.update(delta_time_ns));
+//     }
+// }
+//
+// impl Draw for AnimatedWidget {
+//     fn draw_with_offset(
+//         &self,
+//         offset: &crate::types::offset::Offset<f32>,
+//         drawer: &mut crate::drawer::Drawer,
+//     ) {
+//         delegate!(self.draw_with_offset(offset, drawer));
+//     }
+// }
+//
+// macro_rules! from_impl {
+//     ($variant:ident => $struct:ty) => {
+//         impl From<$variant> for $struct {
+//             fn from(value: $variant) -> Self {
+//                 Self::$variant(value)
+//             }
+//         }
+//     };
+// }
+//
+// from_impl!(FadeIn => AnimatedWidget);
+// from_impl!(FadeOut => AnimatedWidget);
+// from_impl!(PopIn => AnimatedWidget);
+// from_impl!(PopOut => AnimatedWidget);
+// from_impl!(Translate => AnimatedWidget);
 
 /// Describes the pacing curve of an animation.
 #[derive(Default)]
