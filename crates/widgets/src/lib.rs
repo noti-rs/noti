@@ -1,7 +1,7 @@
+pub mod animations;
 pub mod context;
 pub mod drawer;
 pub mod events;
-pub mod presence;
 pub mod state;
 pub mod types;
 pub mod widget;
@@ -12,21 +12,23 @@ use crate::{
         measure::{Constraints, Measure},
         Extent, WidgetId,
     },
-    widget::{Draw, Initialize, Layout, Widget, WidgetInfo},
+    widget::{Draw, Init, Invalidate, Layout, Widget, WidgetBase},
 };
 
 pub struct UiRoot {
     root_widget: Widget,
     context: Context,
+    cached_constraints: Constraints<Extent<f32>>,
 }
 
 impl UiRoot {
     pub fn new(mut root_widget: Widget, mut context: Context) -> Self {
-        root_widget.initialize(&mut context);
+        root_widget.init(&mut context);
 
         Self {
             root_widget,
             context,
+            cached_constraints: Constraints::new_tight(Extent::default()),
         }
     }
 
@@ -42,8 +44,19 @@ impl UiRoot {
             .height
     }
 
-    pub fn layout(&mut self, constraints: Constraints<Extent<f32>>) {
-        self.root_widget.measure(&mut self.context, constraints);
+    pub fn invalidate(&mut self) {
+        if self.context.is_invalidation_required() {
+            self.root_widget.invalidate(&mut self.context);
+        }
+    }
+
+    pub fn layout(&mut self, constraints: Option<Constraints<Extent<f32>>>) {
+        if let Some(constraints) = constraints {
+            self.cached_constraints = constraints;
+        }
+
+        self.root_widget
+            .measure(&mut self.context, self.cached_constraints);
         self.root_widget.layout(&self.context);
     }
 
@@ -89,7 +102,7 @@ impl InjectDependency for UiRoot {
 }
 
 impl Tick for UiRoot {
-    fn tick(&mut self, delta_ns: u64) {
+    fn tick(&mut self, delta_ns: u128) {
         self.context.tick(delta_ns);
     }
 }

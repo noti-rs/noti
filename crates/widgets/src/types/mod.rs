@@ -27,6 +27,7 @@ pub mod extent;
 pub mod identifiers;
 pub mod measure;
 pub mod offset;
+pub mod shader_builder;
 pub mod spacing;
 
 pub use {
@@ -38,5 +39,6 @@ pub use {
     extent::Extent,
     identifiers::{WidgetClass, WidgetId},
     offset::Offset,
+    shader_builder::{ShaderBuilder, ShaderBuilderError, UniformValue},
     spacing::{Spacing, SpacingGBuilder},
 };

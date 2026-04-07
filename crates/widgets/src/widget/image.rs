@@ -9,8 +9,7 @@ use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::Try
 
 use crate::{
     context::{
-        GenerateId, GetFont, GetState, GetStyle, LoadExtent, ManageDirtyFlags, ManageIntrinsic,
-        RegisterKey, SaveExtent, Subscribe,
+        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
     },
     drawer::Drawer,
     events::{Action, DispatchEvent, Event},
@@ -25,7 +24,9 @@ use crate::{
         offset::Offset,
         spacing::Spacing,
     },
-    widget::{Draw, Initialize, Invalidate, Layout, WidgetInfo},
+    widget::{
+        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext, WidgetBase
+    },
 };
 
 const DEFAULT_ICON_THEME: &str = "hicolor";
@@ -76,7 +77,7 @@ pub struct Image {
     #[gbuilder(hidden, default(None))]
     value: Option<ImageData>,
 
-    #[builder(setter(strip_option), default)]
+    #[builder(setter(strip_option, into), default)]
     #[gbuilder(hidden, default(None))]
     state: Option<State<ImageProvider>>,
 
@@ -188,9 +189,17 @@ impl Image {
     }
 }
 
-impl WidgetInfo for Image {
+impl WidgetBase for Image {
     fn get_id(&self) -> WidgetId {
         self.id
+    }
+
+    fn set_id(&mut self, id: WidgetId) {
+        self.id = id;
+    }
+
+    fn get_key(&self) -> Option<&WidgetKey> {
+        self.key.as_ref()
     }
 
     fn get_class(&self) -> WidgetClass {
@@ -208,7 +217,7 @@ impl WidgetInfo for Image {
 
 impl<C> Invalidate<C> for Image
 where
-    C: ManageDirtyFlags<WidgetId> + GetState,
+    C: InvalidateContext,
 {
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
         let mut dirty_flags = context.get_dirty_flags(self.id);
@@ -228,24 +237,11 @@ where
     }
 }
 
-impl<C> Initialize<C> for Image
+impl<C> Init<C> for Image
 where
-    C: GenerateId
-        + RegisterKey<WidgetKey, WidgetId>
-        + GetState
-        + Subscribe<WidgetId>
-        + GetStyle
-        + GetFont,
+    C: InitContext,
 {
-    fn initialize(&mut self, context: &mut C) {
-        if *self.id == 0 {
-            self.id = context.generate_id();
-        }
-
-        if let Some(key) = self.key.as_ref() {
-            context.register_key(key.clone(), self.id);
-        }
-
+    fn on_init(&mut self, context: &mut C) {
         if let Some(WidgetStyle::Image(image_config)) = context.get_style(&self.class) {
             self.configure(image_config.clone());
         }
@@ -274,17 +270,17 @@ impl Measure<f32, WidgetId> for Image {
     /// - Intention: Tells the parent container (like a Flex) the native resolution of the asset plus its required offsets.
     fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
-        C: ManageIntrinsic<f32, WidgetId>,
+        C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        if let Some(intrinsic) = context.load(self.id) {
-            return intrinsic;
+        let dirty_flags = context.get_dirty_flags(self.id);
+        let cached_intrinsic = context.load(self.id);
+
+        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE) && cached_intrinsic.is_some() {
+            return cached_intrinsic.unwrap_or_default();
         }
 
         let inner_spacing = self.margin.unwrap_or_default();
-        let spacing_size = Extent::new(
-            inner_spacing.horizontal() as f32,
-            inner_spacing.vertical() as f32,
-        );
+        let spacing_size = Extent::from(inner_spacing);
 
         let Some(content) = &self.value else {
             return measure::Intrinsic::new(spacing_size, spacing_size);
@@ -362,15 +358,20 @@ impl Measure<f32, WidgetId> for Image {
     where
         C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        if let Some(extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) {
-            return extent;
+        let mut dirty_flags = context.get_dirty_flags(self.id);
+        let constraints_changed =
+            Some(constraints) != <C as LoadConstraints<f32, WidgetId>>::load(context, self.id);
+        let cached_extent = <C as LoadExtent<f32, WidgetId>>::load(context, self.id);
+
+        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE)
+            && !constraints_changed
+            && cached_extent.is_some()
+        {
+            return cached_extent.unwrap_or_default();
         }
 
         let inner_spacing = self.margin.unwrap_or_default();
-        let spacing_size = Extent::new(
-            inner_spacing.horizontal() as f32,
-            inner_spacing.vertical() as f32,
-        );
+        let spacing_size = Extent::from(inner_spacing);
         let inner_constraints = constraints.max.shrink_to_with(&inner_spacing);
 
         if inner_constraints.width <= 0. || inner_constraints.height <= 0. {
@@ -412,14 +413,19 @@ impl Measure<f32, WidgetId> for Image {
         let used_extent =
             (fixed_extent + spacing_size).clamp_with(constraints.min, constraints.max);
 
+        <C as SaveConstraints<f32, WidgetId>>::save(context, self.id, constraints);
         <C as SaveExtent<f32, WidgetId>>::save(context, self.id, used_extent);
+
+        dirty_flags -= DirtyFlags::NEEDS_MEASURE;
+        context.set_dirty_flags(self.id, dirty_flags);
+
         used_extent
     }
 }
 
-impl<C> Layout<C, f32, WidgetId> for Image
+impl<C> Layout<C, f32> for Image
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: LayoutContext<f32>,
 {
     fn layout(&mut self, context: &C) {
         if context.load(self.id).is_none() {
@@ -433,7 +439,7 @@ where
 
 impl<C> Draw<C, f32> for Image
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: DrawContext<f32>,
 {
     fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
         let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {

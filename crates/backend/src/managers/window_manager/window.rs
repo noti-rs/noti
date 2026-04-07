@@ -45,7 +45,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
 };
 use widgets::{
-    presence::Animated,
+    context::Tick,
     types::{extent::Extent, offset::Offset},
 };
 
@@ -817,7 +817,7 @@ impl Dispatch<WpPresentationFeedback, ()> for WindowState {
 
                 if let Some(last_presented_time_ns) = &mut state.last_presented_time_ns {
                     let delta_time_ns = time_ns - *last_presented_time_ns;
-                    state.banner_stack.banners_mut().for_each(|banner| banner.update(delta_time_ns));
+                    state.banner_stack.banners_mut().for_each(|banner| banner.tick(delta_time_ns as u128));
 
                     trace!("Window Presentation: Current FPS — {}", 1_000_000_000.0 / delta_time_ns as f64);
                 }

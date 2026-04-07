@@ -7,7 +7,7 @@ use crate::{
         Extent, WidgetClass, WidgetDependency, WidgetId, WidgetStyle,
     },
 };
-use std::collections::HashMap;
+use std::{any::Any, collections::HashMap, time::Duration};
 
 pub struct Context {
     id_counter: u64,
@@ -17,6 +17,7 @@ pub struct Context {
     dependendices: HashMap<WidgetClass, WidgetDependency>,
     measure_cache: HashMap<WidgetId, MeasureCache>,
     dirty_registry: HashMap<WidgetId, DirtyFlags>,
+    animation_regirsty: HashMap<WidgetId, AnimationProgress>,
     font_collection: skia_safe::textlayout::FontCollection,
 }
 
@@ -31,6 +32,7 @@ impl Context {
             dependendices: HashMap::new(),
             measure_cache: HashMap::new(),
             dirty_registry: HashMap::new(),
+            animation_regirsty: HashMap::new(),
         }
     }
 
@@ -40,6 +42,10 @@ impl Context {
         self.state_registry.insert(descriptor, state_info);
         descriptor
     }
+
+    pub(super) fn is_invalidation_required(&self) -> bool {
+        !self.dirty_registry.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -47,6 +53,76 @@ struct MeasureCache {
     intrinsic: Option<Intrinsic<f32>>,
     extent: Option<Extent<f32>>,
     constraints: Option<Constraints<Extent<f32>>>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AnimationProgress {
+    elapsed_ns: u128,
+    duration: Duration,
+    flag_on_change: DirtyFlags,
+    direction: AnimationDirection,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum AnimationDirection {
+    Forward,
+    Backward,
+}
+
+impl AnimationProgress {
+    pub(crate) fn new(
+        duration: Duration,
+        flag_on_change: DirtyFlags,
+        direction: AnimationDirection,
+    ) -> Self {
+        Self {
+            elapsed_ns: match &direction {
+                AnimationDirection::Forward => 0,
+                AnimationDirection::Backward => duration.as_nanos(),
+            },
+            duration,
+            flag_on_change,
+            direction,
+        }
+    }
+
+    fn reverse(&mut self) {
+        self.direction.reverse()
+    }
+
+    fn progress(&self) -> f32 {
+        self.elapsed_ns as f32 / self.duration.as_nanos() as f32
+    }
+
+    fn is_finished(&self) -> bool {
+        match self.direction {
+            AnimationDirection::Forward => self.elapsed_ns == self.duration.as_nanos(),
+            AnimationDirection::Backward => self.elapsed_ns == 0,
+        }
+    }
+}
+
+impl AnimationDirection {
+    fn reverse(&mut self) {
+        *self = match self {
+            AnimationDirection::Forward => AnimationDirection::Backward,
+            AnimationDirection::Backward => AnimationDirection::Forward,
+        }
+    }
+}
+
+impl Tick for AnimationProgress {
+    fn tick(&mut self, delta_ns: u128) {
+        match self.direction {
+            AnimationDirection::Forward => {
+                let duration_ns = self.duration.as_nanos();
+                self.elapsed_ns = (self.elapsed_ns + delta_ns).min(duration_ns);
+            }
+            AnimationDirection::Backward => {
+                self.elapsed_ns = self.elapsed_ns - delta_ns.min(self.elapsed_ns);
+            }
+        }
+    }
 }
 
 pub trait CreateState<T> {
@@ -66,8 +142,53 @@ impl<T> CreateState<T> for Context {
     }
 }
 
+pub type Callback = Box<dyn for<'a> FnMut(ScopedContext<'a>)>;
+
+pub struct ScopedContext<'a> {
+    inner: &'a mut dyn ScopedManageState,
+}
+
+impl<'a> ScopedContext<'a> {
+    pub(crate) fn new<C: ScopedManageState>(context: &'a mut C) -> Self {
+        Self { inner: context }
+    }
+}
+
+pub(crate) trait ScopedManageState {
+    fn get_raw(&self, descriptor: usize) -> Option<&dyn Any>;
+    fn set_raw(&mut self, descriptor: usize, val: Box<dyn Any>);
+}
+
+impl ScopedManageState for Context {
+    fn set_raw(&mut self, descriptor: usize, val: Box<dyn Any>) {
+        if let Some(state_info) = self.state_registry.get_mut(&descriptor) {
+            if state_info.set_raw_data(val) {
+                // TODO: check the validity of exising widget
+                // For instance, in subscriber list may be some unexisting widget and marking dirty
+                // flags will be invalid
+                state_info.subscribers().for_each(|subscriber| {
+                    self.dirty_registry
+                        .entry(*subscriber)
+                        .and_modify(|flags| *flags |= DirtyFlags::NEEDS_REBUILD)
+                        .or_insert(DirtyFlags::NEEDS_REBUILD);
+                });
+            }
+        }
+    }
+
+    fn get_raw(&self, descriptor: usize) -> Option<&dyn Any> {
+        self.state_registry
+            .get(&descriptor)
+            .and_then(|state_info| state_info.get_raw_data())
+    }
+}
+
 pub trait GetState {
     fn get<T: 'static, S: Into<State<T>>>(&self, state: S) -> Option<&T>;
+}
+
+pub trait SetState {
+    fn set<T: 'static>(&mut self, mutable_state: MutableState<T>, value: T);
 }
 
 impl GetState for Context {
@@ -83,16 +204,15 @@ impl GetState for Context {
     }
 }
 
-pub trait SetState {
-    fn set<T: 'static>(&mut self, mutable_state: MutableState<T>, value: T);
-}
-
 impl SetState for Context {
     fn set<T: 'static>(&mut self, mutable_state: MutableState<T>, value: T) {
         if let Some(state_info) = self.state_registry.get_mut(&mutable_state.descriptor) {
             if let Some(data) = state_info.get_data_mut(mutable_state) {
                 *data = value;
 
+                // TODO: check the validity of exising widget
+                // For instance, in subscriber list may be some unexisting widget and marking dirty
+                // flags will be invalid
                 state_info.subscribers().for_each(|subscriber| {
                     self.dirty_registry
                         .entry(*subscriber)
@@ -101,6 +221,23 @@ impl SetState for Context {
                 });
             }
         }
+    }
+}
+
+impl<'a> GetState for ScopedContext<'a> {
+    fn get<T: 'static, S: Into<State<T>>>(&self, state: S) -> Option<&T> {
+        let state = state.into();
+
+        self.inner
+            .get_raw(state.descriptor)
+            .and_then(|val| val.downcast_ref())
+    }
+}
+
+impl<'a> SetState for ScopedContext<'a> {
+    fn set<T: 'static>(&mut self, mutable_state: MutableState<T>, value: T) {
+        self.inner
+            .set_raw(mutable_state.descriptor, Box::new(value));
     }
 }
 
@@ -156,20 +293,22 @@ impl InjectDependency for Context {
     }
 }
 
-pub(crate) trait Tick {
-    fn tick(&mut self, delta_ns: u64);
+pub trait Tick {
+    fn tick(&mut self, delta_ns: u128);
 }
 
 impl Tick for Context {
-    fn tick(&mut self, delta_ns: u64) {
-        // for (widget_id, presence_state) in &mut self.presence_registry {
-        //     presence_state.update(delta_ns);
-        //
-        //     self.dirty_registry
-        //         .entry(*widget_id)
-        //         .and_modify(|flags| *flags |= DirtyFlags::NEEDS_MEASURE)
-        //         .or_insert(DirtyFlags::NEEDS_MEASURE);
-        // }
+    fn tick(&mut self, delta_ns: u128) {
+        for (widget_id, animation_progress) in &mut self.animation_regirsty {
+            animation_progress.tick(delta_ns);
+
+            if !animation_progress.flag_on_change.is_empty() {
+                self.dirty_registry
+                    .entry(*widget_id)
+                    .and_modify(|flags| *flags |= animation_progress.flag_on_change)
+                    .or_insert(animation_progress.flag_on_change);
+            }
+        }
     }
 }
 
@@ -430,5 +569,60 @@ where
         self.measure_cache
             .get(&id.into())
             .and_then(|cache| cache.constraints)
+    }
+}
+
+pub(crate) trait ManageAnimationRegistry<Id>
+where
+    Id: Into<WidgetId>,
+{
+    fn register_animation(&mut self, id: Id, animation_progress: AnimationProgress);
+    fn remove_animation(&mut self, id: Id);
+    fn reverse_animation(&mut self, id: Id);
+}
+
+pub(crate) trait AnimationQuery<Id>
+where
+    Id: Into<WidgetId>,
+{
+    fn animation_progress(&self, id: Id) -> Option<f32>;
+    fn is_finished(&self, id: Id) -> bool;
+}
+
+impl<Id> ManageAnimationRegistry<Id> for Context
+where
+    Id: Into<WidgetId>,
+{
+    fn register_animation(&mut self, id: Id, animation_progress: AnimationProgress) {
+        self.animation_regirsty
+            .insert(id.into(), animation_progress);
+    }
+
+    fn remove_animation(&mut self, id: Id) {
+        self.animation_regirsty.remove(&id.into());
+    }
+
+    fn reverse_animation(&mut self, id: Id) {
+        self.animation_regirsty
+            .entry(id.into())
+            .and_modify(AnimationProgress::reverse);
+    }
+}
+
+impl<Id> AnimationQuery<Id> for Context
+where
+    Id: Into<WidgetId>,
+{
+    fn animation_progress(&self, id: Id) -> Option<f32> {
+        self.animation_regirsty
+            .get(&id.into())
+            .map(AnimationProgress::progress)
+    }
+
+    fn is_finished(&self, id: Id) -> bool {
+        self.animation_regirsty
+            .get(&id.into())
+            .map(AnimationProgress::is_finished)
+            .unwrap_or(true)
     }
 }

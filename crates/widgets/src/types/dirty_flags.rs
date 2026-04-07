@@ -2,7 +2,7 @@ bitflags::bitflags! {
     /// DirtyFlags represent the pending updates for a widget.
     /// They prevent redundant calculations by marking exactly what needs
     /// synchronization or re-measurement in the current frame.
-    #[derive(Clone, Copy)]
+    #[derive(Debug, Clone, Copy)]
     pub(crate) struct DirtyFlags: u8 {
         const NEEDS_REBUILD       = 1;
 

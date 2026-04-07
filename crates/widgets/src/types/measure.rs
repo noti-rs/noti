@@ -1,5 +1,5 @@
 use crate::{
-    context::{ManageConstraints, ManageDirtyFlags, ManageExtent, ManageIntrinsic},
+    context::{AnimationQuery, ManageConstraints, ManageDirtyFlags, ManageExtent, ManageIntrinsic},
     types::{Extent, WidgetId},
 };
 
@@ -15,7 +15,7 @@ impl SizingMode {
 }
 
 pub(crate) trait MeasureContext<T, Id>:
-    ManageIntrinsic<T, Id> + ManageExtent<T, Id> + ManageConstraints<T, Id>
+    ManageIntrinsic<T, Id> + ManageExtent<T, Id> + ManageConstraints<T, Id> + AnimationQuery<Id>
 where
     T: Default + Copy,
     Id: Into<WidgetId>,
@@ -26,7 +26,7 @@ impl<C, T, Id> MeasureContext<T, Id> for C
 where
     T: Default + Copy,
     Id: Into<WidgetId>,
-    C: ManageIntrinsic<T, Id> + ManageExtent<T, Id> + ManageConstraints<T, Id>,
+    C: ManageIntrinsic<T, Id> + ManageExtent<T, Id> + ManageConstraints<T, Id> + AnimationQuery<Id>,
 {
 }
 
@@ -37,7 +37,7 @@ where
 {
     fn get_intrinsic<C>(&self, context: &mut C) -> Intrinsic<T>
     where
-        C: ManageIntrinsic<T, Id>;
+        C: ManageIntrinsic<T, Id> + ManageDirtyFlags<Id>;
 
     fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<T>>) -> Extent<T>
     where

@@ -2,8 +2,7 @@ use log::warn;
 
 use crate::{
     context::{
-        GenerateId, GetFont, GetState, GetStyle, LoadExtent, ManageDirtyFlags, ManageIntrinsic,
-        RegisterKey, SaveExtent, Subscribe,
+        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
     },
     drawer::Drawer,
     events::{Action, DispatchEvent, Event, Point},
@@ -21,7 +20,8 @@ use crate::{
         Color,
     },
     widget::{
-        flex_container::FlexContainer, Draw, Initialize, Invalidate, Layout, Widget, WidgetInfo,
+        flex_container::FlexContainer, Draw, DrawContext, Init, InitContext, Invalidate,
+        InvalidateContext, Layout, LayoutContext, Widget, WidgetBase,
     },
 };
 
@@ -173,9 +173,17 @@ impl Container {
     }
 }
 
-impl WidgetInfo for Container {
+impl WidgetBase for Container {
     fn get_id(&self) -> WidgetId {
         self.id
+    }
+
+    fn set_id(&mut self, id: WidgetId) {
+        self.id = id;
+    }
+
+    fn get_key(&self) -> Option<&WidgetKey> {
+        self.key.as_ref()
     }
 
     fn get_class(&self) -> WidgetClass {
@@ -193,7 +201,7 @@ impl WidgetInfo for Container {
 
 impl<C> Invalidate<C> for Container
 where
-    C: ManageDirtyFlags<WidgetId> + GetState,
+    C: InvalidateContext,
 {
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
         let mut dirty_flags = context.get_dirty_flags(self.id);
@@ -216,30 +224,17 @@ where
     }
 }
 
-impl<C> Initialize<C> for Container
+impl<C> Init<C> for Container
 where
-    C: GenerateId
-        + RegisterKey<WidgetKey, WidgetId>
-        + GetState
-        + Subscribe<WidgetId>
-        + GetStyle
-        + GetFont,
+    C: InitContext,
 {
-    fn initialize(&mut self, context: &mut C) {
-        if *self.id == 0 {
-            self.id = context.generate_id();
-        }
-
-        if let Some(key) = self.key.as_ref() {
-            context.register_key(key.clone(), self.id);
-        }
-
+    fn on_init(&mut self, context: &mut C) {
         if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
             self.configure(container_style.clone());
         }
 
         if let Some(child) = &mut self.child {
-            child.initialize(context);
+            child.init(context);
         }
     }
 }
@@ -247,10 +242,13 @@ where
 impl Measure<f32, WidgetId> for Container {
     fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
-        C: ManageIntrinsic<f32, WidgetId>,
+        C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        if let Some(intrinsic) = context.load(self.id) {
-            return intrinsic;
+        let dirty_flags = context.get_dirty_flags(self.id);
+        let cached_intrinsic = context.load(self.id);
+
+        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE) && cached_intrinsic.is_some() {
+            return cached_intrinsic.unwrap_or_default();
         }
 
         let exact_extent = Extent::new(self.width as f32, self.height as f32);
@@ -264,21 +262,62 @@ impl Measure<f32, WidgetId> for Container {
     where
         C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        if let Some(extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) {
-            return extent;
+        let mut dirty_flags = context.get_dirty_flags(self.id);
+        let constraints_changed =
+            Some(constraints) != <C as LoadConstraints<f32, WidgetId>>::load(context, self.id);
+        let cached_extent = <C as LoadExtent<f32, WidgetId>>::load(context, self.id);
+
+        if !dirty_flags.contains(DirtyFlags::CHILD_NEEDS_MEASURE)
+            && !constraints_changed
+            && cached_extent.is_some()
+        {
+            return cached_extent.unwrap_or_default();
         }
 
-        let extent = Extent::new(self.width as f32, self.height as f32)
-            .clamp_with(constraints.min, constraints.max);
-        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, extent);
+        if dirty_flags.contains(DirtyFlags::CHILD_NEEDS_MEASURE)
+            && !constraints_changed
+            && cached_extent.is_some()
+        {
+            if let Some(child) = &self.child {
+                let child_constraints =
+                    <C as LoadConstraints<f32, WidgetId>>::load(context, child.get_id())
+                        .or_else(|| {
+                            <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
+                                .map(Constraints::new_tight)
+                        })
+                        .unwrap_or_default();
 
-        extent
+                child.measure(context, child_constraints);
+            }
+
+            dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
+            context.set_dirty_flags(self.id, dirty_flags);
+
+            return cached_extent.unwrap_or_default();
+        }
+
+        let extent = Extent::new(self.width as f32, self.height as f32);
+        let inner_extent = extent.shrink_to_with(&self.inner_spacing());
+
+        if let Some(child) = &self.child {
+            child.measure(context, Constraints::new_soft(inner_extent));
+        }
+
+        let clamped_extent = extent.clamp_with(constraints.min, constraints.max);
+
+        <C as SaveConstraints<f32, WidgetId>>::save(context, self.id, constraints);
+        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, clamped_extent);
+
+        dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
+        context.set_dirty_flags(self.id, dirty_flags);
+
+        clamped_extent
     }
 }
 
-impl<C> Layout<C, f32, WidgetId> for Container
+impl<C> Layout<C, f32> for Container
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: LayoutContext<f32>,
 {
     fn layout(&mut self, context: &C) {
         if context.load(self.id).is_none() {
@@ -293,7 +332,7 @@ where
 
 impl<C> Draw<C, f32> for Container
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: DrawContext<f32>,
 {
     fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
         let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {

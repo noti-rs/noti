@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    ops::{Add, AddAssign, Mul, Sub, SubAssign},
+    ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
 };
 
 use crate::types::Direction;
@@ -260,6 +260,16 @@ macro_rules! impl_ops {
                     $field1: self.$field1 * rhs,
                     $field2: self.$field2 * rhs,
                 }
+            }
+        }
+
+        impl<T> MulAssign<T> for $type<T>
+        where
+            T: Mul<Output = T> + Default + Copy,
+        {
+            fn mul_assign(&mut self, rhs: T) {
+                self.$field1 = self.$field1 * rhs;
+                self.$field2 = self.$field2 * rhs;
             }
         }
 

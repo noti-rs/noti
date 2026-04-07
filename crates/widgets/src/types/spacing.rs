@@ -3,6 +3,8 @@ use std::ops::{Add, AddAssign};
 use macros::GenericBuilder;
 use shared::value::TryFromValue;
 
+use crate::types::Extent;
+
 /// Defines the internal buffer zone between a widget's boundary and its content.
 ///
 /// Think of `Spacing` as a way to "shrink" the available room inside a box.
@@ -113,5 +115,29 @@ impl AddAssign<Spacing> for Spacing {
         self.right += rhs.right;
         self.bottom += rhs.bottom;
         self.left += rhs.left;
+    }
+}
+
+impl<T> From<Spacing> for Extent<T>
+where
+    T: Default + Copy + num_traits::FromPrimitive,
+{
+    fn from(value: Spacing) -> Self {
+        Self {
+            width: T::from_usize(value.horizontal()).unwrap_or_default(),
+            height: T::from_usize(value.vertical()).unwrap_or_default(),
+        }
+    }
+}
+
+impl<T> From<&Spacing> for Extent<T>
+where
+    T: Default + Copy + num_traits::FromPrimitive,
+{
+    fn from(value: &Spacing) -> Self {
+        Self {
+            width: T::from_usize(value.horizontal()).unwrap_or_default(),
+            height: T::from_usize(value.vertical()).unwrap_or_default(),
+        }
     }
 }

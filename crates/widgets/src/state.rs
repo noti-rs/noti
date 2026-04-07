@@ -1,4 +1,8 @@
-use std::{any::Any, collections::HashSet, marker::PhantomData};
+use std::{
+    any::{Any, TypeId},
+    collections::HashSet,
+    marker::PhantomData,
+};
 
 use crate::types::WidgetId;
 
@@ -59,6 +63,7 @@ pub(crate) struct StateInfo {
     data: Box<dyn Any>,
     subscribers: HashSet<WidgetId>,
     is_mutable: bool,
+    type_id: TypeId,
 }
 
 impl StateInfo {
@@ -67,6 +72,7 @@ impl StateInfo {
             data: Box::new(state),
             subscribers: HashSet::new(),
             is_mutable,
+            type_id: TypeId::of::<T>(),
         }
     }
 
@@ -83,6 +89,19 @@ impl StateInfo {
         }
 
         self.data.downcast_mut()
+    }
+
+    pub(crate) fn get_raw_data(&self) -> Option<&dyn Any> {
+        Some(&self.data)
+    }
+
+    pub(crate) fn set_raw_data(&mut self, raw_data: Box<dyn Any>) -> bool {
+        if !self.is_mutable || self.type_id != raw_data.as_ref().type_id() {
+            return false;
+        }
+
+        self.data = raw_data;
+        true
     }
 
     pub(crate) fn add_subscriber<Id: Into<WidgetId>>(&mut self, subscriber: Id) {

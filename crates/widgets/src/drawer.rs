@@ -1,9 +1,8 @@
 use log::warn;
 
 use crate::{
-    context::LoadExtent,
-    types::{border::Border, extent::Extent, offset::Offset, Bgra, Color, WidgetId},
-    widget::{Draw, Widget},
+    types::{border::Border, extent::Extent, offset::Offset, Bgra, Color},
+    widget::{Draw, DrawContext, Widget},
 };
 
 /// A simple wrapper around [`skia_safe::Surface`] used as the main
@@ -30,14 +29,14 @@ impl Drawer {
         widget: &Widget,
     ) -> skia_safe::Image
     where
-        C: LoadExtent<f32, WidgetId>,
+        C: DrawContext<f32>,
     {
         let image_info = self.surface.image_info();
         let mut offscreen = skia_safe::surfaces::raster(&image_info, None, None).unwrap();
         offscreen.canvas().clear(skia_safe::Color::TRANSPARENT);
 
         let mut offscreen_drawer = Drawer::use_surface(offscreen);
-        widget.draw_on(context, offset, &mut offscreen_drawer);
+        widget.draw(context, offset, &mut offscreen_drawer);
         offscreen_drawer.surface.image_snapshot()
     }
 

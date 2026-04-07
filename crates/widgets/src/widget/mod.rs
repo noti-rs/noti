@@ -1,3 +1,4 @@
+pub mod animated_visibility;
 pub mod container;
 pub mod flex_container;
 pub mod image;
@@ -7,8 +8,9 @@ use shared::value::TryFromValue;
 
 use crate::{
     context::{
-        GenerateId, GetFont, GetState, GetStyle, LoadExtent, ManageDirtyFlags, ManageIntrinsic,
-        RegisterKey, Subscribe,
+        AnimationQuery, GenerateId, GetFont, GetState, GetStyle, LoadExtent,
+        ManageAnimationRegistry, ManageDirtyFlags, ManageIntrinsic, RegisterKey, ScopedManageState,
+        Subscribe,
     },
     drawer::Drawer,
     events::{self, DispatchEvent},
@@ -20,6 +22,7 @@ use crate::{
         offset::Offset,
         WidgetId,
     },
+    widget::animated_visibility::AnimatedVisibility,
 };
 
 pub use {
@@ -45,8 +48,12 @@ pub use {
 /// layout engine or debugging tools to query essential information
 /// from any widget variant without needing to understand that
 /// widget's specific internal logic.
-pub trait WidgetInfo {
+pub trait WidgetBase {
     fn get_id(&self) -> WidgetId;
+
+    fn set_id(&mut self, id: WidgetId);
+
+    fn get_key(&self) -> Option<&WidgetKey>;
 
     fn get_class(&self) -> WidgetClass;
 
@@ -58,53 +65,115 @@ pub trait WidgetInfo {
     fn sizing_mode(&self) -> SizingMode;
 }
 
+pub(crate) trait InvalidateContext:
+    ManageDirtyFlags<WidgetId>
+    + ManageAnimationRegistry<WidgetId>
+    + AnimationQuery<WidgetId>
+    + GetState
+    + ScopedManageState
+{
+}
+
+impl<C> InvalidateContext for C where
+    C: ManageDirtyFlags<WidgetId>
+        + ManageAnimationRegistry<WidgetId>
+        + AnimationQuery<WidgetId>
+        + GetState
+        + ScopedManageState
+{
+}
+
 pub(crate) trait Invalidate<C>
 where
-    C: ManageDirtyFlags<WidgetId> + GetState,
+    C: InvalidateContext,
 {
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags;
 }
 
-pub(crate) trait Initialize<C>
-where
+pub(crate) trait InitContext:
+    GenerateId
+    + RegisterKey<WidgetKey, WidgetId>
+    + GetState
+    + Subscribe<WidgetId>
+    + ManageAnimationRegistry<WidgetId>
+    + GetStyle
+    + GetFont
+{
+}
+
+impl<C> InitContext for C where
     C: GenerateId
         + RegisterKey<WidgetKey, WidgetId>
         + GetState
         + Subscribe<WidgetId>
+        + ManageAnimationRegistry<WidgetId>
         + GetStyle
-        + GetFont,
+        + GetFont
 {
-    fn initialize(&mut self, context: &mut C);
 }
 
-pub(crate) trait Layout<C, T, Id>
+pub(crate) trait Init<C>: WidgetBase
 where
-    C: LoadExtent<T, Id>,
+    C: InitContext,
+{
+    fn init(&mut self, context: &mut C) {
+        if *self.get_id() == 0 {
+            self.set_id(context.generate_id());
+        }
+
+        if let Some(key) = self.get_key() {
+            context.register_key(key.clone(), self.get_id());
+        }
+
+        self.on_init(context);
+    }
+
+    fn on_init(&mut self, context: &mut C);
+}
+
+pub(crate) trait LayoutContext<T>: LoadExtent<T, WidgetId>
+where
     T: Default + Copy,
-    Id: Into<WidgetId>,
+{
+}
+
+impl<C, T> LayoutContext<T> for C
+where
+    C: LoadExtent<T, WidgetId>,
+    T: Default + Copy,
+{
+}
+
+pub(crate) trait Layout<C, T>
+where
+    C: LayoutContext<T>,
+    T: Default + Copy,
 {
     fn layout(&mut self, context: &C);
 }
 
-pub(crate) trait Draw<C, T>
+pub(crate) trait DrawContext<T>: LoadExtent<T, WidgetId> + AnimationQuery<WidgetId>
 where
-    C: LoadExtent<T, WidgetId>,
     T: Default + Copy,
-    Self: WidgetInfo,
+{
+}
+
+impl<C, T> DrawContext<T> for C
+where
+    C: LoadExtent<T, WidgetId> + AnimationQuery<WidgetId>,
+    T: Default + Copy,
+{
+}
+
+pub(crate) trait Draw<C, T>: WidgetBase
+where
+    C: DrawContext<T>,
+    T: Default + Copy,
 {
     fn draw(&self, context: &C, offset: &Offset<T>, drawer: &mut Drawer) {
+        // TODO: use this method as pre-action before actual drawing widget
+
         self.draw_on(context, offset, drawer);
-        // let Some(presence_state) = <C as LoadPresenceState<WidgetId>>::load(context, self.get_id())
-        // else {
-        //     self.draw_on(context, offset, drawer);
-        //     return;
-        // };
-        //
-        // match presence_state.phase {
-        //     PresencePhase::Allocating | PresencePhase::Releasing => return,
-        //     PresencePhase::Appearing | PresencePhase::Showing => todo!(),
-        //     PresencePhase::Disappearing => todo!(),
-        // }
     }
 
     fn draw_on(&self, context: &C, offset: &Offset<T>, drawer: &mut Drawer);
@@ -120,6 +189,7 @@ pub enum Widget {
     Text(Box<Text>),
     Container(Box<Container>),
     FlexContainer(Box<FlexContainer>),
+    AnimatedVisibility(Box<AnimatedVisibility>),
 }
 
 macro_rules! delegate {
@@ -129,13 +199,22 @@ macro_rules! delegate {
             Widget::Text(text) => text.$method_name($($tokens),*),
             Widget::Container(container) => container.$method_name($($tokens),*),
             Widget::FlexContainer(flex_container) => flex_container.$method_name($($tokens),*),
+            Widget::AnimatedVisibility(animated_visibility) => animated_visibility.$method_name($($tokens),*),
         }
     };
 }
 
-impl WidgetInfo for Widget {
+impl WidgetBase for Widget {
     fn get_id(&self) -> WidgetId {
         delegate!(self.get_id())
+    }
+
+    fn set_id(&mut self, id: WidgetId) {
+        delegate!(self.set_id(id));
+    }
+
+    fn get_key(&self) -> Option<&WidgetKey> {
+        delegate!(self.get_key())
     }
 
     fn get_class(&self) -> WidgetClass {
@@ -157,31 +236,26 @@ impl WidgetInfo for Widget {
 
 impl<C> Invalidate<C> for Widget
 where
-    C: ManageDirtyFlags<WidgetId> + GetState,
+    C: InvalidateContext,
 {
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
         delegate!(self.invalidate(context))
     }
 }
 
-impl<C> Initialize<C> for Widget
+impl<C> Init<C> for Widget
 where
-    C: GenerateId
-        + RegisterKey<WidgetKey, WidgetId>
-        + GetState
-        + Subscribe<WidgetId>
-        + GetStyle
-        + GetFont,
+    C: InitContext,
 {
-    fn initialize(&mut self, context: &mut C) {
-        delegate!(self.initialize(context));
+    fn on_init(&mut self, context: &mut C) {
+        delegate!(self.on_init(context));
     }
 }
 
 impl Measure<f32, WidgetId> for Widget {
     fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
-        C: ManageIntrinsic<f32, WidgetId>,
+        C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
         delegate!(self.get_intrinsic(context))
     }
@@ -194,7 +268,7 @@ impl Measure<f32, WidgetId> for Widget {
     }
 }
 
-impl<C> Layout<C, f32, WidgetId> for Widget
+impl<C> Layout<C, f32> for Widget
 where
     C: LoadExtent<f32, WidgetId>,
 {
@@ -205,7 +279,7 @@ where
 
 impl<C> Draw<C, f32> for Widget
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: DrawContext<f32>,
 {
     fn draw_on(&self, context: &C, offset: &Offset<f32>, output: &mut Drawer) {
         // INFO: DO NOT USE `draw` METHOD! ONLY `draw_on`
@@ -245,5 +319,11 @@ impl From<Container> for Widget {
 impl From<FlexContainer> for Widget {
     fn from(value: FlexContainer) -> Self {
         Widget::FlexContainer(value.into())
+    }
+}
+
+impl From<AnimatedVisibility> for Widget {
+    fn from(value: AnimatedVisibility) -> Self {
+        Widget::AnimatedVisibility(value.into())
     }
 }
