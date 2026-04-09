@@ -1,5 +1,3 @@
-use macros::GenericBuilder;
-
 use crate::types::Color;
 
 /// Defines the visual stroke and corner shaping for a widget's boundary.
@@ -7,8 +5,7 @@ use crate::types::Color;
 /// This struct groups the properties required to draw a frame around a
 /// container. It manages how thick the frame is, how rounded the
 /// corners appear, and the specific color of the stroke.
-#[derive(GenericBuilder, Debug, Clone, Default)]
-#[gbuilder(name(BorderGBuilder), derive(Clone))]
+#[derive(Debug, Clone, Default)]
 pub struct Border {
     /// The thickness of the border line.
     ///

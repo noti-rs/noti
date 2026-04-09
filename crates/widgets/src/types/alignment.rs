@@ -6,13 +6,9 @@ use shared::{error::ConversionError, value::TryFromValue};
 /// [`Self::vertical`] along the y-axis. These values affect the
 /// final placement of child widgets when there is extra free space
 /// remaining after compilation.
-#[derive(macros::GenericBuilder, Debug, Default, Clone)]
-#[gbuilder(name(AlignmentGBuilder), derive(Clone), constructor)]
+#[derive(Debug, Default, Clone)]
 pub struct Alignment {
-    #[gbuilder(aliases(diagonal))]
     pub horizontal: Position,
-
-    #[gbuilder(aliases(diagonal))]
     pub vertical: Position,
 }
 

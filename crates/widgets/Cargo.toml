@@ -12,12 +12,11 @@ tempfile.workspace = true
 log.workspace = true
 anyhow.workspace = true
 derive_more.workspace = true
-derive_builder.workspace = true
 
+bon = "3.9.1"
 num-traits = "0.2.19"
 resvg = "0.45.1"
 image = { version = "0.25.2"}
 linicon = "2.3.0"
 skia-safe = { version = "0.87.0", features = ["gl", "textlayout"] }
 bitflags = "2.11.0"
-paste = "1.0.15"

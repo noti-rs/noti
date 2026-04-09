@@ -7,9 +7,13 @@ pub mod types;
 pub mod widget;
 
 use crate::{
-    context::{Context, CreateState, GetState, InjectDependency, LoadExtent, SetState, Tick}, events::{DispatchEvent, Event}, types::{
-        Extent, WidgetId, measure::{Constraints, Measure}
-    }, widget::{Draw, Init, Invalidate, Layout, Widget, WidgetBase}
+    context::{Context, CreateState, GetState, LoadExtent, SetState, SetStyleClass, Tick},
+    events::{DispatchEvent, Event},
+    types::{
+        measure::{Constraints, Measure},
+        Extent, WidgetId, WidgetStyle,
+    },
+    widget::{Draw, Init, Invalidate, Layout, Widget, WidgetBase},
 };
 
 pub struct UiRoot {
@@ -92,13 +96,12 @@ impl SetState for UiRoot {
     }
 }
 
-impl InjectDependency for UiRoot {
-    fn inject<Class, Dependency>(&mut self, class: Class, dependency: Dependency)
+impl SetStyleClass for UiRoot {
+    fn set_style_class<Class>(&mut self, class: Class, style: WidgetStyle)
     where
         Class: Into<types::WidgetClass>,
-        Dependency: Into<types::WidgetDependency>,
     {
-        self.context.inject(class, dependency);
+        self.context.set_style_class(class, style);
     }
 }
 

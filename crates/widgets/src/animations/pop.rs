@@ -11,7 +11,7 @@ use crate::types::{ShaderBuilder, UniformValue};
 ///
 /// The direction of scaling is controlled by the [`PopDirection`] trait,  
 /// and the transition curve is determined by the [`Easing`] function.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Pop {
     shader_builder: ShaderBuilder,
 }

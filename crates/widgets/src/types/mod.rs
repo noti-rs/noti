@@ -20,7 +20,6 @@
 pub mod alignment;
 pub mod border;
 pub mod color;
-pub mod data;
 pub mod direction;
 pub mod dirty_flags;
 pub mod extent;
@@ -30,17 +29,20 @@ pub mod offset;
 pub mod point;
 pub mod shader_builder;
 pub mod spacing;
+pub mod style;
+
+pub(crate) use style::StyleInfo;
 
 pub use {
-    alignment::{Alignment, AlignmentGBuilder, Position},
-    border::{Border, BorderGBuilder},
+    alignment::{Alignment, Position},
+    border::Border,
     color::{Bgra, Color, LinearGradient},
-    data::{WidgetDependency, WidgetStyle},
     direction::Direction,
     extent::Extent,
     identifiers::{WidgetClass, WidgetId},
     offset::Offset,
     point::Point,
     shader_builder::{ShaderBuilder, ShaderBuilderError, UniformValue},
-    spacing::{Spacing, SpacingGBuilder},
+    spacing::Spacing,
+    style::WidgetStyle,
 };

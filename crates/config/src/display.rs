@@ -1,9 +1,9 @@
 use std::{collections::HashMap, marker::PhantomData, path::PathBuf, time::Duration};
 
 use dbus::notification::Urgency;
-use macros::{ConfigProperty, GenericBuilder};
+use macros::ConfigProperty;
 use serde::{de::Visitor, Deserialize};
-use widgets::animations::{AnimationKind, Fade, Pop, Translate};
+use widgets::{animations::{AnimationKind, Fade, Pop, Translate}, make_style, widget::ImageStyle};
 
 use crate::{
     public,
@@ -273,14 +273,9 @@ public! {
     #[derive(ConfigProperty, Debug, Clone)]
     #[cfg_prop(name(TomlImageProperty), derive(Debug, Clone, Default, Deserialize))]
     struct ImageProperty {
-        #[cfg_prop(default(64))]
-        max_size: u16,
-
         #[cfg_prop(default(0))]
         rounding: u16,
-
         margin: Spacing,
-
         resizing_method: ResizingMethod,
         mipmap_mode: MipmapMode,
         fit_mode: FitMode,
@@ -293,15 +288,16 @@ impl Default for ImageProperty {
     }
 }
 
-impl From<ImageProperty> for widgets::widget::ImageStyle {
+impl From<ImageProperty> for ImageStyle {
     fn from(value: ImageProperty) -> Self {
-        Self {
-            max_size: value.max_size,
-            rounding: value.rounding,
-            margin: value.margin.into(),
-            resizing_method: value.resizing_method.into(),
-            mipmap_mode: value.mipmap_mode.into(),
-            fit_mode: value.fit_mode.into(),
+        make_style!{
+            ImageStyle {
+                rounding: value.rounding,
+                margin: value.margin.into(),
+                resizing_method: value.resizing_method.into(),
+                mipmap_mode: value.mipmap_mode.into(),
+                fit_mode: value.fit_mode.into(),
+            }
         }
     }
 }
@@ -370,16 +366,13 @@ impl From<FitMode> for widgets::widget::FitMode {
 }
 
 public! {
-    #[derive(ConfigProperty, GenericBuilder, Debug, Default, Clone)]
+    #[derive(ConfigProperty, Debug, Default, Clone)]
     #[cfg_prop(name(TomlBorder), derive(Debug, Clone, Default, Deserialize))]
-    #[gbuilder(name(GBuilderBorder), derive(Clone))]
     struct Border {
         #[cfg_prop(default(0))]
-        #[gbuilder(default(0))]
         size: u32,
 
         #[cfg_prop(default(0))]
-        #[gbuilder(default(0))]
         radius: u32,
     }
 }

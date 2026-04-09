@@ -6,26 +6,24 @@ use indexmap::{
     IndexMap,
 };
 use log::{debug, trace, warn};
-use shared::{cached_data::CachedData, text::Text};
-use std::{cmp::Ordering, collections::VecDeque, hash::Hash, path::PathBuf, time};
+use shared::text;
+use std::{cmp::Ordering, collections::VecDeque, hash::Hash, time};
 use widgets::{
     self,
     animations::AnimationKind,
-    context::{Context, CreateState, GetState, InjectDependency, SetState, Tick},
+    context::{Context, CreateState, GetState, SetState, SetStyleClass, Tick},
     drawer::Drawer,
     events::Event,
-    make_widget,
+    make_style, make_widget,
     state::MutableState,
     types::{measure::Constraints, Alignment, Border, Direction, Extent, Offset, Point, Position},
     widget::{
-        animated_visibility::{AnimatedVisibilityBuilder, AnimationDefinition},
+        animated_visibility::{AnimatedVisibility, AnimatedVisibilityStyle, AnimationDefinition},
         image::ImageProvider,
-        FlexContainerBuilder, ImageBuilder, TextBuilder,
+        ContainerStyle, FlexContainer, Image, Text, TextStyle,
     },
     UiRoot,
 };
-
-use super::CachedLayout;
 
 /// The container of banners which allows manage them easily.
 pub(super) struct BannerStack<K>
@@ -79,7 +77,7 @@ where
     pub(super) fn configure(&mut self, config: &Config) {
         self.sort_by_config(config);
         self.banners_mut()
-            .for_each(|banner| banner.is_compiled = false);
+            .for_each(|banner| banner.update_config(config));
     }
 
     fn sort_by_config(&mut self, config: &Config) {
@@ -131,12 +129,19 @@ impl BannerStack<u32> {
 
     /// Extends current container with new banners that will be created from notification. Note
     /// that existing banner with the same notification id will be replaced.
-    pub(super) fn extend_from<I>(&mut self, notifications: I, config: &Config)
-    where
+    pub(super) fn extend_from<I>(
+        &mut self,
+        notifications: I,
+        font_collection: skia_safe::textlayout::FontCollection,
+        config: &Config,
+    ) where
         I: Iterator<Item = Notification>,
     {
         for notification in notifications {
-            self.banners.insert(notification.id, notification.into());
+            self.banners.insert(
+                notification.id,
+                Banner::new(notification, font_collection.clone(), config),
+            );
         }
         self.sort_by_config(config);
     }
@@ -235,13 +240,10 @@ where
 /// Represents a notification banner.
 pub(super) struct Banner {
     notification: Notification,
-    ui_root: Option<UiRoot>,
+    ui_root: UiRoot,
     close_status: CloseStatus,
 
-    banner_state: Option<BannerState>,
-
-    /// A widget layout only needs to be compiled once, until the data or layout changes.
-    is_compiled: bool,
+    banner_state: BannerState,
 }
 
 struct BannerState {
@@ -249,8 +251,8 @@ struct BannerState {
     shown_at: MutableState<time::Instant>,
     banner_phase: MutableState<BannerPhase>,
 
-    summary_state: MutableState<Text>,
-    body_state: MutableState<Text>,
+    summary_state: MutableState<text::Text>,
+    body_state: MutableState<text::Text>,
     image_state: MutableState<ImageProvider>,
     visible_state: MutableState<bool>,
 }
@@ -263,160 +265,53 @@ enum BannerPhase {
 }
 
 impl Banner {
+    const NOTIFICATION_ANIMATED_VISIBILITY: &str = "notification_animated_visibility";
     const NOTIFICATION_FRAME: &str = "notification_frame";
     const NOTIFICATION_SUMMARY: &str = "notification_summary";
     const NOTIFICATION_BODY: &str = "notification_body";
     const NOTIFICATION_IMAGE: &str = "notification_image";
 
-    pub(super) fn new(notification: Notification) -> Self {
-        debug!("Banner (id={}): Created", notification.id);
-
-        Self {
-            notification,
-            ui_root: None,
-            close_status: CloseStatus::NotClosed,
-
-            banner_state: None,
-
-            is_compiled: false,
-        }
-    }
-
-    pub(super) fn close(&mut self, closing_reason: ClosingReason) {
-        self.close_status.close_with(closing_reason);
-    }
-
-    pub(super) fn is_closed(&self) -> bool {
-        self.close_status.is_closed()
-    }
-
-    fn is_finished(&self) -> bool {
-        self.ui_root
-            .as_ref()
-            .map(|ui_root| {
-                matches!(
-                    ui_root
-                        .get(self.banner_state.as_ref().unwrap().banner_phase)
-                        .unwrap(),
-                    BannerPhase::Closed
-                )
-            })
-            .unwrap_or(false)
-    }
-
-    pub(super) fn reset_timeout(&mut self) {
-        if let Some(ui_root) = self.ui_root.as_mut() {
-            ui_root.set(
-                self.banner_state.as_ref().unwrap().shown_at,
-                time::Instant::now(),
-            );
-        }
-
-        trace!("Banner (id={}): Timeout reset", self.notification.id);
-    }
-
-    pub(super) fn update_data(&mut self, notification: Notification, config: &Config) {
-        self.notification = notification;
-
-        if let Some(ui_root) = self.ui_root.as_mut() {
-            let banner_state = self.banner_state.as_ref().unwrap();
-
-            ui_root.set(
-                banner_state.summary_state,
-                self.notification.summary.clone(),
-            );
-            ui_root.set(banner_state.body_state, self.notification.body.clone());
-            ui_root.set(
-                banner_state.image_state,
-                make_image_provider(
-                    &self.notification,
-                    config.display_by_app(&self.notification.app_name),
-                ),
-            )
-        } else {
-            self.is_compiled = false;
-        }
-
-        self.reset_timeout();
-        debug!(
-            "Banner (id={}): Updated notification data and timeout",
-            self.notification.id
-        );
-    }
-
-    // TODO: use it for resize
-    pub(super) fn width(&self) -> usize {
-        self.ui_root
-            .as_ref()
-            .map(|ui_root| ui_root.width())
-            .unwrap_or_default()
-            .round() as usize
-    }
-
-    pub(super) fn height(&self) -> usize {
-        self.ui_root
-            .as_ref()
-            .map(|ui_root| ui_root.height())
-            .unwrap_or_default()
-            .round() as usize
-    }
-
-    /// Compiles the widget layout of notification banner.
-    ///
-    /// Compiling the widget layout is important to ensure correct positioning of the UI elements,
-    /// proper text alignment, and overall layout consistency. Without compilation, the notification
-    /// banner may render incorrectly or not appear at all.
-    pub(super) fn compile(
-        &mut self,
-        config: &Config,
+    pub(super) fn new(
+        notification: Notification,
         font_collection: skia_safe::textlayout::FontCollection,
-        // TODO: need fix parser before use cached_layout
-        _cached_layouts: &CachedData<PathBuf, CachedLayout>,
-    ) {
-        if self.is_compiled {
-            return;
-        }
-
+        config: &Config,
+    ) -> Self {
         let extent = Extent::new(
-            config.general().width as usize,
-            config.general().height as usize,
+            config.general().width as f32,
+            config.general().height as f32,
         );
 
         let timeout = config
-            .display_by_app(&self.notification.app_name)
+            .display_by_app(&notification.app_name)
             .timeout
-            .by_urgency(&self.notification.hints.urgency) as u128;
+            .by_urgency(&notification.hints.urgency) as u128;
 
-        let display = config.display_by_app(&self.notification.app_name);
+        let display = config.display_by_app(&notification.app_name);
 
         let mut context = Context::new(font_collection);
-        let summary_state = context.create_state_mut(self.notification.summary.clone());
+        let summary_state = context.create_state_mut(notification.summary.clone());
         let summary_widget = make_widget! {
             Text {
                 class: Banner::NOTIFICATION_SUMMARY,
                 state: summary_state,
             }
-        }
-        .unwrap();
+        };
 
-        let body_state = context.create_state_mut(self.notification.body.clone());
+        let body_state = context.create_state_mut(notification.body.clone());
         let body_widget = make_widget! {
             Text {
                 class: Banner::NOTIFICATION_BODY,
                 state: body_state
             }
-        }
-        .unwrap();
+        };
 
-        let image_state =
-            context.create_state_mut(make_image_provider(&self.notification, display));
+        let image_state = context.create_state_mut(make_image_provider(&notification, display));
         let image_widget = make_widget! {
             Image {
                 class: Banner::NOTIFICATION_IMAGE,
                 state: image_state,
             }
-        }
-        .unwrap();
+        };
 
         let visible_state = context.create_state_mut(true);
         let shown_at = context.create_state_mut(time::Instant::now());
@@ -425,6 +320,7 @@ impl Banner {
         let layout = make_widget! {
             AnimatedVisibility {
                 state: visible_state,
+                class: Banner::NOTIFICATION_ANIMATED_VISIBILITY,
 
                 primary_animation: correct_animation(config, display.animation.primary.clone().into()),
                 primary_spatial_change: display.animation.primary_spatial_change.clone().into(),
@@ -456,21 +352,20 @@ impl Banner {
                                     alignment: Alignment::new(Position::Center, Position::Center),
                                     children: vec![summary_widget.into(), body_widget.into()],
                                 }
-                            }.unwrap().into()
+                            }.into()
                         ]
                     }
-                }.unwrap()
+                }
             }
         }
-        .unwrap()
         .into();
 
-        inject_dependencies(&mut context, &self.notification, config);
+        set_styles(&mut context, &notification, config);
 
         let mut ui_root = UiRoot::new(layout, context);
-        ui_root.layout(Constraints::new_tight(extent.into()).into());
+        ui_root.layout(Constraints::new_tight(extent).into());
 
-        self.banner_state = Some(BannerState {
+        let banner_state = BannerState {
             timeout,
             shown_at,
             banner_phase,
@@ -478,53 +373,126 @@ impl Banner {
             body_state,
             image_state,
             visible_state,
-        });
-        self.ui_root = Some(ui_root);
-        self.is_compiled = true;
+        };
+        debug!("Banner (id={}): Created", notification.id);
+
+        Self {
+            notification,
+            ui_root,
+            close_status: CloseStatus::NotClosed,
+            banner_state,
+        }
+    }
+
+    pub(super) fn close(&mut self, closing_reason: ClosingReason) {
+        self.close_status.close_with(closing_reason);
+    }
+
+    pub(super) fn is_closed(&self) -> bool {
+        self.close_status.is_closed()
+    }
+
+    fn is_finished(&self) -> bool {
+        matches!(
+            self.ui_root.get(self.banner_state.banner_phase).unwrap(),
+            BannerPhase::Closed
+        )
+    }
+
+    pub(super) fn reset_timeout(&mut self) {
+        self.ui_root
+            .set(self.banner_state.shown_at, time::Instant::now());
+
+        trace!("Banner (id={}): Timeout reset", self.notification.id);
+    }
+
+    pub(super) fn update_data(&mut self, notification: Notification, config: &Config) {
+        self.notification = notification;
+
+        self.ui_root.set(
+            self.banner_state.summary_state,
+            self.notification.summary.clone(),
+        );
+        self.ui_root
+            .set(self.banner_state.body_state, self.notification.body.clone());
+        self.ui_root.set(
+            self.banner_state.image_state,
+            make_image_provider(
+                &self.notification,
+                config.display_by_app(&self.notification.app_name),
+            ),
+        );
+
+        self.reset_timeout();
+        debug!(
+            "Banner (id={}): Updated notification data and timeout",
+            self.notification.id
+        );
+    }
+
+    pub(super) fn update_config(&mut self, config: &Config) {
+        let extent = Extent::new(
+            config.general().width as f32,
+            config.general().height as f32,
+        );
+
+        let display_config = config.display_by_app(&self.notification.app_name);
+        self.banner_state.timeout = display_config
+            .timeout
+            .by_urgency(&self.notification.hints.urgency)
+            as u128;
+
+        self.ui_root.set(
+            self.banner_state.image_state,
+            make_image_provider(&self.notification, display_config),
+        );
+
+        set_styles(&mut self.ui_root, &self.notification, config);
+        self.ui_root.layout(Constraints::new_tight(extent).into());
+    }
+
+    // TODO: use it for resize
+    pub(super) fn width(&self) -> usize {
+        self.ui_root.width() as usize
+    }
+
+    pub(super) fn height(&self) -> usize {
+        self.ui_root.height() as usize
     }
 
     /// Draws the notification banner frame into provided surface with offset.
-    pub(super) fn draw(
-        &self,
-        offset: &Offset<f32>,
-        sk_surface: &mut skia_safe::Surface,
-    ) -> DrawState {
+    pub(super) fn draw(&self, offset: &Offset<f32>, sk_surface: &mut skia_safe::Surface) {
         debug!("Banner (id={}): Beginning of draw", self.notification.id);
 
         let mut drawer = Drawer::use_surface(sk_surface.clone());
-        let Some(ui_root) = &self.ui_root else {
-            return DrawState::Failure;
-        };
-
-        ui_root.draw(offset, &mut drawer);
+        self.ui_root.draw(offset, &mut drawer);
 
         debug!("Banner (id={}): Complete draw", self.notification.id);
-        DrawState::Success
     }
 
     pub(super) fn dispatch_event(&mut self, event: Event) {
-        if let Some(ui_root) = self.ui_root.as_mut() {
-            ui_root.dispatch_event(event)
-        }
+        self.ui_root.dispatch_event(event);
     }
 }
 
-fn inject_dependencies(context: &mut Context, notification: &Notification, config: &Config) {
+fn set_styles<C: SetStyleClass>(context: &mut C, notification: &Notification, config: &Config) {
     macro_rules! make_text_config {
         (for $kind:ident use $compile_ctx:ident, $display_config:ident, $colors:ident, $id:ident) => {
-            $compile_ctx.inject(
+            $compile_ctx.set_style_class(
                 Banner::$id,
-                widgets::types::WidgetStyle::Text(widgets::widget::TextStyle {
-                    font: widgets::widget::Font {
-                        name: $display_config.$kind.font.name.clone(),
-                        size: $display_config.$kind.font_size as usize,
-                        style: $display_config.$kind.style.clone().into(),
-                    },
-                    wrap: $display_config.$kind.wrap,
-                    margin: $display_config.$kind.margin.into(),
-                    alignment: $display_config.$kind.alignment.clone().into(),
-                    line_spacing: $display_config.$kind.line_spacing as usize,
-                    color: $colors.foreground.clone().into(),
+                widgets::types::WidgetStyle::Text(make_style! {
+                    TextStyle {
+                        font: widgets::widget::Font {
+                            name: $display_config.$kind.font.name.clone(),
+                            size: $display_config.$kind.font_size as usize,
+                            style: $display_config.$kind.style.clone().into(),
+                        },
+                        wrap: $display_config.$kind.wrap,
+                        margin: $display_config.$kind.margin.into(),
+                        alignment: $display_config.$kind.alignment.clone().into(),
+                        line_spacing: $display_config.$kind.line_spacing as usize,
+                        color: $colors.foreground.clone().into(),
+                    }
                 }),
             );
         };
@@ -534,21 +502,36 @@ fn inject_dependencies(context: &mut Context, notification: &Notification, confi
     let theme = config.theme_by_app(&notification.app_name);
     let colors = theme.by_urgency(&notification.hints.urgency);
 
-    context.inject(
+    context.set_style_class(
+        Banner::NOTIFICATION_ANIMATED_VISIBILITY, 
+        widgets::types::WidgetStyle::AnimatedVisibility(make_style! {
+            AnimatedVisibilityStyle {
+                primary_animation: correct_animation(config, display_config.animation.primary.clone().into()),
+                primary_spatial_change: display_config.animation.primary_spatial_change.clone().into(),
+
+                secondary_animation: correct_animation(config, display_config.animation.secondary.clone().into()),
+                secondary_spatial_change: display_config.animation.secondary_spatial_change.clone().into(),
+            }
+        })
+    );
+
+    context.set_style_class(
         Banner::NOTIFICATION_FRAME,
-        widgets::types::WidgetStyle::Container(widgets::widget::ContainerStyle {
-            background_color: colors.background.clone().into(),
-            border: Border {
-                size: display_config.border.size as usize,
-                radius: display_config.border.radius as usize,
-                color: colors.border.clone().into(),
-            },
-            spacing: display_config.padding.into(),
-            alignment: Alignment::new(Position::Start, Position::Center),
+        widgets::types::WidgetStyle::Container(make_style! {
+            ContainerStyle {
+                background_color: colors.background.clone().into(),
+                border: Border {
+                    size: display_config.border.size as usize,
+                    radius: display_config.border.radius as usize,
+                    color: colors.border.clone().into(),
+                },
+                spacing: display_config.padding.into(),
+                alignment: Alignment::new(Position::Start, Position::Center),
+            }
         }),
     );
 
-    context.inject(
+    context.set_style_class(
         Banner::NOTIFICATION_IMAGE,
         widgets::types::WidgetStyle::Image(display_config.image.clone().into()),
     );
@@ -598,42 +581,36 @@ fn make_image_provider(
 
 impl Tick for Banner {
     fn tick(&mut self, delta_ns: u128) {
-        if let Some(ui_root) = &mut self.ui_root {
-            ui_root.tick(delta_ns);
+        self.ui_root.tick(delta_ns);
 
-            ui_root.invalidate();
-            ui_root.layout(None);
+        self.ui_root.invalidate();
+        self.ui_root.layout(None);
 
-            let banner_state = self.banner_state.as_ref().expect("It must be created!");
-            match ui_root
-                .get(banner_state.banner_phase)
-                .expect("Banner State must be created!")
-            {
-                BannerPhase::NotShown | BannerPhase::Closing => (),
-                BannerPhase::Shown => {
-                    let shown_at = ui_root
-                        .get(banner_state.shown_at)
-                        .expect("Time snapshot must be created!");
+        match self
+            .ui_root
+            .get(self.banner_state.banner_phase)
+            .expect("Banner State must be created!")
+        {
+            BannerPhase::NotShown | BannerPhase::Closing => (),
+            BannerPhase::Shown => {
+                let shown_at = self
+                    .ui_root
+                    .get(self.banner_state.shown_at)
+                    .expect("Time snapshot must be created!");
 
-                    if banner_state.timeout != 0
-                        && shown_at.elapsed().as_millis() >= banner_state.timeout
-                        && *ui_root.get(banner_state.visible_state).unwrap()
-                    {
-                        ui_root.set(banner_state.visible_state, false);
-                        ui_root.set(banner_state.banner_phase, BannerPhase::Closing);
-                    }
-                }
-                BannerPhase::Closed => {
-                    self.close_status.close_with(ClosingReason::Expired);
+                if self.banner_state.timeout != 0
+                    && shown_at.elapsed().as_millis() >= self.banner_state.timeout
+                    && *self.ui_root.get(self.banner_state.visible_state).unwrap()
+                {
+                    self.ui_root.set(self.banner_state.visible_state, false);
+                    self.ui_root
+                        .set(self.banner_state.banner_phase, BannerPhase::Closing);
                 }
             }
+            BannerPhase::Closed => {
+                self.close_status.close_with(ClosingReason::Expired);
+            }
         }
-    }
-}
-
-impl From<Notification> for Banner {
-    fn from(value: Notification) -> Self {
-        Self::new(value)
     }
 }
 
@@ -641,11 +618,6 @@ impl<'a> From<&'a Banner> for &'a Notification {
     fn from(value: &'a Banner) -> Self {
         &value.notification
     }
-}
-
-pub(super) enum DrawState {
-    Success,
-    Failure,
 }
 
 #[derive(Default)]

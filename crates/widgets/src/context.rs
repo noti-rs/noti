@@ -4,7 +4,7 @@ use crate::{
         dirty_flags::DirtyFlags,
         identifiers::WidgetKey,
         measure::{Constraints, Intrinsic},
-        Extent, WidgetClass, WidgetDependency, WidgetId, WidgetStyle,
+        Extent, StyleInfo, WidgetClass, WidgetId, WidgetStyle,
     },
 };
 use std::{any::Any, collections::HashMap, time::Duration};
@@ -12,10 +12,10 @@ use std::{any::Any, collections::HashMap, time::Duration};
 pub struct Context {
     id_counter: u64,
     state_descriptor_counter: usize,
+    measure_cache: HashMap<WidgetId, MeasureCache>,
     state_registry: HashMap<usize, StateInfo>,
     key_registry: HashMap<WidgetKey, WidgetId>,
-    dependendices: HashMap<WidgetClass, WidgetDependency>,
-    measure_cache: HashMap<WidgetId, MeasureCache>,
+    style_registry: HashMap<WidgetClass, StyleInfo>,
     dirty_registry: HashMap<WidgetId, DirtyFlags>,
     animation_regirsty: HashMap<WidgetId, AnimationProgress>,
     font_collection: skia_safe::textlayout::FontCollection,
@@ -26,11 +26,11 @@ impl Context {
         Self {
             id_counter: 1,
             state_descriptor_counter: 1,
-            state_registry: HashMap::new(),
             font_collection,
-            key_registry: HashMap::new(),
-            dependendices: HashMap::new(),
             measure_cache: HashMap::new(),
+            state_registry: HashMap::new(),
+            key_registry: HashMap::new(),
+            style_registry: HashMap::new(),
             dirty_registry: HashMap::new(),
             animation_regirsty: HashMap::new(),
         }
@@ -239,7 +239,7 @@ impl<'a> SetState for ScopedContext<'a> {
     }
 }
 
-pub(crate) trait Subscribe<Id>
+pub(crate) trait StateSubscription<Id>
 where
     Id: Into<WidgetId>,
 {
@@ -249,7 +249,7 @@ where
         T: 'static;
 }
 
-impl<Id> Subscribe<Id> for Context
+impl<Id> StateSubscription<Id> for Context
 where
     Id: Into<WidgetId>,
 {
@@ -266,28 +266,59 @@ where
     }
 }
 
-pub trait InjectDependency {
-    fn inject<Class, Dependency>(&mut self, class: Class, dependency: Dependency)
-    where
-        Class: Into<WidgetClass>,
-        Dependency: Into<WidgetDependency>;
+pub(crate) trait StyleSubscription<C, Id>
+where
+    C: Into<WidgetClass>,
+    Id: Into<WidgetId>,
+{
+    fn subscribe(&mut self, id: Id, class: C);
 }
 
-impl InjectDependency for Context {
-    fn inject<Class, Dependency>(&mut self, class: Class, dependency: Dependency)
+impl<C, Id> StyleSubscription<C, Id> for Context
+where
+    Id: Into<WidgetId>,
+    C: Into<WidgetClass>,
+{
+    fn subscribe(&mut self, id: Id, class: C) {
+        let id = id.into();
+        self.style_registry
+            .entry(class.into())
+            .and_modify(|style_info| style_info.add_subscriber(id))
+            .or_insert_with(|| {
+                let mut style = StyleInfo::new(WidgetStyle::Unknown);
+                style.add_subscriber(id);
+                style
+            });
+    }
+}
+
+pub trait SetStyleClass {
+    fn set_style_class<Class>(&mut self, class: Class, style: WidgetStyle)
+    where
+        Class: Into<WidgetClass>;
+}
+
+impl SetStyleClass for Context {
+    fn set_style_class<Class>(&mut self, class: Class, style: WidgetStyle)
     where
         Class: Into<WidgetClass>,
-        Dependency: Into<WidgetDependency>,
     {
-        let dependency = dependency.into();
-        self.dependendices
+        self.style_registry
             .entry(class.into())
-            .and_modify(|existing_dependency| {
-                if let Some(style) = dependency.style.clone() {
-                    existing_dependency.style = Some(style);
-                }
+            .and_modify(|style_info| {
+                style_info.set_style(style.clone());
+
+                // TODO: check the validity of exising widget
+                // For instance, in subscriber list may be some unexisting widget and marking dirty
+                // flags will be invalid
+                style_info.subscribers().for_each(|subscriber| {
+                    self.dirty_registry
+                        .entry(*subscriber)
+                        .and_modify(|flags| *flags |= DirtyFlags::NEEDS_UPDATE_STYLES)
+                        .or_insert(DirtyFlags::NEEDS_UPDATE_STYLES);
+                });
             })
-            .or_insert_with(|| dependency);
+            .or_insert_with(|| StyleInfo::new(style));
     }
 }
 
@@ -375,9 +406,7 @@ pub(crate) trait GetStyle {
 
 impl GetStyle for Context {
     fn get_style(&self, class: &WidgetClass) -> Option<&WidgetStyle> {
-        self.dependendices
-            .get(class)
-            .and_then(|dependency| dependency.style.as_ref())
+        self.style_registry.get(class).map(StyleInfo::get_style)
     }
 }
 

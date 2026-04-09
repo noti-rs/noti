@@ -4,12 +4,23 @@ use log::warn;
 
 use crate::{
     context::{
-        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
+        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints,
+        SaveExtent, StyleSubscription,
     },
     drawer::Drawer,
     events::{DispatchContext, DispatchEvent, Event},
     types::{
-        Color, Point, alignment::{Alignment, Position}, border::{Border, BorderGBuilder}, data::{Configure, WidgetStyle}, direction::Direction, dirty_flags::DirtyFlags, extent::{Extent, FlexExtent}, identifiers::{WidgetClass, WidgetId, WidgetKey}, measure::{self, Constraints, Measure, MeasureContext, SizingMode}, offset::Offset, spacing::Spacing
+        alignment::{Alignment, Position},
+        border::Border,
+        direction::Direction,
+        dirty_flags::DirtyFlags,
+        extent::{Extent, FlexExtent},
+        identifiers::{WidgetClass, WidgetId, WidgetKey},
+        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+        offset::Offset,
+        spacing::Spacing,
+        style::{Configure, StyleProperty, WidgetStyle},
+        Color, Point,
     },
     widget::{
         Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
@@ -30,9 +41,7 @@ use crate::{
 /// This type is intentionally lightweight — it does not implement the
 /// full CSS flexbox algorithm, but provides enough flexibility to build
 /// common layouts without duplicating positioning logic.
-#[derive(macros::GenericBuilder, derive_builder::Builder, Clone)]
-#[builder(pattern = "owned")]
-#[gbuilder(name(FlexContainerGBuilder), derive(Clone))]
+#[derive(bon::Builder)]
 pub struct FlexContainer {
     /// An optional identifier for this widget.
     ///
@@ -40,20 +49,16 @@ pub struct FlexContainer {
     /// compilation. Setting this manually allows the widget to be
     /// targeted by external configurations and makes the widget tree
     /// significantly easier to navigate during debugging.
-    #[builder(private, default)]
-    #[gbuilder(hidden, default)]
+    #[builder(skip)]
     id: WidgetId,
 
-    #[builder(setter(strip_option, into), default)]
-    #[gbuilder(default)]
+    #[builder(into)]
     key: Option<WidgetKey>,
 
-    #[builder(default, setter(into))]
-    #[gbuilder(default)]
+    #[builder(into, default)]
     class: WidgetClass,
 
     #[builder(default = false)]
-    #[gbuilder(default(false))]
     expand: bool,
 
     /// The fill color or gradient applied to the entire area of the container.
@@ -63,9 +68,8 @@ pub struct FlexContainer {
     /// providing a solid or decorative base. If not set, the container
     /// is typically transparent, allowing the parent's background to
     /// show through.
-    #[builder(setter(strip_option), default)]
-    #[gbuilder(default)]
-    pub(super) background_color: Option<Color>,
+    #[builder(with = |v: Color| StyleProperty::Explicit(v), default)]
+    pub(super) background_color: StyleProperty<Color>,
 
     /// The internal spacing between the widget's boundary box and its actual content.
     ///
@@ -73,9 +77,8 @@ pub struct FlexContainer {
     /// effectively shrinks the available area for the widget's content
     /// without changing the widget's outer dimensions. It ensures
     /// content does not touch the edges of its container.
-    #[builder(setter(strip_option), default)]
-    #[gbuilder(default)]
-    pub(super) spacing: Option<Spacing>,
+    #[builder(with = |v: Spacing| StyleProperty::Explicit(v), default)]
+    pub(super) spacing: StyleProperty<Spacing>,
 
     /// The visual frame and corner shaping applied to the container's edges.
     ///
@@ -83,9 +86,8 @@ pub struct FlexContainer {
     /// the widget's boundary. It provides a clear visual distinction
     /// between the container's internal content and the rest of the
     /// layout.
-    #[builder(setter(strip_option), default)]
-    #[gbuilder(use_gbuilder(BorderGBuilder))]
-    pub(super) border: Option<Border>,
+    #[builder(with = |v: Border| StyleProperty::Explicit(v), default)]
+    pub(super) border: StyleProperty<Border>,
 
     /// The rules for positioning content within the available internal space.
     ///
@@ -93,8 +95,8 @@ pub struct FlexContainer {
     /// anchors itself when the container is larger than the content
     /// it holds. It manages the distribution of "extra" space along
     /// the horizontal and vertical axes.
-    #[builder(setter(strip_option), default)]
-    pub(super) alignment: Option<Alignment>,
+    #[builder(with = |v: Alignment| StyleProperty::Explicit(v), default)]
+    pub(super) alignment: StyleProperty<Alignment>,
 
     /// The primary axis used for arranging the child widgets.
     ///
@@ -214,7 +216,7 @@ impl FlexContainer {
     /// - In a **Row**, Horizontal.
     /// - In a **Column**, Vertical.
     fn main_axis_alignment(&self) -> Position {
-        let alignment = self.alignment.as_ref().cloned().unwrap_or_default();
+        let alignment = self.alignment.clone().unwrap_or_default();
 
         match &self.direction {
             Direction::Horizontal => alignment.horizontal,
@@ -228,7 +230,7 @@ impl FlexContainer {
     /// - In a **Row**, Vertical.
     /// - In a **Column**, Horizontal.
     fn cross_axis_alignment(&self) -> Position {
-        let alignment = self.alignment.as_ref().cloned().unwrap_or_default();
+        let alignment = self.alignment.clone().unwrap_or_default();
 
         match &self.direction {
             Direction::Horizontal => alignment.vertical,
@@ -329,6 +331,16 @@ where
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
         let mut dirty_flags = context.get_dirty_flags(self.id);
 
+        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
+            if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
+                self.configure(container_style.clone());
+
+                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
+            }
+
+            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
+        }
+
         for child in &mut self.children {
             let child_flags = child.invalidate(context);
 
@@ -349,6 +361,14 @@ where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
+        if !self.class.is_empty() {
+            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
+                context,
+                self.id,
+                self.class.clone(),
+            );
+        }
+
         if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
             self.configure(container_style.clone());
         }
@@ -646,8 +666,8 @@ where
         let (start, incrementor) = self.get_start_and_incrementor(context, plane.main.extent);
         plane.main.start += start;
 
-        let background_color = self.background_color.as_ref().cloned().unwrap_or_default();
-        let border = self.border.as_ref().cloned().unwrap_or_default();
+        let background_color = self.background_color.clone().unwrap_or_default();
+        let border = self.border.clone().unwrap_or_default();
 
         let canvas = drawer.surface.canvas();
         canvas.save();

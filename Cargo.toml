@@ -48,7 +48,6 @@ async-channel = "2.5.0"
 derive_more = { version = "2.0.1", features = ["display"] }
 humantime = "2.1.0"
 tempfile = "3.12.0"
-derive_builder = "0.20.0"
 
 config.path = "crates/config"
 widgets.path = "crates/widgets"

@@ -356,8 +356,11 @@ impl WindowState {
     }
 
     pub(super) fn add_banners(&mut self, notifications: Vec<Notification>) {
-        self.banner_stack
-            .extend_from(notifications.into_iter(), &self.config);
+        self.banner_stack.extend_from(
+            notifications.into_iter(),
+            self.font_collection.clone(),
+            &self.config,
+        );
     }
 
     pub(super) fn replace_by_indices(&mut self, notifications: &mut VecDeque<Notification>) {
@@ -739,13 +742,6 @@ impl Dispatch<WlCallback, ()> for WindowState {
                 .use_current_egl_surface()
                 .expect("The EGL surface must be available to make current and use it");
 
-            state.banner_stack.banners_mut().for_each(|banner| {
-                banner.compile(
-                    &state.config,
-                    state.font_collection.clone(),
-                    &state.cached_layouts,
-                )
-            });
 
             // TODO: correctly resize for specific animation
             let gap = state.config.general().gap as usize;

@@ -15,7 +15,7 @@ use crate::{
 ///
 /// The start and end points are stored in the underlying shader builder, so
 /// the animation struct itself only tracks timing and easing.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Translate {
     shader_builder: ShaderBuilder,
 }

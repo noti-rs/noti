@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use skia_safe::runtime_effect::ChildPtr;
 
+#[derive(Debug)]
 pub struct ShaderBuilder {
     sksl: String,
     effect: skia_safe::RuntimeEffect,
@@ -79,8 +80,7 @@ impl Clone for ShaderBuilder {
     }
 }
 
-#[allow(unused)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum UniformValue {
     Float(f32),
     Float2(f32, f32),

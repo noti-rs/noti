@@ -2,21 +2,22 @@ use log::warn;
 
 use crate::{
     context::{
-        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
+        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints,
+        SaveExtent, StyleSubscription,
     },
     drawer::Drawer,
     events::{DispatchContext, DispatchEvent, Event},
     make_configuration,
     types::{
         alignment::Alignment,
-        border::{Border, BorderGBuilder},
-        data::{Configure, WidgetStyle},
+        border::Border,
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
         measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
+        style::{Configure, StyleProperty, WidgetStyle},
         Color, Point,
     },
     widget::{
@@ -37,9 +38,7 @@ use crate::{
 ///
 /// Use this when you need a UI element to stay exactly the same,
 /// like a fixed icon or a status light that should never grow or shrink.
-#[derive(macros::GenericBuilder, derive_builder::Builder, Clone)]
-#[builder(pattern = "owned")]
-#[gbuilder(name(ContainerGBuilder), derive(Clone))]
+#[derive(bon::Builder)]
 pub struct Container {
     /// An optional identifier for this widget.
     ///
@@ -47,16 +46,13 @@ pub struct Container {
     /// compilation. Setting this manually allows the widget to be
     /// targeted by external configurations and makes the widget tree
     /// significantly easier to navigate during debugging.
-    #[builder(private, default)]
-    #[gbuilder(hidden, default)]
+    #[builder(skip)]
     id: WidgetId,
 
-    #[builder(setter(strip_option, into), default)]
-    #[gbuilder(default)]
+    #[builder(into)]
     key: Option<WidgetKey>,
 
-    #[builder(default, setter(into))]
-    #[gbuilder(default)]
+    #[builder(into, default)]
     class: WidgetClass,
 
     /// The fill color or gradient applied to the entire area of the container.
@@ -66,9 +62,8 @@ pub struct Container {
     /// providing a solid or decorative base. If not set, the container
     /// is typically transparent, allowing the parent's background to
     /// show through.
-    #[builder(setter(strip_option), default)]
-    #[gbuilder(default)]
-    background_color: Option<Color>,
+    #[builder(with = |v: Color| StyleProperty::Explicit(v), default)]
+    background_color: StyleProperty<Color>,
 
     /// The visual frame and corner shaping applied to the container's edges.
     ///
@@ -76,9 +71,8 @@ pub struct Container {
     /// the widget's boundary. It provides a clear visual distinction
     /// between the container's internal content and the rest of the
     /// layout.
-    #[builder(setter(strip_option), default)]
-    #[gbuilder(use_gbuilder(BorderGBuilder))]
-    border: Option<Border>,
+    #[builder(with = |v: Border| StyleProperty::Explicit(v), default)]
+    border: StyleProperty<Border>,
 
     /// The internal spacing between the widget's boundary box and its actual content.
     ///
@@ -86,9 +80,8 @@ pub struct Container {
     /// effectively shrinks the available area for the widget's content
     /// without changing the widget's outer dimensions. It ensures
     /// content does not touch the edges of its container.
-    #[builder(setter(strip_option), default)]
-    #[gbuilder(default)]
-    spacing: Option<Spacing>,
+    #[builder(with = |v: Spacing| StyleProperty::Explicit(v), default)]
+    spacing: StyleProperty<Spacing>,
 
     /// The rules for positioning content within the available internal space.
     ///
@@ -96,8 +89,8 @@ pub struct Container {
     /// anchors itself when the container is larger than the content
     /// it holds. It manages the distribution of "extra" space along
     /// the horizontal and vertical axes.
-    #[builder(setter(strip_option), default)]
-    alignment: Option<Alignment>,
+    #[builder(with = |v: Alignment| StyleProperty::Explicit(v), default)]
+    alignment: StyleProperty<Alignment>,
 
     /// A hard-coded, fixed dimension for this axis.
     ///
@@ -120,7 +113,6 @@ pub struct Container {
     /// As a single-child provider, the container acts as a wrapper,
     /// applying its own alignment, background, and border rules to
     /// this inner element.
-    #[gbuilder(default(None))]
     child: Option<Widget>,
 }
 
@@ -133,12 +125,19 @@ make_configuration! {
     /// data—such as alignment and borders—directly into the widget's
     /// compilation phase. If no configuration is associated with a
     /// widget's ID, it continues to use its own internal state.
-    #[derive(Debug, Clone)]
+    #[derive(bon::Builder, Debug, Clone)]
     pub struct ContainerStyle {
-        pub background_color: Color,
-        pub border: Border,
-        pub spacing: Spacing,
-        pub alignment: Alignment,
+        #[builder(with = |v: Color| StyleProperty::FromClass(v), default)]
+        pub background_color: StyleProperty<Color>,
+
+        #[builder(with = |v: Border| StyleProperty::FromClass(v), default)]
+        pub border: StyleProperty<Border>,
+
+        #[builder(with = |v: Spacing| StyleProperty::FromClass(v), default)]
+        pub spacing: StyleProperty<Spacing>,
+
+        #[builder(with = |v: Alignment| StyleProperty::FromClass(v), default)]
+        pub alignment: StyleProperty<Alignment>,
     } <<= Container, FlexContainer
 }
 
@@ -206,6 +205,14 @@ where
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
         let mut dirty_flags = context.get_dirty_flags(self.id);
 
+        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
+            if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
+                self.configure(container_style.clone());
+            }
+
+            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
+        }
+
         if let Some(child) = &mut self.child {
             let child_flags = child.invalidate(context);
 
@@ -229,6 +236,14 @@ where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
+        if !self.class.is_empty() {
+            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
+                context,
+                self.id,
+                self.class.clone(),
+            );
+        }
+
         if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
             self.configure(container_style.clone());
         }
@@ -367,12 +382,12 @@ where
             actual_extent.width,
             actual_extent.height,
         );
-        let border = self.border.as_ref().cloned().unwrap_or_default();
+        let border = self.border.clone().unwrap_or_default();
         let border_radius = border.radius as f32;
         let rrect = skia_safe::RRect::new_rect_xy(rect, border_radius, border_radius);
         canvas.clip_rrect(rrect, skia_safe::ClipOp::Intersect, true);
 
-        let background_color = self.background_color.as_ref().cloned().unwrap_or_default();
+        let background_color = self.background_color.clone().unwrap_or_default();
         if !background_color.is_transparent() {
             drawer.fill_background(actual_offset, actual_extent, &border, &background_color);
         }
@@ -382,7 +397,7 @@ where
         inner_extent.shrink_by(&inner_spacing);
 
         if let Some(child) = &self.child {
-            let alignment = self.alignment.as_ref().cloned().unwrap_or_default();
+            let alignment = self.alignment.clone().unwrap_or_default();
             let child_extent =
                 <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id()).unwrap_or_default();
 
@@ -426,7 +441,7 @@ where
             return;
         }
 
-        let alignment = self.alignment.as_ref().cloned().unwrap_or_default();
+        let alignment = self.alignment.clone().unwrap_or_default();
         let child_extent = context.load(child.get_id()).unwrap_or_default();
         let horizontal_start = alignment
             .horizontal

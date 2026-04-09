@@ -6,7 +6,6 @@ use dbus::{
     notification::Notification,
     server::Server,
 };
-use derive_builder::Builder;
 use dispatcher::Dispatcher;
 use error::Error;
 use log::{debug, error, info, warn};
@@ -182,7 +181,7 @@ pub(crate) struct Backend {
 
 /// Represents the list of bound Wayland protocols, usable for a wide range of tasks—from window
 /// creation to managing complex states.
-#[derive(Builder)]
+#[derive(derive_builder::Builder)]
 struct Protocols {
     wl_compositor: WlCompositor,
     wl_shm: WlShm,

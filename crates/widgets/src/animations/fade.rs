@@ -15,7 +15,7 @@ use crate::{
 /// The direction of fading (in or out) is controlled by the [`FadeDirection`] trait,  
 /// with type aliases [`FadeIn`] and [`FadeOut`] for convenience.  
 /// The transition speed is influenced by the chosen [`Easing`] function.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Fade {
     shader_builder: ShaderBuilder,
 }

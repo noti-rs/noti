@@ -1,6 +1,5 @@
 use std::ops::{Add, AddAssign};
 
-use macros::GenericBuilder;
 use shared::value::TryFromValue;
 
 use crate::types::Extent;
@@ -15,23 +14,18 @@ use crate::types::Extent;
 /// the content is allowed to live gets smaller based on these four
 /// measurements. This ensures that text, images, or nested widgets
 /// don't touch the very edge of their container.
-#[derive(GenericBuilder, Debug, Default, Clone, Copy)]
-#[gbuilder(name(SpacingGBuilder), derive(Clone), constructor)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Spacing {
     /// The gap pushed down from the top edge.
-    #[gbuilder(default(0), aliases(vertical, all))]
     pub top: usize,
 
     /// The gap pushed in from the right edge.
-    #[gbuilder(default(0), aliases(horizontal, all))]
     pub right: usize,
 
     /// The gap pushed up from the bottom edge.
-    #[gbuilder(default(0), aliases(vertical, all))]
     pub bottom: usize,
 
     /// The gap pushed in from the left edge.
-    #[gbuilder(default(0), aliases(horizontal, all))]
     pub left: usize,
 }
 

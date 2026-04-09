@@ -4,13 +4,11 @@ pub mod flex_container;
 pub mod image;
 pub mod text;
 
-use shared::value::TryFromValue;
-
 use crate::{
     context::{
         AnimationQuery, GenerateId, GetFont, GetState, GetStyle, LoadExtent,
         ManageAnimationRegistry, ManageDirtyFlags, ManageIntrinsic, RegisterKey, ScopedManageState,
-        Subscribe,
+        StateSubscription, StyleSubscription,
     },
     drawer::Drawer,
     events::{self, DispatchContext, DispatchEvent},
@@ -26,20 +24,10 @@ use crate::{
 };
 
 pub use {
-    container::{
-        Container, ContainerBuilder, ContainerBuilderError, ContainerGBuilder, ContainerStyle,
-    },
-    flex_container::{
-        FlexContainer, FlexContainerBuilder, FlexContainerBuilderError, FlexContainerGBuilder,
-    },
-    image::{
-        FitMode, Image, ImageBuilder, ImageBuilderError, ImageGBuilder, ImageInfo, ImageStyle,
-        MipmapMode, ResizingMethod,
-    },
-    text::{
-        Font, FontGBuilder, FontStyle, Text, TextAlignment, TextBuilder, TextBuilderError,
-        TextGBuilder, TextStyle,
-    },
+    container::{Container, ContainerBuilder, ContainerStyle},
+    flex_container::{FlexContainer, FlexContainerBuilder},
+    image::{FitMode, Image, ImageBuilder, ImageInfo, ImageStyle, MipmapMode, ResizingMethod},
+    text::{Font, FontStyle, Text, TextAlignment, TextBuilder, TextStyle},
 };
 
 /// A metadata interface for inspecting a widget's identity and dimensions.
@@ -65,36 +53,12 @@ pub trait WidgetBase {
     fn sizing_mode(&self) -> SizingMode;
 }
 
-pub(crate) trait InvalidateContext:
-    ManageDirtyFlags<WidgetId>
-    + ManageAnimationRegistry<WidgetId>
-    + AnimationQuery<WidgetId>
-    + GetState
-    + ScopedManageState
-{
-}
-
-impl<C> InvalidateContext for C where
-    C: ManageDirtyFlags<WidgetId>
-        + ManageAnimationRegistry<WidgetId>
-        + AnimationQuery<WidgetId>
-        + GetState
-        + ScopedManageState
-{
-}
-
-pub(crate) trait Invalidate<C>
-where
-    C: InvalidateContext,
-{
-    fn invalidate(&mut self, context: &mut C) -> DirtyFlags;
-}
-
 pub(crate) trait InitContext:
     GenerateId
     + RegisterKey<WidgetKey, WidgetId>
     + GetState
-    + Subscribe<WidgetId>
+    + StateSubscription<WidgetId>
+    + StyleSubscription<WidgetClass, WidgetId>
     + ManageAnimationRegistry<WidgetId>
     + GetStyle
     + GetFont
@@ -105,7 +69,8 @@ impl<C> InitContext for C where
     C: GenerateId
         + RegisterKey<WidgetKey, WidgetId>
         + GetState
-        + Subscribe<WidgetId>
+        + StateSubscription<WidgetId>
+        + StyleSubscription<WidgetClass, WidgetId>
         + ManageAnimationRegistry<WidgetId>
         + GetStyle
         + GetFont
@@ -152,6 +117,33 @@ where
     fn layout(&mut self, context: &C);
 }
 
+pub(crate) trait InvalidateContext:
+    ManageDirtyFlags<WidgetId>
+    + ManageAnimationRegistry<WidgetId>
+    + AnimationQuery<WidgetId>
+    + GetState
+    + GetStyle
+    + ScopedManageState
+{
+}
+
+impl<C> InvalidateContext for C where
+    C: ManageDirtyFlags<WidgetId>
+        + ManageAnimationRegistry<WidgetId>
+        + AnimationQuery<WidgetId>
+        + GetState
+        + GetStyle
+        + ScopedManageState
+{
+}
+
+pub(crate) trait Invalidate<C>
+where
+    C: InvalidateContext,
+{
+    fn invalidate(&mut self, context: &mut C) -> DirtyFlags;
+}
+
 pub(crate) trait DrawContext<T>: LoadExtent<T, WidgetId> + AnimationQuery<WidgetId>
 where
     T: Default + Copy,
@@ -183,7 +175,6 @@ where
 ///
 /// This allows dynamic storage and composition of widgets, including complex
 /// layouts such as a [`FlexContainer`] holding multiple widgets.
-#[derive(Clone)]
 pub enum Widget {
     Image(Box<Image>),
     Text(Box<Text>),
@@ -296,8 +287,6 @@ where
     }
 }
 
-impl TryFromValue for Widget {}
-
 impl From<Image> for Widget {
     fn from(value: Image) -> Self {
         Widget::Image(value.into())
@@ -331,10 +320,8 @@ impl From<AnimatedVisibility> for Widget {
 #[macro_export]
 macro_rules! make_widget {
     ($name:ident { $($field_name:ident: $val:expr),* $(,)? }) => {
-        paste::paste!{
-            [<$name Builder>]::default()
+            $name::builder()
                 $(.$field_name($val))*
                 .build()
-        }
     };
 }

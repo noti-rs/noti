@@ -5,16 +5,18 @@ use crate::{
     context::{
         AnimationDirection, AnimationProgress, LoadConstraints, LoadExtent,
         ManageAnimationRegistry, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
-        ScopedContext,
+        ScopedContext, StateSubscription, StyleSubscription,
     },
     drawer::Drawer,
     events::{Callback, DispatchContext, DispatchEvent, Event, FunctionCallback},
+    make_configuration,
     state::State,
     types::{
         dirty_flags::DirtyFlags,
         identifiers::WidgetKey,
         measure::{Constraints, Intrinsic, Measure, MeasureContext, SizingMode},
-        Extent, Offset, WidgetClass, WidgetId,
+        style::{Configure, StyleProperty},
+        Extent, Offset, WidgetClass, WidgetId, WidgetStyle,
     },
     widget::{
         Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
@@ -22,99 +24,68 @@ use crate::{
     },
 };
 
-#[derive(derive_builder::Builder, Default)]
-#[builder(pattern = "owned")]
+#[derive(bon::Builder, Default)]
 pub struct AnimatedVisibility {
-    #[builder(private, default)]
+    #[builder(skip)]
     id: WidgetId,
 
-    #[builder(setter(strip_option, into), default)]
     key: Option<WidgetKey>,
 
-    #[builder(setter(into), default)]
+    #[builder(into, default)]
     class: WidgetClass,
 
     #[builder(default = true)]
     visible: bool,
 
-    #[builder(setter(strip_option, into), default)]
+    #[builder(into)]
     state: Option<State<bool>>,
 
     #[builder(default)]
     phase: VisibilityPhase,
 
-    #[builder(private, default)]
+    #[builder(skip)]
     animation_state: AnimationState,
 
-    primary_animation: AnimationDefinition,
+    #[builder(with = |v: AnimationDefinition| StyleProperty::Explicit(v))]
+    primary_animation: StyleProperty<AnimationDefinition>,
 
-    #[builder(setter(strip_option), default)]
-    secondary_animation: Option<AnimationDefinition>,
+    #[builder(with = |v: AnimationDefinition| StyleProperty::Explicit(v), default)]
+    secondary_animation: StyleProperty<AnimationDefinition>,
 
-    primary_spatial_change: SpatialChangeDefinition,
+    #[builder(with = |v: SpatialChangeDefinition| StyleProperty::Explicit(v))]
+    primary_spatial_change: StyleProperty<SpatialChangeDefinition>,
 
-    #[builder(setter(strip_option), default)]
-    secondary_spatial_change: Option<SpatialChangeDefinition>,
+    #[builder(with = |v: SpatialChangeDefinition| StyleProperty::Explicit(v), default)]
+    secondary_spatial_change: StyleProperty<SpatialChangeDefinition>,
 
-    #[builder(setter(strip_option, into), default)]
+    #[builder(into)]
     child: Option<Widget>,
 
-    #[builder(setter(custom), default)]
+    #[builder(with = |f: impl for<'a> FunctionCallback<'a, ()> + 'static| Box::new(f))]
     on_visible: Option<Callback<()>>,
 
-    #[builder(setter(custom), default)]
+    #[builder(with = |f: impl for<'a> FunctionCallback<'a, ()> + 'static| Box::new(f))]
     on_hidden: Option<Callback<()>>,
 
-    #[builder(setter(custom), default)]
+    #[builder(with = |f: impl for<'a> FunctionCallback<'a, ()> + 'static| Box::new(f))]
     on_hover: Option<Callback<()>>,
 }
 
-impl AnimatedVisibilityBuilder {
-    pub fn on_visible<F>(mut self, callback: F) -> Self
-    where
-        F: for<'a> FunctionCallback<'a, ()> + 'static,
-    {
-        self.on_visible = Some(Some(Box::new(callback)));
-        self
-    }
+make_configuration! {
+    #[derive(bon::Builder, Debug, Default, Clone)]
+    pub struct AnimatedVisibilityStyle {
+        #[builder(with = |v: AnimationDefinition| StyleProperty::FromClass(v), default)]
+        primary_animation: StyleProperty<AnimationDefinition>,
 
-    pub fn on_hidden<F>(mut self, callback: F) -> Self
-    where
-        F: for<'a> FunctionCallback<'a, ()> + 'static,
-    {
-        self.on_hidden = Some(Some(Box::new(callback)));
-        self
-    }
+        #[builder(with = |v: AnimationDefinition| StyleProperty::FromClass(v), default)]
+        secondary_animation: StyleProperty<AnimationDefinition>,
 
-    pub fn on_hover<F>(mut self, callback: F) -> Self
-    where
-        F: for<'a> FunctionCallback<'a, ()> + 'static,
-    {
-        self.on_hover = Some(Some(Box::new(callback)));
-        self
-    }
-}
+        #[builder(with = |v: SpatialChangeDefinition| StyleProperty::FromClass(v), default)]
+        primary_spatial_change: StyleProperty<SpatialChangeDefinition>,
 
-impl Clone for AnimatedVisibility {
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            key: self.key.clone(),
-            class: self.class.clone(),
-            visible: self.visible,
-            state: self.state,
-            phase: self.phase.clone(),
-            animation_state: self.animation_state.clone(),
-            primary_animation: self.primary_animation.clone(),
-            secondary_animation: self.secondary_animation.clone(),
-            primary_spatial_change: self.primary_spatial_change.clone(),
-            secondary_spatial_change: self.secondary_spatial_change.clone(),
-            child: self.child.clone(),
-            on_visible: None,
-            on_hidden: None,
-            on_hover: None,
-        }
-    }
+        #[builder(with = |v: SpatialChangeDefinition| StyleProperty::FromClass(v), default)]
+        secondary_spatial_change: StyleProperty<SpatialChangeDefinition>,
+    } <<= AnimatedVisibility
 }
 
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -134,14 +105,14 @@ enum AnimationState {
     Unwind,
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct AnimationDefinition {
     pub easing: Easing,
     pub duration: Duration,
     pub kind: AnimationKind,
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct SpatialChangeDefinition {
     pub easing: Easing,
     pub duration: Duration,
@@ -186,8 +157,20 @@ where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
+        if !self.class.is_empty() {
+            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
+                context,
+                self.id,
+                self.class.clone(),
+            );
+        }
+
+        if let Some(WidgetStyle::AnimatedVisibility(av_style)) = context.get_style(&self.class) {
+            self.configure(av_style.clone());
+        }
+
         if let Some(state) = self.state {
-            context.subscribe(self.id, state);
+            <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
 
             if let Some(visible) = context.get(state) {
                 self.visible = *visible;
@@ -216,6 +199,16 @@ where
 {
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
         let mut dirty_flags = context.get_dirty_flags(self.id);
+
+        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
+            if let Some(WidgetStyle::AnimatedVisibility(av_style)) = context.get_style(&self.class) {
+                self.configure(av_style.clone());
+
+                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
+            }
+
+            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
+        }
 
         if let Some(new_visibility) = self
             .state
@@ -437,7 +430,10 @@ impl AnimatedVisibility {
     }
 
     fn resolve_spatial_change_definition(&self) -> &SpatialChangeDefinition {
-        let enter_spatial_change = &self.primary_spatial_change;
+        let enter_spatial_change = self
+            .primary_spatial_change
+            .as_ref()
+            .expect("Primary spatial change must be set!");
         let exit_spatial_change = self
             .secondary_spatial_change
             .as_ref()
@@ -454,7 +450,10 @@ impl AnimatedVisibility {
     }
 
     fn resolve_animation_definition(&self) -> &AnimationDefinition {
-        let enter_animation = &self.primary_animation;
+        let enter_animation = self
+            .primary_animation
+            .as_ref()
+            .expect("Primary animation must be set!");
         let exit_animation = self.secondary_animation.as_ref().unwrap_or(enter_animation);
 
         match (self.visible, &self.animation_state) {

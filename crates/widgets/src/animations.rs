@@ -34,7 +34,7 @@ impl Direction for Reverse {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum AnimationKind {
     Fade(Fade),
     Pop(Pop),
@@ -66,7 +66,7 @@ impl AnimationFilter for AnimationKind {
 }
 
 /// Describes the pacing curve of an animation.
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub enum Easing {
     /// Progresses at a constant speed.
     Linear,

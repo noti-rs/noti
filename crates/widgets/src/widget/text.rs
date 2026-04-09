@@ -8,20 +8,21 @@ use shared::{
 
 use crate::{
     context::{
-        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
+        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints,
+        SaveExtent, StateSubscription, StyleSubscription,
     },
     drawer::{Drawer, UseColor},
     events::{DispatchContext, DispatchEvent, Event},
     make_configuration,
     state::State,
     types::{
-        data::{Configure, WidgetStyle},
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
         measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
+        style::{Configure, StyleProperty, WidgetStyle},
         Color,
     },
     widget::{
@@ -35,9 +36,7 @@ use crate::{
 ///
 /// `WText` aims to be simple but flexible, providing a consistent API
 /// for compilation and querying its dimensions after layout.
-#[derive(macros::GenericBuilder, derive_builder::Builder, Default)]
-#[builder(pattern = "owned")]
-#[gbuilder(name(TextGBuilder))]
+#[derive(bon::Builder, Default)]
 pub struct Text {
     /// An optional identifier for this widget.
     ///
@@ -45,16 +44,13 @@ pub struct Text {
     /// compilation. Setting this manually allows the widget to be
     /// targeted by external configurations and makes the widget tree
     /// significantly easier to navigate during debugging.
-    #[builder(private, default)]
-    #[gbuilder(hidden, default)]
+    #[builder(skip)]
     id: WidgetId,
 
-    #[builder(setter(strip_option, into), default)]
-    #[gbuilder(default)]
+    #[builder(into)]
     key: Option<WidgetKey>,
 
-    #[builder(default, setter(into))]
-    #[gbuilder(default)]
+    #[builder(into, default)]
     class: WidgetClass,
 
     /// The specific typeface and sizing rules used to render this text.
@@ -62,9 +58,8 @@ pub struct Text {
     /// This field points to a [`Font`] struct that contains the font family
     /// name, the size (in px), and the style (like Bold or Italic). It ensures
     /// that the text is drawn with the correct visual weight and proportions.
-    #[builder(setter(strip_option), default)]
-    #[gbuilder(use_gbuilder(FontGBuilder))]
-    font: Option<Font>,
+    #[builder(with = |v: Font| StyleProperty::Explicit(v), default)]
+    font: StyleProperty<Font>,
 
     /// Determines if text should break into multiple lines when it hits the
     /// edge of its container.
@@ -73,9 +68,8 @@ pub struct Text {
     /// to stay within the available width. When disabled, the text remains
     /// on a single line, potentially overflowing the container if it
     /// is too long.
-    #[builder(setter(strip_option), default)]
-    #[gbuilder(default)]
-    wrap: Option<bool>,
+    #[builder(with = |v: bool| StyleProperty::Explicit(v), default)]
+    wrap: StyleProperty<bool>,
 
     /// The internal spacing between the widget's boundary box and its actual content.
     ///
@@ -83,8 +77,8 @@ pub struct Text {
     /// effectively shrinks the available area for the widget's content
     /// without changing the widget's outer dimensions. It ensures
     /// content does not touch the edges of its container.
-    #[builder(setter(strip_option), default)]
-    margin: Option<Spacing>,
+    #[builder(with = |v: Spacing| StyleProperty::Explicit(v), default)]
+    margin: StyleProperty<Spacing>,
 
     /// Controls the horizontal distribution of text within its boundary.
     ///
@@ -92,8 +86,8 @@ pub struct Text {
     /// should hug the left side, sit in the center, or be pushed to the
     /// right. It can also spread the words out (space-between) to fill
     /// the entire width of the line.
-    #[builder(setter(strip_option), default)]
-    alignment: Option<TextAlignment>,
+    #[builder(with = |v: TextAlignment| StyleProperty::Explicit(v), default)]
+    alignment: StyleProperty<TextAlignment>,
 
     /// The extra vertical space added between lines, measured in the same units as font size.
     ///
@@ -103,8 +97,8 @@ pub struct Text {
     ///
     /// Note: Internally, this is converted to a ratio to satisfy the rendering
     /// engine's requirement for a line-height multiplier.
-    #[builder(setter(strip_option), default)]
-    line_spacing: Option<usize>,
+    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
+    line_spacing: StyleProperty<usize>,
 
     /// The foreground color applied to the text characters.
     ///
@@ -113,8 +107,8 @@ pub struct Text {
     /// bounding box; it only colors the "ink" used to draw the text.
     /// Use this to ensure your text has enough contrast against the
     /// background it is sitting on.
-    #[builder(setter(strip_option), default)]
-    color: Option<Color>,
+    #[builder(with = |v: Color| StyleProperty::Explicit(v), default)]
+    color: StyleProperty<Color>,
 
     /// The actual text data that this widget is responsible for rendering.
     ///
@@ -123,11 +117,9 @@ pub struct Text {
     /// paragraph with mixed styles, this is the primary source of
     /// information the widget uses to draw glyphs on the screen.
     #[builder(default)]
-    #[gbuilder(default)]
     value: text::Text,
 
-    #[builder(setter(strip_option, into), default)]
-    #[gbuilder(hidden, default(None))]
+    #[builder(into)]
     state: Option<State<text::Text>>,
 
     /// A shared reference to the system's global font registry.
@@ -137,8 +129,7 @@ pub struct Text {
     /// allows the widget to efficiently resolve font styles and re-render
     /// text—such as when changing colors—without the memory overhead of
     /// duplicating font resources.
-    #[builder(private, default = None)]
-    #[gbuilder(hidden, default(None))]
+    #[builder(skip)]
     font_collection: Option<skia_safe::textlayout::FontCollection>,
 
     /// The compiled layout of the text, used for rendering and hit-testing.
@@ -149,8 +140,7 @@ pub struct Text {
     /// area the text occupies. It is essential for interactive tasks,
     /// such as determining if a user is hovering over a specific link or
     /// character.
-    #[builder(private, default = None)]
-    #[gbuilder(hidden, default(None))]
+    #[builder(skip)]
     paragraph: Option<RefCell<skia_safe::textlayout::Paragraph>>,
 
     /// A cached count of the lines required to display the current text.
@@ -160,8 +150,7 @@ pub struct Text {
     /// when the text exceeds its available space, allowing the widget
     /// to quickly rebuild its layout or apply wrapping rules without
     /// starting from scratch.
-    #[builder(private, default)]
-    #[gbuilder(hidden, default)]
+    #[builder(skip)]
     total_lines: Option<usize>,
 }
 
@@ -175,14 +164,25 @@ make_configuration! {
     /// presentation of text elements independently of the widget's
     /// initial construction, ensuring a clean separation between the
     /// layout structure and the final styling data.
-    #[derive(Debug, Clone)]
+    #[derive(bon::Builder, Debug, Clone)]
     pub struct TextStyle {
-        pub font: Font,
-        pub wrap: bool,
-        pub margin: Spacing,
-        pub alignment: TextAlignment,
-        pub line_spacing: usize,
-        pub color: Color,
+        #[builder(with = |v: Font| StyleProperty::FromClass(v), default)]
+        pub font: StyleProperty<Font>,
+
+        #[builder(with = |v: bool| StyleProperty::FromClass(v), default)]
+        pub wrap: StyleProperty<bool>,
+
+        #[builder(with = |v: Spacing| StyleProperty::FromClass(v), default)]
+        pub margin: StyleProperty<Spacing>,
+
+        #[builder(with = |v: TextAlignment| StyleProperty::FromClass(v), default)]
+        pub alignment: StyleProperty<TextAlignment>,
+
+        #[builder(with = |v: usize| StyleProperty::FromClass(v), default)]
+        pub line_spacing: StyleProperty<usize>,
+
+        #[builder(with = |v: Color| StyleProperty::FromClass(v), default)]
+        pub color: StyleProperty<Color>,
     } <<= Text
 }
 
@@ -192,8 +192,7 @@ make_configuration! {
 /// everything needed to tell the rendering engine exactly how to draw
 /// each character. It covers the font family, the physical scale in points,
 /// and the specific weight or slant of the text.
-#[derive(macros::GenericBuilder, Debug, Clone)]
-#[gbuilder(name(FontGBuilder), derive(Clone))]
+#[derive(Debug, Clone)]
 pub struct Font {
     /// The name of the font family (e.g., "Inter", "JetBrains Mono").
     ///
@@ -298,49 +297,6 @@ impl TryFromValue for TextAlignment {
     }
 }
 
-impl Clone for Text {
-    fn clone(&self) -> Self {
-        // INFO: we shouldn't clone compiled info about text
-        Self {
-            id: self.id,
-            key: self.key.clone(),
-            class: self.class.clone(),
-            font: self.font.clone(),
-            wrap: self.wrap,
-            margin: self.margin,
-            alignment: self.alignment.clone(),
-            color: self.color.clone(),
-            value: self.value.clone(),
-            state: self.state,
-            line_spacing: self.line_spacing,
-            font_collection: None,
-            paragraph: None,
-            total_lines: None,
-        }
-    }
-}
-
-impl Clone for TextGBuilder {
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            key: self.key.clone(),
-            class: self.class.clone(),
-            font: self.font.clone(),
-            wrap: self.wrap,
-            margin: self.margin,
-            alignment: self.alignment.clone(),
-            color: self.color.clone(),
-            value: self.value.clone(),
-            state: self.state,
-            line_spacing: self.line_spacing,
-            font_collection: None,
-            paragraph: None,
-            total_lines: None,
-        }
-    }
-}
-
 impl Text {
     // INFO: better to pass it instead of `usize::MAX` because skia's textlayout module
     // with ellipsis will make the layout in strange way — just truncate the first line
@@ -389,6 +345,16 @@ where
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
         let mut dirty_flags = context.get_dirty_flags(self.id);
 
+        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
+            if let Some(WidgetStyle::Text(text_style)) = context.get_style(&self.class) {
+                self.configure(text_style.clone());
+
+                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
+            }
+
+            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
+        }
+
         if dirty_flags.contains(DirtyFlags::NEEDS_REBUILD) {
             if let Some(text) = self
                 .state
@@ -419,11 +385,19 @@ where
 {
     fn on_init(&mut self, context: &mut C) {
         if let Some(state) = self.state {
-            context.subscribe(self.id, state);
+            <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
 
             if let Some(text) = context.get(state) {
                 self.value = text.clone();
             }
+        }
+
+        if !self.class.is_empty() {
+            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
+                context,
+                self.id,
+                self.class.clone(),
+            );
         }
 
         if let Some(WidgetStyle::Text(text_style)) = context.get_style(&self.class) {
@@ -778,7 +752,7 @@ where
 
         let mut paint = skia_safe::Paint::default();
         paint.use_color(
-            &self.color.as_ref().cloned().unwrap_or_default(),
+            &self.color.clone().unwrap_or_default(),
             *offset,
             provided_extent,
         );

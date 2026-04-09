@@ -13,5 +13,7 @@ bitflags::bitflags! {
         /// One or more descendants are marked with NEEDS_MEASURE.
         /// Allows the system to skip clean branches during the measure pass.
         const CHILD_NEEDS_MEASURE = 1 << 2;
+
+        const NEEDS_UPDATE_STYLES = 1 << 3;
     }
 }

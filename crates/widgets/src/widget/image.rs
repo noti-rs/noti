@@ -9,20 +9,21 @@ use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::Try
 
 use crate::{
     context::{
-        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
+        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints,
+        SaveExtent, StateSubscription, StyleSubscription,
     },
     drawer::Drawer,
     events::{DispatchContext, DispatchEvent, Event},
     make_configuration,
     state::State,
     types::{
-        data::{Configure, WidgetStyle},
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
         measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
+        style::{Configure, StyleProperty, WidgetStyle},
     },
     widget::{
         Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
@@ -47,8 +48,7 @@ const DEFAULT_ICON_THEME: &str = "hicolor";
 /// - Choosing the right way to load the picture you provided.
 /// - Getting the picture ready to be drawn (like unpacking it and making it the right size).
 /// - Telling the rest of the layout how much space it needs so everything stays organized.
-#[derive(macros::GenericBuilder, derive_builder::Builder, Default, Clone)]
-#[gbuilder(name(ImageGBuilder), derive(Clone))]
+#[derive(bon::Builder, Default)]
 pub struct Image {
     /// An optional identifier for this widget.
     ///
@@ -56,16 +56,13 @@ pub struct Image {
     /// compilation. Setting this manually allows the widget to be
     /// targeted by external configurations and makes the widget tree
     /// significantly easier to navigate during debugging.
-    #[builder(private, default)]
-    #[gbuilder(hidden, default)]
+    #[builder(skip)]
     id: WidgetId,
 
-    #[builder(setter(strip_option, into), default)]
-    #[gbuilder(default)]
+    #[builder(into)]
     key: Option<WidgetKey>,
 
-    #[builder(default, setter(into))]
-    #[gbuilder(default)]
+    #[builder(into, default)]
     class: WidgetClass,
 
     /// The source data for the image being rendered.
@@ -74,29 +71,16 @@ pub struct Image {
     /// `WidgetData::Image` during the compilation phase. It holds the
     /// processed pixel data or file path information required to
     /// draw the image to the screen.
-    #[builder(private, default = None)]
-    #[gbuilder(hidden, default(None))]
     value: Option<ImageData>,
 
-    #[builder(setter(strip_option, into), default)]
-    #[gbuilder(hidden, default(None))]
+    #[builder(into)]
     state: Option<State<ImageProvider>>,
 
-    #[builder(setter(strip_option), default)]
-    width: Option<usize>,
+    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
+    width: StyleProperty<usize>,
 
-    #[builder(setter(strip_option), default)]
-    height: Option<usize>,
-
-    /// The maximum allowable dimension for the image in any one direction.
-    ///
-    /// This ensures the image stays within a specific boundary. If the
-    /// available space is a square, both sides are capped at this value.
-    /// In rectangular spaces, the larger side is reduced to `max_size`,
-    /// and the other side is scaled down proportionally to maintain
-    /// the image's original aspect ratio.
-    #[builder(setter(strip_option), default)]
-    max_size: Option<u16>,
+    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
+    height: StyleProperty<usize>,
 
     /// The corner radius applied to the image's edges.
     ///
@@ -104,8 +88,8 @@ pub struct Image {
     /// images handle their own clipping independently of the standard
     /// `Border` struct, this field defines how much to "curve" the
     /// rectangular boundary of the image.
-    #[builder(setter(strip_option), default)]
-    rounding: Option<u16>,
+    #[builder(with = |v: u16| StyleProperty::Explicit(v), default)]
+    rounding: StyleProperty<u16>,
 
     /// The internal spacing between the widget's boundary box and its actual content.
     ///
@@ -113,11 +97,11 @@ pub struct Image {
     /// effectively shrinks the available area for the widget's content
     /// without changing the widget's outer dimensions. It ensures
     /// content does not touch the edges of its container.
-    #[builder(setter(strip_option), default)]
-    margin: Option<Spacing>,
+    #[builder(with = |v: Spacing| StyleProperty::Explicit(v), default)]
+    margin: StyleProperty<Spacing>,
 
-    #[builder(setter(strip_option), default)]
-    fit_mode: Option<FitMode>,
+    #[builder(with = |v: FitMode| StyleProperty::Explicit(v), default)]
+    fit_mode: StyleProperty<FitMode>,
 
     /// The mathematical approach used to scale the image up or down.
     ///
@@ -126,8 +110,8 @@ pub struct Image {
     /// it uses a linear approach to prevent jagged edges, but can be
     /// set to a simpler method for performance or specific aesthetic
     /// styles (like pixel art).
-    #[builder(setter(strip_option), default)]
-    resizing_method: Option<ResizingMethod>,
+    #[builder(with = |v: ResizingMethod| StyleProperty::Explicit(v), default)]
+    resizing_method: StyleProperty<ResizingMethod>,
 
     /// The strategy for using pre-calculated, lower-resolution versions
     /// of the image.
@@ -136,8 +120,8 @@ pub struct Image {
     /// can occur. This field tells the engine how to sample from these
     /// pre-scaled versions (mipmaps) to ensure the image remains clean
     /// and stable even at very small sizes.
-    #[builder(setter(strip_option), default)]
-    mipmap_mode: Option<MipmapMode>,
+    #[builder(with = |v: MipmapMode| StyleProperty::Explicit(v), default)]
+    mipmap_mode: StyleProperty<MipmapMode>,
 }
 
 make_configuration! {
@@ -149,14 +133,28 @@ make_configuration! {
     /// from outside the main widget tree. It is particularly useful for
     /// applying data-driven changes to specific images during the final
     /// layout pass without needing to manually find and update the widget node.
-    #[derive(Debug, Clone)]
+    #[derive(bon::Builder, Debug, Clone)]
     pub struct ImageStyle {
-        pub max_size: u16,
-        pub rounding: u16,
-        pub margin: Spacing,
-        pub resizing_method: ResizingMethod,
-        pub mipmap_mode: MipmapMode,
-        pub fit_mode: FitMode,
+        #[builder(with = |v: usize| StyleProperty::FromClass(v), default)]
+        pub width: StyleProperty<usize>,
+
+        #[builder(with = |v: usize| StyleProperty::FromClass(v), default)]
+        pub height: StyleProperty<usize>,
+
+        #[builder(with = |v: u16| StyleProperty::FromClass(v), default)]
+        pub rounding: StyleProperty<u16>,
+
+        #[builder(with = |v: Spacing| StyleProperty::FromClass(v), default)]
+        pub margin: StyleProperty<Spacing>,
+
+        #[builder(with = |v: ResizingMethod| StyleProperty::FromClass(v), default)]
+        pub resizing_method: StyleProperty<ResizingMethod>,
+
+        #[builder(with = |v: MipmapMode| StyleProperty::FromClass(v), default)]
+        pub mipmap_mode: StyleProperty<MipmapMode>,
+
+        #[builder(with = |v: FitMode| StyleProperty::FromClass(v), default)]
+        pub fit_mode: StyleProperty<FitMode>,
     } <<= Image
 }
 
@@ -226,6 +224,16 @@ where
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
         let mut dirty_flags = context.get_dirty_flags(self.id);
 
+        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
+            if let Some(WidgetStyle::Image(image_style)) = context.get_style(&self.class) {
+                self.configure(image_style.clone());
+
+                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
+            }
+
+            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
+        }
+
         if dirty_flags.contains(DirtyFlags::NEEDS_REBUILD) {
             if let Some(image_provider) = self.state.and_then(|state| context.get(state)) {
                 self.load_image(image_provider);
@@ -246,12 +254,20 @@ where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
+        if !self.class.is_empty() {
+            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
+                context,
+                self.id,
+                self.class.clone(),
+            );
+        }
+
         if let Some(WidgetStyle::Image(image_config)) = context.get_style(&self.class) {
             self.configure(image_config.clone());
         }
 
         if let Some(state) = self.state {
-            context.subscribe(self.id, state);
+            <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
 
             if let Some(image_provider) = context.get(state) {
                 self.load_image(image_provider);
@@ -291,23 +307,23 @@ impl Measure<f32, WidgetId> for Image {
         };
 
         let mut extent = Extent::new(0., 0.);
-        if let Some(width) = self.width {
-            extent.width = width as f32;
+        if let Some(width) = self.width.as_option() {
+            extent.width = *width as f32;
 
-            if self.height.is_none() {
+            if self.height.is_default() {
                 extent.height = extent.width / content.aspect_ratio;
             }
         }
 
-        if let Some(height) = self.height {
-            extent.height = height as f32;
+        if let Some(height) = self.height.as_option() {
+            extent.height = *height as f32;
 
-            if self.width.is_none() {
+            if self.width.is_default() {
                 extent.width = extent.height * content.aspect_ratio;
             }
         }
 
-        if self.width.is_none() && self.height.is_none() {
+        if self.width.is_default() && self.height.is_default() {
             extent = content.extent;
         }
 
@@ -387,23 +403,23 @@ impl Measure<f32, WidgetId> for Image {
         };
 
         let mut fixed_extent = Extent::new(0., 0.);
-        if let Some(width) = self.width {
-            fixed_extent.width = width as f32;
+        if let Some(width) = self.width.as_option() {
+            fixed_extent.width = *width as f32;
 
-            if self.height.is_none() {
+            if self.height.is_default() {
                 fixed_extent.height = fixed_extent.width / content.aspect_ratio;
             }
         }
 
-        if let Some(height) = self.height {
-            fixed_extent.height = height as f32;
+        if let Some(height) = self.height.as_option() {
+            fixed_extent.height = *height as f32;
 
-            if self.width.is_none() {
+            if self.width.is_default() {
                 fixed_extent.width = fixed_extent.height * content.aspect_ratio;
             }
         }
 
-        if self.width.is_none() && self.height.is_none() {
+        if self.width.is_default() && self.height.is_default() {
             let proportional_height = inner_constraints.width / content.aspect_ratio;
 
             if proportional_height > inner_constraints.height {
@@ -499,7 +515,7 @@ where
         let scale_x = inner_extent.width / image_extent.width;
         let scale_y = inner_extent.height / image_extent.height;
 
-        let final_extent = match self.fit_mode.as_ref().cloned().unwrap_or_default() {
+        let final_extent = match self.fit_mode.clone().unwrap_or_default() {
             FitMode::Contain => {
                 let scale = scale_x.min(scale_y);
                 image_extent * scale
@@ -543,15 +559,10 @@ where
 
         let sampling = skia_safe::SamplingOptions::new(
             self.resizing_method
-                .as_ref()
-                .cloned()
+                .clone()
                 .unwrap_or_default()
                 .to_skia_value(),
-            self.mipmap_mode
-                .as_ref()
-                .cloned()
-                .unwrap_or_default()
-                .to_skia_value(),
+            self.mipmap_mode.clone().unwrap_or_default().to_skia_value(),
         );
 
         let mut paint = skia_safe::Paint::default();
