@@ -3,6 +3,7 @@ use std::{collections::HashMap, marker::PhantomData, path::PathBuf, time::Durati
 use dbus::notification::Urgency;
 use macros::{ConfigProperty, GenericBuilder};
 use serde::{de::Visitor, Deserialize};
+use widgets::animations::{AnimationKind, Fade, Pop, Translate};
 
 use crate::{
     public,
@@ -103,53 +104,66 @@ public! {
     #[cfg_prop(name(AnimationProperty), derive(Debug, Deserialize, Clone, Default))]
     struct Animation {
         #[cfg_prop(
-            use_type(SpacerAnimationDefinitionProperty),
+            use_type(AnimationDefinitionProperty),
             mergeable,
-            default
+            default(path = AnimationDefinitionProperty::default_primary)
         )]
-        allocation: SpacerAnimationDefinition,
+        primary: AnimationDefinition,
 
         #[cfg_prop(
             use_type(AnimationDefinitionProperty),
             mergeable,
-            default(path = AnimationDefinitionProperty::default_enter)
+            default(path = AnimationDefinitionProperty::default_secondary)
         )]
-        enter: AnimationDefinition,
+        secondary: AnimationDefinition,
 
         #[cfg_prop(
-            use_type(AnimationDefinitionProperty),
-            mergeable,
-            default(path = AnimationDefinitionProperty::default_exit)
-        )]
-        exit: AnimationDefinition,
-
-        #[cfg_prop(
-            use_type(SpacerAnimationDefinitionProperty),
+            use_type(SpatialChangeDefinitionProperty),
             mergeable,
             default
         )]
-        free: SpacerAnimationDefinition,
+        primary_spatial_change: SpatialChangeDefinition,
+
+        #[cfg_prop(
+            use_type(SpatialChangeDefinitionProperty),
+            mergeable,
+            default
+        )]
+        secondary_spatial_change: SpatialChangeDefinition,
     }
 }
 
 public! {
-    #[derive(ConfigProperty,Debug)]
-    #[cfg_prop(name(SpacerAnimationDefinitionProperty), derive(Debug, Deserialize, Clone))]
-    struct SpacerAnimationDefinition {
+    #[derive(ConfigProperty, Debug, Clone)]
+    #[cfg_prop(name(SpatialChangeDefinitionProperty), derive(Debug, Deserialize, Clone))]
+    struct SpatialChangeDefinition {
+        easing: EasingType,
         duration: AnimationDuration,
     }
 }
 
-impl Default for SpacerAnimationDefinitionProperty {
+impl Default for SpatialChangeDefinitionProperty {
     fn default() -> Self {
         Self {
+            easing: Some(EasingType::EaseInOut),
             duration: Some(AnimationDuration(Duration::from_secs_f32(0.15))),
         }
     }
 }
 
+impl From<SpatialChangeDefinition>
+    for widgets::widget::animated_visibility::SpatialChangeDefinition
+{
+    fn from(value: SpatialChangeDefinition) -> Self {
+        Self {
+            easing: value.easing.into(),
+            duration: value.duration.0,
+        }
+    }
+}
+
 public! {
-    #[derive(ConfigProperty,Debug)]
+    #[derive(ConfigProperty, Debug, Clone)]
     #[cfg_prop(name(AnimationDefinitionProperty), derive(Debug, Deserialize, Clone, Default))]
     struct AnimationDefinition {
         style:  AnimationStyle,
@@ -159,19 +173,29 @@ public! {
 }
 
 impl AnimationDefinitionProperty {
-    fn default_enter() -> Self {
+    fn default_primary() -> Self {
         Self {
-            style: Some(AnimationStyle::FadeIn),
+            style: Some(AnimationStyle::Fade),
             easing: Some(EasingType::EaseInOut),
             duration: Some(AnimationDuration(Duration::from_secs_f32(0.5))),
         }
     }
 
-    fn default_exit() -> Self {
+    fn default_secondary() -> Self {
         Self {
-            style: Some(AnimationStyle::FadeOut),
+            style: Some(AnimationStyle::Fade),
             easing: Some(EasingType::EaseInOut),
             duration: Some(AnimationDuration(Duration::from_secs_f32(0.5))),
+        }
+    }
+}
+
+impl From<AnimationDefinition> for widgets::widget::animated_visibility::AnimationDefinition {
+    fn from(value: AnimationDefinition) -> Self {
+        Self {
+            kind: value.style.into(),
+            easing: value.easing.into(),
+            duration: value.duration.0,
         }
     }
 }
@@ -194,18 +218,22 @@ impl Default for AnimationDuration {
 #[derive(Debug, Deserialize, Clone, Default)]
 pub enum AnimationStyle {
     #[default]
-    #[serde(rename = "fade-in")]
-    FadeIn,
-    #[serde(rename = "fade-out")]
-    FadeOut,
-    #[serde(rename = "pop-in")]
-    PopIn,
-    #[serde(rename = "pop-out")]
-    PopOut,
-    #[serde(rename = "slide-in")]
-    SlideIn,
-    #[serde(rename = "slide-out")]
-    SlideOut,
+    #[serde(rename = "fade")]
+    Fade,
+    #[serde(rename = "pop")]
+    Pop,
+    #[serde(rename = "slide")]
+    Slide,
+}
+
+impl From<AnimationStyle> for AnimationKind {
+    fn from(value: AnimationStyle) -> Self {
+        match value {
+            AnimationStyle::Fade => AnimationKind::Fade(Fade::new()),
+            AnimationStyle::Pop => AnimationKind::Pop(Pop::new()),
+            AnimationStyle::Slide => AnimationKind::Translate(Translate::default()),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -273,7 +301,7 @@ impl From<ImageProperty> for widgets::widget::ImageStyle {
             margin: value.margin.into(),
             resizing_method: value.resizing_method.into(),
             mipmap_mode: value.mipmap_mode.into(),
-            fit_mode: value.fit_mode.into()
+            fit_mode: value.fit_mode.into(),
         }
     }
 }

@@ -7,12 +7,9 @@ pub mod types;
 pub mod widget;
 
 use crate::{
-    context::{Context, CreateState, GetState, InjectDependency, LoadExtent, SetState, Tick},
-    types::{
-        measure::{Constraints, Measure},
-        Extent, WidgetId,
-    },
-    widget::{Draw, Init, Invalidate, Layout, Widget, WidgetBase},
+    context::{Context, CreateState, GetState, InjectDependency, LoadExtent, SetState, Tick}, events::{DispatchEvent, Event}, types::{
+        Extent, WidgetId, measure::{Constraints, Measure}
+    }, widget::{Draw, Init, Invalidate, Layout, Widget, WidgetBase}
 };
 
 pub struct UiRoot {
@@ -62,6 +59,10 @@ impl UiRoot {
 
     pub fn draw(&self, offset: &types::Offset<f32>, drawer: &mut drawer::Drawer) {
         self.root_widget.draw(&self.context, offset, drawer);
+    }
+
+    pub fn dispatch_event(&mut self, event: Event) {
+        self.root_widget.dispatch_event(&mut self.context, event);
     }
 }
 

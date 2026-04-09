@@ -142,8 +142,6 @@ impl<T> CreateState<T> for Context {
     }
 }
 
-pub type Callback = Box<dyn for<'a> FnMut(ScopedContext<'a>)>;
-
 pub struct ScopedContext<'a> {
     inner: &'a mut dyn ScopedManageState,
 }

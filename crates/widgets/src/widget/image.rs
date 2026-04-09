@@ -12,11 +12,11 @@ use crate::{
         LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
     },
     drawer::Drawer,
-    events::{Action, DispatchEvent, Event},
+    events::{DispatchContext, DispatchEvent, Event},
     make_configuration,
     state::State,
     types::{
-        data::{Configure, ToConfig, WidgetStyle},
+        data::{Configure, WidgetStyle},
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
@@ -25,7 +25,8 @@ use crate::{
         spacing::Spacing,
     },
     widget::{
-        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext, WidgetBase
+        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
+        WidgetBase,
     },
 };
 
@@ -170,13 +171,15 @@ impl Image {
                 .and_then(|icon| icon.ok())
         }
 
-        self.value = match provider {
-            ImageProvider::ImageInfo(image_data) => ImageData::from_image_data(image_data),
-            ImageProvider::ImagePath(image_path) => ImageData::from_path(image_path),
+        match provider {
+            ImageProvider::ImageInfo(image_data) => {
+                self.value = ImageData::from_image_data(image_data)
+            }
+            ImageProvider::ImagePath(image_path) => self.value = ImageData::from_path(image_path),
             ImageProvider::Icon { name, theme, sizes } => {
                 let mut sizes = sizes.clone();
                 sizes.sort();
-                sizes
+                self.value = sizes
                     .into_iter()
                     .rev()
                     .find_map(|size| {
@@ -185,6 +188,7 @@ impl Image {
                     })
                     .and_then(|icon_path| ImageData::from_path(&icon_path.path))
             }
+            ImageProvider::Unknown => self.value = None,
         };
     }
 }
@@ -428,7 +432,7 @@ where
     C: LayoutContext<f32>,
 {
     fn layout(&mut self, context: &C) {
-        if context.load(self.id).is_none() {
+        if context.load(self.id).is_none() && self.value.is_some() {
             warn!(
                 "Image widget with id {} didn't measured! The widget may be incorrectly drawn.",
                 *self.id
@@ -442,6 +446,10 @@ where
     C: DrawContext<f32>,
 {
     fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
+        if self.value.is_none() {
+            return;
+        }
+
         let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
             warn!(
                 "Image widget with id {} didn't measured! Refused to draw.",
@@ -563,11 +571,9 @@ where
 
 impl<C> DispatchEvent<C, f32> for Image
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: DispatchContext<f32>,
 {
-    fn dispatch_event(&self, _context: &C, _event: Event) -> Action {
-        Action::None
-    }
+    fn dispatch_event(&mut self, _context: &mut C, _event: Event) {}
 }
 
 #[derive(Debug, Clone)]
@@ -582,6 +588,7 @@ pub enum ImageProvider {
         theme: String,
         sizes: Vec<u16>,
     },
+    Unknown,
 }
 
 /// Represents a GPU-ready image used by [`Image`] widget during rendering.

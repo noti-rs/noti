@@ -33,16 +33,6 @@ pub(crate) trait Configure<C> {
     fn configure(&mut self, config: C);
 }
 
-/// Internal trait for extracting a configuration snapshot from a widget.
-///
-/// This allows a widget to "export" its current state into a
-/// configuration struct (`C`). This is useful for saving a widget's
-/// current setup or passing its parameters to other parts of the
-/// layout engine.
-pub(crate) trait ToConfig<C> {
-    fn to_config(&self) -> C;
-}
-
 impl From<WidgetStyle> for WidgetDependency {
     fn from(value: WidgetStyle) -> Self {
         WidgetDependency { style: Some(value) }
@@ -110,16 +100,6 @@ macro_rules! make_configuration {
                 $(
                     self.$field_name.get_or_insert_with(|| config.$field_name);
                 )*
-            }
-        }
-
-        impl ToConfig<$struct_name> for $current_origin {
-            fn to_config(&self) -> $struct_name {
-                $struct_name {
-                    $(
-                        $field_name: self.$field_name.clone().unwrap_or_default(),
-                    )*
-                }
             }
         }
 

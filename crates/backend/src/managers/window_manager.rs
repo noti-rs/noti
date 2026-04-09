@@ -258,13 +258,10 @@ impl WindowManager {
 
     /// Handles user interaction with the window, if any has occurred.
     pub(crate) fn handle_actions(&mut self) -> Result<(), Error> {
-        //TODO: change it to actions which defines in config file
+        //TODO: make widgets more interactable for better handling user events
 
         if let Some(window) = self.window.as_mut() {
-            window.handle_hover();
-
-            // TODO: also add bypass by config value named 'bypass_click' or something similar
-            window.handle_click();
+            window.handle_user_actions();
         }
 
         Ok(())

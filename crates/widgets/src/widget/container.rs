@@ -5,19 +5,19 @@ use crate::{
         LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
     },
     drawer::Drawer,
-    events::{Action, DispatchEvent, Event, Point},
+    events::{DispatchContext, DispatchEvent, Event},
     make_configuration,
     types::{
         alignment::Alignment,
         border::{Border, BorderGBuilder},
-        data::{Configure, ToConfig, WidgetStyle},
+        data::{Configure, WidgetStyle},
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
         measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
-        Color,
+        Color, Point,
     },
     widget::{
         flex_container::FlexContainer, Draw, DrawContext, Init, InitContext, Invalidate,
@@ -407,24 +407,24 @@ where
 
 impl<C> DispatchEvent<C, f32> for Container
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: DispatchContext<f32>,
 {
-    fn dispatch_event(&self, context: &C, event: Event) -> Action {
+    fn dispatch_event(&mut self, context: &mut C, event: Event) {
         if !event.kind.is_mouse() {
-            return Action::None;
-        }
-
-        let Some(child) = &self.child else {
-            return Action::None;
-        };
-
-        if event.local_coord.x > self.width as f32 || event.local_coord.y > self.height as f32 {
-            return Action::None;
+            return;
         }
 
         let inner_spacing = self.inner_spacing();
         let mut inner_extent = Extent::new(self.width as f32, self.height as f32);
         inner_extent.shrink_by(&inner_spacing);
+
+        let Some(child) = &mut self.child else {
+            return;
+        };
+
+        if event.local_coord.x > self.width as f32 || event.local_coord.y > self.height as f32 {
+            return;
+        }
 
         let alignment = self.alignment.as_ref().cloned().unwrap_or_default();
         let child_extent = context.load(child.get_id()).unwrap_or_default();
@@ -442,7 +442,7 @@ where
             || event.local_coord.x > horizontal_start + child_extent.width
             || event.local_coord.y > vertical_start + child_extent.height
         {
-            return Action::None;
+            return;
         }
 
         let mut modified_event = event.clone();

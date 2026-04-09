@@ -13,7 +13,7 @@ use crate::{
         Subscribe,
     },
     drawer::Drawer,
-    events::{self, DispatchEvent},
+    events::{self, DispatchContext, DispatchEvent},
     types::{
         dirty_flags::DirtyFlags,
         extent::Extent,
@@ -289,9 +289,9 @@ where
 
 impl<C> DispatchEvent<C, f32> for Widget
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: DispatchContext<f32>,
 {
-    fn dispatch_event(&self, context: &C, event: events::Event) -> events::Action {
+    fn dispatch_event(&mut self, context: &mut C, event: events::Event) {
         delegate!(self.dispatch_event(context, event))
     }
 }
@@ -326,4 +326,15 @@ impl From<AnimatedVisibility> for Widget {
     fn from(value: AnimatedVisibility) -> Self {
         Widget::AnimatedVisibility(value.into())
     }
+}
+
+#[macro_export]
+macro_rules! make_widget {
+    ($name:ident { $($field_name:ident: $val:expr),* $(,)? }) => {
+        paste::paste!{
+            [<$name Builder>]::default()
+                $(.$field_name($val))*
+                .build()
+        }
+    };
 }

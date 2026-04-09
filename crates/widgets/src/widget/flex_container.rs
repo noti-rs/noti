@@ -7,19 +7,9 @@ use crate::{
         LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
     },
     drawer::Drawer,
-    events::{Action, DispatchEvent, Event, Point},
+    events::{DispatchContext, DispatchEvent, Event},
     types::{
-        alignment::{Alignment, Position},
-        border::{Border, BorderGBuilder},
-        data::{Configure, WidgetStyle},
-        direction::Direction,
-        dirty_flags::DirtyFlags,
-        extent::{Extent, FlexExtent},
-        identifiers::{WidgetClass, WidgetId, WidgetKey},
-        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
-        offset::Offset,
-        spacing::Spacing,
-        Color,
+        Color, Point, alignment::{Alignment, Position}, border::{Border, BorderGBuilder}, data::{Configure, WidgetStyle}, direction::Direction, dirty_flags::DirtyFlags, extent::{Extent, FlexExtent}, identifiers::{WidgetClass, WidgetId, WidgetKey}, measure::{self, Constraints, Measure, MeasureContext, SizingMode}, offset::Offset, spacing::Spacing
     },
     widget::{
         Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
@@ -699,21 +689,21 @@ where
 
 impl<C> DispatchEvent<C, f32> for FlexContainer
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: DispatchContext<f32>,
 {
-    fn dispatch_event(&self, context: &C, event: Event) -> Action {
+    fn dispatch_event(&mut self, context: &mut C, event: Event) {
         let Some(provided_extent) = context.load(self.id) else {
-            return Action::None;
+            return;
         };
 
         if !event.kind.is_mouse() {
-            return Action::None;
+            return;
         }
 
         if event.local_coord.x > provided_extent.width
             || event.local_coord.y > provided_extent.height
         {
-            return Action::None;
+            return;
         }
 
         let (mouse_main, mouse_cross) = if let Direction::Horizontal = self.direction {
@@ -727,19 +717,20 @@ where
         plane.main.start += start;
 
         if mouse_main < plane.main.start || mouse_cross < plane.cross.start {
-            return Action::None;
+            return;
         }
 
-        for child in &self.children {
+        let cross_axis_alignment = self.cross_axis_alignment();
+
+        for child in &mut self.children {
             let child_extent = context
                 .load(child.get_id())
                 .unwrap_or_default()
                 .to_flex(&self.direction);
 
             if mouse_main <= plane.main.start + child_extent.main {
-                let widget_start = self
-                    .cross_axis_alignment()
-                    .get_start(plane.cross.extent, child_extent.cross);
+                let widget_start =
+                    cross_axis_alignment.get_start(plane.cross.extent, child_extent.cross);
 
                 if mouse_cross >= plane.cross.start + widget_start
                     && mouse_cross <= plane.cross.start + widget_start + child_extent.cross
@@ -761,13 +752,11 @@ where
                     return child.dispatch_event(context, modified_event);
                 }
 
-                return Action::None;
+                return;
             }
 
             plane.cut_front(child_extent.main + incrementor);
         }
-
-        Action::None
     }
 }
 

@@ -11,11 +11,11 @@ use crate::{
         LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
     },
     drawer::{Drawer, UseColor},
-    events::{Action, DispatchEvent, Event},
+    events::{DispatchContext, DispatchEvent, Event},
     make_configuration,
     state::State,
     types::{
-        data::{Configure, ToConfig, WidgetStyle},
+        data::{Configure, WidgetStyle},
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
@@ -814,11 +814,10 @@ where
 
 impl<C> DispatchEvent<C, f32> for Text
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: DispatchContext<f32>,
 {
-    fn dispatch_event(&self, _context: &C, _event: Event) -> Action {
+    fn dispatch_event(&mut self, _context: &mut C, _event: Event) {
         // TODO: implement link click
-        Action::None
     }
 }
 

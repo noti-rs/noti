@@ -1,9 +1,12 @@
-use crate::{context::LoadExtent, types::WidgetId};
+use crate::{
+    context::{LoadExtent, ScopedContext, ScopedManageState},
+    types::{Point, WidgetId},
+};
 
 #[derive(Debug, Clone)]
 pub struct Event {
     pub kind: EventKind,
-    pub local_coord: Point,
+    pub local_coord: Point<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -22,30 +25,35 @@ impl EventKind {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Point {
-    pub x: f32,
-    pub y: f32,
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MouseButton {
     Left,
     Middle,
     Right,
 }
 
-pub enum Action {
-    ButtonPressed { button_id: String },
-    RequestMenu { menu_id: String },
-    OpenLink { link: String },
-    None,
+pub trait FunctionCallback<'a, T>: FnMut(ScopedContext<'a>, T) {}
+impl<'a, T, F> FunctionCallback<'a, T> for F where F: FnMut(ScopedContext<'a>, T) {}
+
+pub type Callback<T> = Box<dyn for<'a> FunctionCallback<'a, T>>;
+
+pub(crate) trait DispatchContext<T>: LoadExtent<T, WidgetId> + ScopedManageState
+where
+    T: Default + Copy,
+{
+}
+
+impl<C, T> DispatchContext<T> for C
+where
+    C: LoadExtent<T, WidgetId> + ScopedManageState,
+    T: Default + Copy,
+{
 }
 
 pub(crate) trait DispatchEvent<C, T>
 where
-    C: LoadExtent<T, WidgetId>,
+    C: DispatchContext<T>,
     T: Default + Copy,
 {
-    fn dispatch_event(&self, context: &C, event: Event) -> Action;
+    fn dispatch_event(&mut self, context: &mut C, event: Event);
 }

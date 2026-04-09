@@ -4,7 +4,7 @@ use skia_safe::runtime_effect::ChildPtr;
 
 use crate::{
     animations::AnimationFilter,
-    types::{ShaderBuilder, UniformValue},
+    types::{Point, ShaderBuilder, UniformValue},
 };
 
 /// A translation animation effect for widgets.
@@ -18,21 +18,6 @@ use crate::{
 #[derive(Clone)]
 pub struct Translate {
     shader_builder: ShaderBuilder,
-}
-
-/// A simple 2D point used in translation effects.
-///
-/// Represents an `(x, y)` offset in logical coordinates.
-#[derive(Default, Clone, Copy)]
-pub struct Point {
-    x: f32,
-    y: f32,
-}
-
-impl Point {
-    pub fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
 }
 
 const SHADER: &str = r#"
@@ -63,7 +48,7 @@ half4 main(float2 coord) {
 "#;
 
 impl Translate {
-    fn new(start: Point, end: Point) -> Self {
+    pub fn new(start: Point<f32>, end: Point<f32>) -> Self {
         Self {
             shader_builder: {
                 let mut builder = ShaderBuilder::new(SHADER).unwrap();
@@ -72,6 +57,13 @@ impl Translate {
                 builder
             },
         }
+    }
+
+    pub fn update_path(&mut self, start: Point<f32>, end: Point<f32>) {
+        self.shader_builder
+            .set_uniform("start", UniformValue::Float2(start.x, start.y));
+        self.shader_builder
+            .set_uniform("end", UniformValue::Float2(end.x, end.y));
     }
 }
 

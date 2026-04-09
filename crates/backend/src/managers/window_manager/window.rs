@@ -46,7 +46,8 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 use widgets::{
     context::Tick,
-    types::{extent::Extent, offset::Offset},
+    events::{Event, EventKind, MouseButton},
+    types::{extent::Extent, offset::Offset, Point},
 };
 
 /// Wraps a [WindowState] and holds an event queue used only for dispatching.
@@ -376,72 +377,52 @@ impl WindowState {
         self.banner_stack.remove_closed()
     }
 
-    pub(super) fn handle_hover(&mut self) {
-        if let Some(index) = self.get_hovered_banner() {
-            self.banner_stack[&index].reset_timeout();
-
-            // INFO: because of every tracking pointer position, it emits very frequently and it's
-            // annoying. So moved to 'TRACE' level for specific situations.
-            trace!("Window: Updated timeout of hovered notification banner with id {index}");
-        }
-    }
-
     pub(super) fn reset_timeouts(&mut self) {
         self.banner_stack
             .banners_mut()
             .for_each(Banner::reset_timeout);
     }
 
-    pub(super) fn handle_click(&mut self) {
-        if let PrioritizedPressState::Unpressed = self.pointer_state.press_state {
+    pub(super) fn handle_user_actions(&mut self) {
+        if !self.pointer_state.entered && self.pointer_state.events.is_empty() {
             return;
         }
-        let _press_state = self.pointer_state.press_state.take();
 
-        if let Some(id) = self.get_hovered_banner() {
-            if self.config.general().anchor.is_bottom() {
-                self.pointer_state.y -=
-                    self.banner_stack[&id].height() as f64 + self.config.general().gap as f64;
-
-                // INFO: the compositor may wrongly relocate to previous position and it will cause
-                // of incorrect pointer positioning for next click in row. So need to ignore and
-                // left remaining.
-                self.pointer_state.ignore_first_relocate();
-            }
-
-            debug!("Window: Clicked to notification banner with id {id}");
-
-            let banner = &mut self.banner_stack[&id];
-
-            if banner.is_interactable() {
-                banner.close(dbus::actions::ClosingReason::DismissedByUser);
-            }
-        }
-    }
-
-    fn get_hovered_banner(&self) -> Option<u32> {
-        if !self.pointer_state.entered {
-            return None;
-        }
-
-        let mut offset = 0.0;
-        let gap = self.config.general().gap as f64;
-
-        let finder = |banner: &Banner| {
-            let banner_height = banner.height() as f64;
-            let bottom = offset + banner_height;
-            if (offset..bottom).contains(&self.pointer_state.y) {
-                Some(banner.notification().id)
-            } else {
-                offset += banner_height + gap;
-                None
-            }
+        let mut banners = if self.config.general().anchor.is_top() {
+            self.banner_stack.banners_mut().collect::<Vec<_>>()
+        } else {
+            self.banner_stack.banners_mut().rev().collect::<Vec<_>>()
         };
 
-        if self.config.general().anchor.is_top() {
-            self.banner_stack.banners().find_map(finder)
-        } else {
-            self.banner_stack.banners().rev().find_map(finder)
+        while let Some(event) = self.pointer_state.events.pop_front() {
+            let mut offset = Offset::new(self.margin.left as f64, self.margin.top as f64);
+            let gap = self.config.general().gap as f64;
+
+            for banner in &mut banners {
+                let banner_height = banner.height() as f64;
+
+                let bottom = offset.y + banner_height;
+                let right = offset.x + banner.width() as f64;
+
+                if (offset.y..bottom).contains(&event.y) {
+                    if !(offset.x..right).contains(&event.x) {
+                        break;
+                    }
+
+                    let event = Event {
+                        kind: event.kind.clone().into(),
+                        local_coord: Point {
+                            x: (event.x - offset.x) as f32,
+                            y: (event.y - offset.y) as f32,
+                        },
+                    };
+
+                    banner.dispatch_event(event);
+                    break;
+                } else {
+                    offset.y += banner_height + gap;
+                }
+            }
         }
     }
 
@@ -615,55 +596,33 @@ impl Margin {
 /// The `state` tracks events that are useful for handling interactions with notification banners.
 #[derive(Default)]
 struct PointerState {
+    events: VecDeque<PointerEvent>,
     x: f64,
     y: f64,
 
     entered: bool,
-    /// Some Wayland compositors reposition the pointer unexpectedly after a window resize.
-    /// The first repositioning should be ignored; subsequent repositionings are considered valid.
-    ignore_first_relocate: bool,
-    press_state: PrioritizedPressState,
 }
 
-/// Represents a mouse click button with priority.
-///
-/// If the user clicks multiple buttons in a very short time, the priority determines which
-/// button is considered. By default, the left mouse button (LMB) has the highest priority,
-/// followed by the right mouse button (RMB), and then the middle mouse button (MMB).
-///
-/// In short: LMB > RMB > MMB.
-#[derive(Default, Clone)]
-enum PrioritizedPressState {
-    #[default]
-    Unpressed,
-    Lmb,
-    Rmb,
-    Mmb,
+struct PointerEvent {
+    x: f64,
+    y: f64,
+    kind: PointerEventKind,
 }
 
-impl PrioritizedPressState {
-    /// Updates the current state, keeping only the event with the highest priority.
-    fn update(&mut self, new_state: PrioritizedPressState) {
-        match self {
-            PrioritizedPressState::Lmb => (),
-            PrioritizedPressState::Rmb => {
-                if let PrioritizedPressState::Lmb = &new_state {
-                    *self = new_state
-                }
-            }
-            PrioritizedPressState::Mmb => match &new_state {
-                PrioritizedPressState::Lmb | PrioritizedPressState::Rmb => *self = new_state,
-                _ => (),
-            },
-            PrioritizedPressState::Unpressed => *self = new_state,
+#[derive(Clone, PartialEq, Eq)]
+enum PointerEventKind {
+    Hover,
+    MouseDown { button: MouseButton },
+    MouseUp { button: MouseButton },
+}
+
+impl From<PointerEventKind> for EventKind {
+    fn from(value: PointerEventKind) -> Self {
+        match value {
+            PointerEventKind::Hover => EventKind::MouseHover,
+            PointerEventKind::MouseDown { button } => EventKind::MouseDown(button),
+            PointerEventKind::MouseUp { button } => EventKind::MouseUp(button),
         }
-    }
-
-    /// Returns the current state while resetting it to the unpressed state.
-    fn take(&mut self) -> Self {
-        let current_state = self.clone();
-        *self = PrioritizedPressState::Unpressed;
-        current_state
     }
 }
 
@@ -672,12 +631,6 @@ impl PointerState {
     const RIGHT_BTN: u32 = 273;
     const MIDDLE_BTN: u32 = 274;
 
-    /// Ignores the first pointer-move event from the Wayland compositor.
-    /// This can be useful if the compositor moves the pointer unexpectedly.
-    fn ignore_first_relocate(&mut self) {
-        self.ignore_first_relocate = true;
-    }
-
     /// Updates the current pointer state to indicate that it has left the window frame.
     fn leave(&mut self) {
         self.entered = false;
@@ -685,43 +638,82 @@ impl PointerState {
         debug!("Pointer: Left");
     }
 
-    /// Updates the current pointer state to indicate that it has entered the window frame and sets
-    /// the pointer’s position.
-    fn enter_and_relocate(&mut self, x: f64, y: f64) {
+    fn enter(&mut self, x: f64, y: f64) {
         self.entered = true;
-        debug!("Pointer: Entered");
-
-        self.relocate(x, y);
+        self.update_or_push_hover(x, y);
     }
 
     /// Updates the current pointer state to reflect movement to a new position.
     ///
     /// Behavior may differ if `ignore_first_relocate` is enabled.
     fn relocate(&mut self, x: f64, y: f64) {
-        if self.ignore_first_relocate {
-            debug!("Pointer: Forced to ignore first relocate.");
-
-            self.ignore_first_relocate = false;
-            return;
-        }
-
-        self.x = x;
-        self.y = y;
+        // if self.ignore_first_relocate {
+        //     debug!("Pointer: Forced to ignore first relocate.");
+        //
+        //     self.ignore_first_relocate = false;
+        //     return;
+        // }
+        self.update_or_push_hover(x, y);
 
         // INFO: Pointer state updates very frequently so in 'DEBUG' level rows will be filled with
         // useless information about pointer. So moved into 'TRACE' level.
         trace!("Pointer: Relocate to x - {x}, y - {y}")
     }
 
+    fn update_or_push_hover(&mut self, x: f64, y: f64) {
+        self.x = x;
+        self.y = y;
+
+        if let Some(event) = self
+            .events
+            .back_mut()
+            .take_if(|event| event.kind == PointerEventKind::Hover)
+        {
+            event.x = x;
+            event.y = y;
+        } else {
+            self.events.push_back(PointerEvent {
+                x,
+                y,
+                kind: PointerEventKind::Hover,
+            });
+        }
+    }
+
     /// Updates the current pointer state to reflect a user’s mouse button click.
     fn press(&mut self, button: u32) {
-        debug!("Pointer: Pressed button {button}");
-        match button {
-            PointerState::LEFT_BTN => self.press_state.update(PrioritizedPressState::Lmb),
-            PointerState::RIGHT_BTN => self.press_state.update(PrioritizedPressState::Rmb),
-            PointerState::MIDDLE_BTN => self.press_state.update(PrioritizedPressState::Mmb),
-            _ => (),
-        }
+        let Some(button) = Self::get_button(button) else {
+            return;
+        };
+        debug!("Pointer: Pressed button {button:?}");
+
+        self.events.push_back(PointerEvent {
+            x: self.x,
+            y: self.y,
+            kind: PointerEventKind::MouseDown { button },
+        });
+    }
+
+    fn release(&mut self, button: u32) {
+        let Some(button) = Self::get_button(button) else {
+            return;
+        };
+        debug!("Pointer: Released button {button:?}");
+
+        self.events.push_back(PointerEvent {
+            x: self.x,
+            y: self.y,
+            kind: PointerEventKind::MouseUp { button },
+        });
+    }
+
+    fn get_button(button: u32) -> Option<MouseButton> {
+        Some(match button {
+            PointerState::LEFT_BTN => MouseButton::Left,
+            PointerState::RIGHT_BTN => MouseButton::Right,
+            PointerState::MIDDLE_BTN => MouseButton::Middle,
+            _ => return None,
+        })
     }
 }
 
@@ -748,8 +740,6 @@ impl Dispatch<WlCallback, ()> for WindowState {
                 .expect("The EGL surface must be available to make current and use it");
 
             state.banner_stack.banners_mut().for_each(|banner| {
-                banner.try_next_stage(&state.config);
-
                 banner.compile(
                     &state.config,
                     state.font_collection.clone(),
@@ -852,7 +842,7 @@ impl Dispatch<WlPointer, ()> for WindowState {
                     .cursor_device
                     .set_shape(serial, wp_cursor_shape_device_v1::Shape::Pointer);
 
-                state.pointer_state.enter_and_relocate(surface_x, surface_y);
+                state.pointer_state.enter(surface_x, surface_y);
             }
             wl_pointer::Event::Leave { serial, .. } => {
                 state
@@ -870,6 +860,11 @@ impl Dispatch<WlPointer, ()> for WindowState {
                 state: WEnum::Value(ButtonState::Pressed),
                 ..
             } => state.pointer_state.press(button),
+            wl_pointer::Event::Button {
+                button,
+                state: WEnum::Value(ButtonState::Released),
+                ..
+            } => state.pointer_state.release(button),
             _ => (),
         }
     }

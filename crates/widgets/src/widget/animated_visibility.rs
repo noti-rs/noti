@@ -3,12 +3,12 @@ use std::time::Duration;
 use crate::{
     animations::{AnimationFilter, AnimationKind, Easing},
     context::{
-        AnimationDirection, AnimationProgress, Callback, LoadConstraints, LoadExtent,
+        AnimationDirection, AnimationProgress, LoadConstraints, LoadExtent,
         ManageAnimationRegistry, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
         ScopedContext,
     },
     drawer::Drawer,
-    events::DispatchEvent,
+    events::{Callback, DispatchContext, DispatchEvent, Event, FunctionCallback},
     state::State,
     types::{
         dirty_flags::DirtyFlags,
@@ -59,11 +59,40 @@ pub struct AnimatedVisibility {
     #[builder(setter(strip_option, into), default)]
     child: Option<Widget>,
 
-    #[builder(setter(strip_option), default)]
-    on_visible: Option<Callback>,
+    #[builder(setter(custom), default)]
+    on_visible: Option<Callback<()>>,
 
-    #[builder(setter(strip_option), default)]
-    on_hidden: Option<Callback>,
+    #[builder(setter(custom), default)]
+    on_hidden: Option<Callback<()>>,
+
+    #[builder(setter(custom), default)]
+    on_hover: Option<Callback<()>>,
+}
+
+impl AnimatedVisibilityBuilder {
+    pub fn on_visible<F>(mut self, callback: F) -> Self
+    where
+        F: for<'a> FunctionCallback<'a, ()> + 'static,
+    {
+        self.on_visible = Some(Some(Box::new(callback)));
+        self
+    }
+
+    pub fn on_hidden<F>(mut self, callback: F) -> Self
+    where
+        F: for<'a> FunctionCallback<'a, ()> + 'static,
+    {
+        self.on_hidden = Some(Some(Box::new(callback)));
+        self
+    }
+
+    pub fn on_hover<F>(mut self, callback: F) -> Self
+    where
+        F: for<'a> FunctionCallback<'a, ()> + 'static,
+    {
+        self.on_hover = Some(Some(Box::new(callback)));
+        self
+    }
 }
 
 impl Clone for AnimatedVisibility {
@@ -83,6 +112,7 @@ impl Clone for AnimatedVisibility {
             child: self.child.clone(),
             on_visible: None,
             on_hidden: None,
+            on_hover: None,
         }
     }
 }
@@ -103,16 +133,6 @@ enum AnimationState {
     Play,
     Unwind,
 }
-
-// impl AnimationState {
-//     fn as_direction(&self, visible: bool) -> AnimationDirection {
-//         match (visible, self) {
-//             AnimationState::Nothing => AnimationDirection::Forward,
-//             AnimationState::Play => AnimationDirection::Forward,
-//             AnimationState::Unwind => AnimationDirection::Backward,
-//         }
-//     }
-// }
 
 #[derive(Default, Clone)]
 pub struct AnimationDefinition {
@@ -233,10 +253,10 @@ where
 
                     match self.phase {
                         VisibilityPhase::Hidden if self.on_hidden.is_some() => {
-                            (self.on_hidden.as_mut().unwrap())(ScopedContext::new(context))
+                            (self.on_hidden.as_mut().unwrap())(ScopedContext::new(context), ())
                         }
                         VisibilityPhase::Showing if self.on_visible.is_some() => {
-                            (self.on_visible.as_mut().unwrap())(ScopedContext::new(context))
+                            (self.on_visible.as_mut().unwrap())(ScopedContext::new(context), ())
                         }
                         _ => (),
                     }
@@ -339,15 +359,17 @@ impl Measure<f32, WidgetId> for AnimatedVisibility {
                 spatial_change_easing.ease(context.animation_progress(self.id).unwrap_or(1.0));
         }
 
-        let clamped_extent = used_extent.clamp_with(constraints.min, constraints.max);
+        if let VisibilityPhase::Hidden = self.phase {
+            used_extent *= 0.0;
+        }
 
         <C as SaveConstraints<f32, WidgetId>>::save(context, self.id, constraints);
-        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, clamped_extent);
+        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, used_extent);
 
         dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
         context.set_dirty_flags(self.id, dirty_flags);
 
-        clamped_extent
+        used_extent
     }
 }
 
@@ -503,9 +525,15 @@ impl AnimatedVisibility {
 
 impl<C> DispatchEvent<C, f32> for AnimatedVisibility
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: DispatchContext<f32>,
 {
-    fn dispatch_event(&self, _context: &C, _event: crate::events::Event) -> crate::events::Action {
-        todo!()
+    fn dispatch_event(&mut self, context: &mut C, event: Event) {
+        if matches!(event.kind, crate::events::EventKind::MouseHover) && self.on_hover.is_some() {
+            (self.on_hover.as_mut().unwrap())(ScopedContext::new(context), ())
+        }
+
+        if let Some(child) = &mut self.child {
+            child.dispatch_event(context, event);
+        }
     }
 }

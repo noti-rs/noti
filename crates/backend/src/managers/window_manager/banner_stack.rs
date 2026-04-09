@@ -5,22 +5,22 @@ use indexmap::{
     map::{Iter, Values, ValuesMut},
     IndexMap,
 };
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use shared::{cached_data::CachedData, text::Text};
-use std::{cmp::Ordering, collections::VecDeque, hash::Hash, path::PathBuf};
+use std::{cmp::Ordering, collections::VecDeque, hash::Hash, path::PathBuf, time};
 use widgets::{
     self,
-    animations::Fade,
-    context::{Context, CreateState, InjectDependency, SetState, Tick},
+    animations::AnimationKind,
+    context::{Context, CreateState, GetState, InjectDependency, SetState, Tick},
     drawer::Drawer,
+    events::Event,
+    make_widget,
     state::MutableState,
-    types::{measure::Constraints, Alignment, Border, Extent, Offset, Position},
+    types::{measure::Constraints, Alignment, Border, Direction, Extent, Offset, Point, Position},
     widget::{
-        animated_visibility::{
-            AnimatedVisibilityBuilder, AnimationDefinition, SpatialChangeDefinition,
-        },
+        animated_visibility::{AnimatedVisibilityBuilder, AnimationDefinition},
         image::ImageProvider,
-        FlexContainerBuilder, ImageBuilder, TextBuilder, Widget,
+        FlexContainerBuilder, ImageBuilder, TextBuilder,
     },
     UiRoot,
 };
@@ -59,8 +59,9 @@ where
 
     pub(super) fn width(&self) -> usize {
         self.banners
-            .first()
-            .map(|(_, banner)| banner.width())
+            .values()
+            .map(|banner| banner.width())
+            .max()
             .unwrap_or(0)
     }
 
@@ -122,7 +123,7 @@ impl BannerStack<u32> {
 
         for notification in notifications_to_replace {
             let id = notification.id;
-            self.banners[&id].update_data(notification);
+            self.banners[&id].update_data(notification, config);
         }
 
         self.sort_by_config(config);
@@ -237,13 +238,28 @@ pub(super) struct Banner {
     ui_root: Option<UiRoot>,
     close_status: CloseStatus,
 
-    summary_state: Option<MutableState<Text>>,
-    body_state: Option<MutableState<Text>>,
-    image_state: Option<MutableState<ImageProvider>>,
-    visible_state: Option<MutableState<bool>>,
+    banner_state: Option<BannerState>,
 
     /// A widget layout only needs to be compiled once, until the data or layout changes.
     is_compiled: bool,
+}
+
+struct BannerState {
+    timeout: u128,
+    shown_at: MutableState<time::Instant>,
+    banner_phase: MutableState<BannerPhase>,
+
+    summary_state: MutableState<Text>,
+    body_state: MutableState<Text>,
+    image_state: MutableState<ImageProvider>,
+    visible_state: MutableState<bool>,
+}
+
+enum BannerPhase {
+    NotShown,
+    Shown,
+    Closing,
+    Closed,
 }
 
 impl Banner {
@@ -260,17 +276,10 @@ impl Banner {
             ui_root: None,
             close_status: CloseStatus::NotClosed,
 
-            summary_state: None,
-            body_state: None,
-            image_state: None,
-            visible_state: None,
+            banner_state: None,
 
             is_compiled: false,
         }
-    }
-
-    pub(super) fn notification(&self) -> &Notification {
-        &self.notification
     }
 
     pub(super) fn close(&mut self, closing_reason: ClosingReason) {
@@ -282,25 +291,52 @@ impl Banner {
     }
 
     fn is_finished(&self) -> bool {
-        todo!()
-    }
-
-    pub(super) fn is_interactable(&self) -> bool {
-        true
-        // !self.is_closed() && self.stage.as_ref().is_some_and(BannerStage::is_showing)
+        self.ui_root
+            .as_ref()
+            .map(|ui_root| {
+                matches!(
+                    ui_root
+                        .get(self.banner_state.as_ref().unwrap().banner_phase)
+                        .unwrap(),
+                    BannerPhase::Closed
+                )
+            })
+            .unwrap_or(false)
     }
 
     pub(super) fn reset_timeout(&mut self) {
-        // if let Some(stage) = self.stage.as_mut() {
-        //     stage.reset_timeout();
-        // }
+        if let Some(ui_root) = self.ui_root.as_mut() {
+            ui_root.set(
+                self.banner_state.as_ref().unwrap().shown_at,
+                time::Instant::now(),
+            );
+        }
 
         trace!("Banner (id={}): Timeout reset", self.notification.id);
     }
 
-    pub(super) fn update_data(&mut self, notification: Notification) {
+    pub(super) fn update_data(&mut self, notification: Notification, config: &Config) {
         self.notification = notification;
-        self.is_compiled = false;
+
+        if let Some(ui_root) = self.ui_root.as_mut() {
+            let banner_state = self.banner_state.as_ref().unwrap();
+
+            ui_root.set(
+                banner_state.summary_state,
+                self.notification.summary.clone(),
+            );
+            ui_root.set(banner_state.body_state, self.notification.body.clone());
+            ui_root.set(
+                banner_state.image_state,
+                make_image_provider(
+                    &self.notification,
+                    config.display_by_app(&self.notification.app_name),
+                ),
+            )
+        } else {
+            self.is_compiled = false;
+        }
+
         self.reset_timeout();
         debug!(
             "Banner (id={}): Updated notification data and timeout",
@@ -325,30 +361,6 @@ impl Banner {
             .round() as usize
     }
 
-    pub(super) fn try_next_stage(&mut self, config: &Config) -> bool {
-        // let is_unfinished_or_last_or_unskipable = |stage: &BannerStage| {
-        //     !(stage.is_current_finished(&self.notification, config)
-        //         || (self.is_closed() && stage.is_skipable()))
-        //         || stage.is_totally_finished()
-        // };
-        //
-        // if self
-        //     .stage
-        //     .as_ref()
-        //     .is_none_or(is_unfinished_or_last_or_unskipable)
-        // {
-        //     return false;
-        // }
-        //
-        // let Some(stage) = self.stage.take() else {
-        //     return false;
-        // };
-        //
-        // self.stage = stage.next(&self.notification, config);
-
-        true
-    }
-
     /// Compiles the widget layout of notification banner.
     ///
     /// Compiling the widget layout is important to ensure correct positioning of the UI elements,
@@ -358,7 +370,8 @@ impl Banner {
         &mut self,
         config: &Config,
         font_collection: skia_safe::textlayout::FontCollection,
-        cached_layouts: &CachedData<PathBuf, CachedLayout>,
+        // TODO: need fix parser before use cached_layout
+        _cached_layouts: &CachedData<PathBuf, CachedLayout>,
     ) {
         if self.is_compiled {
             return;
@@ -369,101 +382,103 @@ impl Banner {
             config.general().height as usize,
         );
 
-        let display = config.display_by_app(&self.notification.app_name);
+        let timeout = config
+            .display_by_app(&self.notification.app_name)
+            .timeout
+            .by_urgency(&self.notification.hints.urgency) as u128;
 
-        // let mut layout = match &display.layout {
-        //     config::display::Layout::Default => default_layout(),
-        //     config::display::Layout::FromPath { path_buf } => cached_layouts
-        //         .get(path_buf)
-        //         .and_then(CachedLayout::layout)
-        //         .cloned()
-        //         .unwrap_or_else(default_layout),
-        // };
+        let display = config.display_by_app(&self.notification.app_name);
 
         let mut context = Context::new(font_collection);
         let summary_state = context.create_state_mut(self.notification.summary.clone());
-        self.summary_state = Some(summary_state);
+        let summary_widget = make_widget! {
+            Text {
+                class: Banner::NOTIFICATION_SUMMARY,
+                state: summary_state,
+            }
+        }
+        .unwrap();
 
         let body_state = context.create_state_mut(self.notification.body.clone());
-        self.body_state = Some(body_state);
-
-        let mut image_builder = ImageBuilder::default();
-
-        if let Some(image_provider) = try_get_image_data(&self.notification, display) {
-            let image_state = context.create_state_mut(image_provider);
-            self.image_state = Some(image_state);
-            image_builder.state(image_state);
+        let body_widget = make_widget! {
+            Text {
+                class: Banner::NOTIFICATION_BODY,
+                state: body_state
+            }
         }
+        .unwrap();
+
+        let image_state =
+            context.create_state_mut(make_image_provider(&self.notification, display));
+        let image_widget = make_widget! {
+            Image {
+                class: Banner::NOTIFICATION_IMAGE,
+                state: image_state,
+            }
+        }
+        .unwrap();
 
         let visible_state = context.create_state_mut(true);
-        self.visible_state = Some(visible_state);
+        let shown_at = context.create_state_mut(time::Instant::now());
+        let banner_phase = context.create_state_mut(BannerPhase::NotShown);
 
-        let layout = AnimatedVisibilityBuilder::default()
-            .primary_animation(AnimationDefinition {
-                kind: widgets::animations::AnimationKind::Fade(Fade::new()),
-                easing: widgets::animations::Easing::EaseOut,
-                duration: display.animation.enter.duration.clone().into(),
-            })
-            .primary_spatial_change(SpatialChangeDefinition {
-                duration: display.animation.allocation.duration.clone().into(),
-                easing: widgets::animations::Easing::Linear,
-            })
-            .state(visible_state)
-            .on_visible(Box::new(move |mut context| {
-                println!("Banner now is visible!");
-                context.set(visible_state, false);
-            }))
-            .on_hidden(Box::new(move |mut context| {
-                println!("Banner now is hidden!");
-                context.set(visible_state, true);
-            }))
-            .child(
-                FlexContainerBuilder::default()
-                    .class(Banner::NOTIFICATION_FRAME)
-                    .direction(widgets::types::Direction::Horizontal)
-                    .alignment(Alignment::new(Position::Start, Position::Center))
-                    .children(vec![
-                        image_builder
-                            .class(Banner::NOTIFICATION_IMAGE)
-                            .build()
-                            .unwrap()
-                            .into(),
-                        FlexContainerBuilder::default()
-                            .spacing(Default::default())
-                            .border(Border::default())
-                            .direction(widgets::types::direction::Direction::Vertical)
-                            .alignment(Alignment::new(Position::Center, Position::Center))
-                            .children(vec![
-                                TextBuilder::default()
-                                    .class(Banner::NOTIFICATION_SUMMARY)
-                                    .state(summary_state)
-                                    .build()
-                                    .unwrap()
-                                    .into(),
-                                TextBuilder::default()
-                                    .class(Banner::NOTIFICATION_BODY)
-                                    .state(body_state)
-                                    .build()
-                                    .unwrap()
-                                    .into(),
-                            ])
-                            .build()
-                            .unwrap()
-                            .into(),
-                    ])
-                    .build()
-                    .unwrap(),
-            )
-            .build()
-            .unwrap()
-            .into();
+        let layout = make_widget! {
+            AnimatedVisibility {
+                state: visible_state,
+
+                primary_animation: correct_animation(config, display.animation.primary.clone().into()),
+                primary_spatial_change: display.animation.primary_spatial_change.clone().into(),
+
+                secondary_animation: correct_animation(config, display.animation.secondary.clone().into()),
+                secondary_spatial_change: display.animation.secondary_spatial_change.clone().into(),
+
+                on_visible: move |mut context, _| {
+                    context.set(banner_phase, BannerPhase::Shown);
+                    context.set(shown_at, time::Instant::now());
+                },
+                on_hidden: move |mut context, _| {
+                    context.set(banner_phase, BannerPhase::Closed);
+                },
+                on_hover: move |mut context, _| {
+                    context.set(visible_state, true);
+                },
+
+                child: make_widget! {
+                    FlexContainer {
+                        class: Banner::NOTIFICATION_FRAME,
+                        direction: Direction::Horizontal,
+                        alignment: Alignment::new(Position::Start, Position::Center),
+                        children: vec![
+                            image_widget.into(),
+                            make_widget!{
+                                FlexContainer {
+                                    direction: Direction::Vertical,
+                                    alignment: Alignment::new(Position::Center, Position::Center),
+                                    children: vec![summary_widget.into(), body_widget.into()],
+                                }
+                            }.unwrap().into()
+                        ]
+                    }
+                }.unwrap()
+            }
+        }
+        .unwrap()
+        .into();
 
         inject_dependencies(&mut context, &self.notification, config);
 
         let mut ui_root = UiRoot::new(layout, context);
-
         ui_root.layout(Constraints::new_tight(extent.into()).into());
 
+        self.banner_state = Some(BannerState {
+            timeout,
+            shown_at,
+            banner_phase,
+            summary_state,
+            body_state,
+            image_state,
+            visible_state,
+        });
         self.ui_root = Some(ui_root);
         self.is_compiled = true;
     }
@@ -480,58 +495,18 @@ impl Banner {
         let Some(ui_root) = &self.ui_root else {
             return DrawState::Failure;
         };
-        // let Some(stage) = &self.stage else {
-        //     return DrawState::Failure;
-        // };
 
         ui_root.draw(offset, &mut drawer);
 
         debug!("Banner (id={}): Complete draw", self.notification.id);
         DrawState::Success
     }
-}
 
-/// Returns the default widget layout if a custom layout has not been defined.
-fn default_layout() -> Widget {
-    AnimatedVisibilityBuilder::default()
-        .child(
-            FlexContainerBuilder::default()
-                .class(Banner::NOTIFICATION_FRAME)
-                .direction(widgets::types::Direction::Horizontal)
-                .alignment(Alignment::new(Position::Start, Position::Center))
-                .children(vec![
-                    ImageBuilder::default()
-                        .class(Banner::NOTIFICATION_IMAGE)
-                        .build()
-                        .unwrap()
-                        .into(),
-                    FlexContainerBuilder::default()
-                        .spacing(Default::default())
-                        .border(Border::default())
-                        .direction(widgets::types::direction::Direction::Vertical)
-                        .alignment(Alignment::new(Position::Center, Position::Center))
-                        .children(vec![
-                            TextBuilder::default()
-                                .class(Banner::NOTIFICATION_SUMMARY)
-                                .build()
-                                .unwrap()
-                                .into(),
-                            TextBuilder::default()
-                                .class(Banner::NOTIFICATION_BODY)
-                                .build()
-                                .unwrap()
-                                .into(),
-                        ])
-                        .build()
-                        .unwrap()
-                        .into(),
-                ])
-                .build()
-                .unwrap(),
-        )
-        .build()
-        .unwrap()
-        .into()
+    pub(super) fn dispatch_event(&mut self, event: Event) {
+        if let Some(ui_root) = self.ui_root.as_mut() {
+            ui_root.dispatch_event(event)
+        }
+    }
 }
 
 fn inject_dependencies(context: &mut Context, notification: &Notification, config: &Config) {
@@ -578,30 +553,14 @@ fn inject_dependencies(context: &mut Context, notification: &Notification, confi
         widgets::types::WidgetStyle::Image(display_config.image.clone().into()),
     );
 
-    // TODO: need to inject image!
-    // if let Some(image_data) = try_get_image_data(notification, display_config) {
-    //     context.inject(Banner::NOTIFICATION_IMAGE, image_data);
-    // }
-
     make_text_config!(for summary use context, display_config, colors, NOTIFICATION_SUMMARY);
-    // TODO: need to inject summary!
-    // context.inject(
-    //     Banner::NOTIFICATION_SUMMARY,
-    //     widgets::types::WidgetData::Text(notification.summary.clone()),
-    // );
-
     make_text_config!(for body use context, display_config, colors, NOTIFICATION_BODY);
-    // TODO: need to inject body!
-    // context.inject(
-    //     Banner::NOTIFICATION_BODY,
-    //     widgets::types::WidgetData::Text(notification.body.clone()),
-    // );
 }
 
-fn try_get_image_data(
+fn make_image_provider(
     notification: &Notification,
     display_config: &DisplayConfig,
-) -> Option<ImageProvider> {
+) -> ImageProvider {
     notification
         .hints
         .image_data
@@ -634,6 +593,7 @@ fn try_get_image_data(
                 sizes: display_config.icons.size.clone(),
             })
         })
+        .unwrap_or(ImageProvider::Unknown)
 }
 
 impl Tick for Banner {
@@ -643,42 +603,33 @@ impl Tick for Banner {
 
             ui_root.invalidate();
             ui_root.layout(None);
+
+            let banner_state = self.banner_state.as_ref().expect("It must be created!");
+            match ui_root
+                .get(banner_state.banner_phase)
+                .expect("Banner State must be created!")
+            {
+                BannerPhase::NotShown | BannerPhase::Closing => (),
+                BannerPhase::Shown => {
+                    let shown_at = ui_root
+                        .get(banner_state.shown_at)
+                        .expect("Time snapshot must be created!");
+
+                    if banner_state.timeout != 0
+                        && shown_at.elapsed().as_millis() >= banner_state.timeout
+                        && *ui_root.get(banner_state.visible_state).unwrap()
+                    {
+                        ui_root.set(banner_state.visible_state, false);
+                        ui_root.set(banner_state.banner_phase, BannerPhase::Closing);
+                    }
+                }
+                BannerPhase::Closed => {
+                    self.close_status.close_with(ClosingReason::Expired);
+                }
+            }
         }
     }
 }
-
-// impl Draw for Banner {
-//     // TODO: add `Result` type for these methods to handle possible errors
-//     fn draw_on(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
-//         // let Some(layout) = &self.base_layout else {
-//         //     return;
-//         // };
-//         let Some(layout) = &self.ui_root else {
-//             return;
-//         };
-//
-//         layout.draw_on(offset, drawer);
-//     }
-// }
-
-// impl Animated for Banner {
-//     fn is_finished(&self) -> bool {
-//         true
-//         // self.stage
-//         //     .as_ref()
-//         //     .is_none_or(|stage| stage.is_totally_finished())
-//     }
-//
-//     fn update(&mut self, delta_time_ns: u64) {
-//         // if let Some(stage) = self.stage.as_mut() {
-//         //     stage.update(delta_time_ns);
-//         //
-//         //     if stage.is_totally_finished() {
-//         //         self.close_status.close_with(ClosingReason::Expired);
-//         //     }
-//         // }
-//     }
-// }
 
 impl From<Notification> for Banner {
     fn from(value: Notification) -> Self {
@@ -696,191 +647,6 @@ pub(super) enum DrawState {
     Success,
     Failure,
 }
-
-// enum BannerStage {
-//     Allocation(Spacer<Increasing>),
-//     Appearing(AnimatedWidget),
-//     Showing {
-//         widget: Widget,
-//         created_at: time::Instant,
-//         timeout: notification::Timeout,
-//     },
-//     Disappearing(AnimatedWidget),
-//     Free(Spacer<Decreasing>),
-// }
-//
-// impl BannerStage {
-//     fn start(widget: Widget, notification: &Notification, config: &Config) -> Self {
-//         // TODO: some animations may require additional information about position or something
-//         // else. For instance, the slide animation which requires to have start and end positions.
-//         let max_height = widget.height();
-//         BannerStage::Allocation(Spacer::<Increasing>::new(
-//             widget,
-//             0.0,
-//             max_height,
-//             config
-//                 .display_by_app(&notification.app_name)
-//                 .animation
-//                 .allocation
-//                 .duration
-//                 .clone()
-//                 .into(),
-//         ))
-//     }
-//
-//     fn next(self, notification: &Notification, config: &Config) -> Option<Self> {
-//         match self {
-//             BannerStage::Allocation(Spacer { widget, .. }) => {
-//                 Some(BannerStage::Appearing(make_animated_widget(
-//                     widget,
-//                     config,
-//                     &config
-//                         .display_by_app(&notification.app_name)
-//                         .animation
-//                         .enter,
-//                 )))
-//             }
-//             BannerStage::Appearing(animated_widget) => Some(BannerStage::Showing {
-//                 widget: animated_widget.into_widget(),
-//                 created_at: time::Instant::now(),
-//                 timeout: notification.expire_timeout.clone(),
-//             }),
-//             BannerStage::Showing { widget, .. } => {
-//                 Some(BannerStage::Disappearing(make_animated_widget(
-//                     widget,
-//                     config,
-//                     &config.display_by_app(&notification.app_name).animation.exit,
-//                 )))
-//             }
-//             BannerStage::Disappearing(animated_widget) => {
-//                 let max_height = animated_widget.as_widget().height();
-//                 Some(BannerStage::Free(Spacer::<Decreasing>::new(
-//                     animated_widget.into_widget(),
-//                     0.0,
-//                     max_height,
-//                     config
-//                         .display_by_app(&notification.app_name)
-//                         .animation
-//                         .free
-//                         .duration
-//                         .clone()
-//                         .into(),
-//                 )))
-//             }
-//             BannerStage::Free(_) => None,
-//         }
-//     }
-//
-//     fn replace_widget(&mut self, new_widget: Widget) {
-//         match self {
-//             BannerStage::Allocation(spacer) => spacer.widget = new_widget,
-//             BannerStage::Appearing(animated_widget) => animated_widget.replace_widget(new_widget),
-//             BannerStage::Showing { widget, .. } => *widget = new_widget,
-//             BannerStage::Disappearing(animated_widget) => {
-//                 animated_widget.replace_widget(new_widget)
-//             }
-//             BannerStage::Free(spacer) => spacer.widget = new_widget,
-//         }
-//     }
-//
-//     fn update(&mut self, delta_time_ns: u64) {
-//         match self {
-//             BannerStage::Allocation(spacer) => spacer.update(delta_time_ns),
-//             BannerStage::Appearing(animated_widget) => animated_widget.update(delta_time_ns),
-//             BannerStage::Showing { .. } => (),
-//             BannerStage::Disappearing(animated_widget) => animated_widget.update(delta_time_ns),
-//             BannerStage::Free(spacer) => spacer.update(delta_time_ns),
-//         }
-//     }
-//
-//     fn reset_timeout(&mut self) {
-//         if let BannerStage::Showing {
-//             ref mut created_at, ..
-//         } = self
-//         {
-//             *created_at = time::Instant::now();
-//         }
-//     }
-//
-//     fn is_showing(&self) -> bool {
-//         matches!(self, BannerStage::Showing { .. })
-//     }
-//
-//     fn is_skipable(&self) -> bool {
-//         matches!(self, BannerStage::Showing { .. })
-//     }
-//
-//     fn is_current_finished(&self, notification: &Notification, config: &Config) -> bool {
-//         match self {
-//             BannerStage::Allocation(spacer) => spacer.is_finished(),
-//             BannerStage::Appearing(animated_widget) => animated_widget.is_finished(),
-//             BannerStage::Showing {
-//                 created_at,
-//                 timeout,
-//                 ..
-//             } => match timeout {
-//                 notification::Timeout::Millis(millis) => {
-//                     created_at.elapsed().as_millis() > *millis as u128
-//                 }
-//                 notification::Timeout::Configurable => {
-//                     let timeout = config
-//                         .display_by_app(&notification.app_name)
-//                         .timeout
-//                         .by_urgency(&notification.hints.urgency);
-//                     timeout != 0 && created_at.elapsed().as_millis() > timeout as u128
-//                 }
-//                 notification::Timeout::Never => false,
-//             },
-//             BannerStage::Disappearing(animated_widget) => animated_widget.is_finished(),
-//             BannerStage::Free(spacer) => spacer.is_finished(),
-//         }
-//     }
-//
-//     fn is_totally_finished(&self) -> bool {
-//         if let BannerStage::Free(spacer) = self {
-//             return spacer.is_finished();
-//         }
-//
-//         false
-//     }
-//
-//     fn width(&self) -> usize {
-//         match self {
-//             BannerStage::Allocation(spacer) => spacer.widget.width(),
-//             BannerStage::Appearing(animated_widget) => animated_widget.as_widget().width(),
-//             BannerStage::Showing { widget, .. } => widget.width(),
-//             BannerStage::Disappearing(animated_widget) => animated_widget.as_widget().width(),
-//             BannerStage::Free(spacer) => spacer.widget.width(),
-//         }
-//         .round() as usize
-//     }
-//
-//     fn height(&self) -> usize {
-//         match self {
-//             BannerStage::Allocation(spacer) => spacer.current_height,
-//             BannerStage::Appearing(animated_widget) => animated_widget.as_widget().height(),
-//             BannerStage::Showing { widget, .. } => widget.height(),
-//             BannerStage::Disappearing(animated_widget) => animated_widget.as_widget().height(),
-//             BannerStage::Free(spacer) => spacer.current_height,
-//         }
-//         .round() as usize
-//     }
-// }
-//
-// impl Draw for BannerStage {
-//     fn draw_on(&self, offset: &Offset<f32>, drawer: &mut Drawer) {
-//         match self {
-//             BannerStage::Appearing(animated_widget) => {
-//                 animated_widget.draw_with_offset(offset, drawer)
-//             }
-//             BannerStage::Showing { widget, .. } => widget.draw_on(offset, drawer),
-//             BannerStage::Disappearing(animated_widget) => {
-//                 animated_widget.draw_with_offset(offset, drawer)
-//             }
-//             BannerStage::Allocation(_) | BannerStage::Free(_) => (),
-//         }
-//     }
-// }
 
 #[derive(Default)]
 enum CloseStatus {
@@ -909,116 +675,29 @@ impl CloseStatus {
         }
     }
 }
-//
-// fn make_animated_widget(
-//     widget: Widget,
-//     config: &Config,
-//     animation_definition: &AnimationDefinition,
-// ) -> AnimatedWidget {
-//     let duration: Duration = animation_definition.duration.clone().into();
-//     let easing_type = animation_definition.easing.clone();
-//
-//     // TODO: better to use actual window size instead of fixed value when the dynamic adaptation by
-//     // width (by filled content).
-//     let (start_x, end_x) = if config.general().anchor.is_left() {
-//         (-500.0, 0.0)
-//     } else if config.general().anchor.is_right() {
-//         (500.0, 0.0)
-//     } else {
-//         warn!("Selected slide in/out animation for middle window which won't look normally!");
-//
-//         (500.0, 0.0)
-//     };
-//
-//     match animation_definition.style {
-//         AnimationStyle::FadeIn => widget.fade_in(duration, easing_type).into(),
-//         AnimationStyle::FadeOut => widget.fade_out(duration, easing_type).into(),
-//         AnimationStyle::PopIn => widget.pop_in(duration, easing_type).into(),
-//         AnimationStyle::PopOut => widget.pop_out(duration, easing_type).into(),
-//         AnimationStyle::SlideIn => widget
-//             .slide_horizontally(start_x, end_x, duration, easing_type)
-//             .into(),
-//         AnimationStyle::SlideOut => widget
-//             .slide_horizontally(end_x, start_x, duration, easing_type)
-//             .into(),
-//     }
-// }
-//
-// trait ChangeDirection {
-//     fn get_current_value(progress: f32, min: f32, max: f32) -> f32;
-// }
-//
-// struct Increasing;
-// struct Decreasing;
-//
-// impl ChangeDirection for Increasing {
-//     fn get_current_value(progress: f32, min: f32, max: f32) -> f32 {
-//         progress * (max - min)
-//     }
-// }
-//
-// impl ChangeDirection for Decreasing {
-//     fn get_current_value(progress: f32, min: f32, max: f32) -> f32 {
-//         (1.0 - progress) * (max - min)
-//     }
-// }
-//
-// struct Spacer<Direction: ChangeDirection> {
-//     widget: Widget,
-//
-//     min_height: f32,
-//     max_height: f32,
-//     current_height: f32,
-//
-//     elapsed_ns: u64,
-//     duration: Duration,
-//
-//     _marker: std::marker::PhantomData<Direction>,
-// }
-//
-// impl Spacer<Increasing> {
-//     fn new(widget: Widget, min_height: f32, max_height: f32, duration: Duration) -> Self {
-//         Self {
-//             widget,
-//             min_height,
-//             max_height,
-//             current_height: min_height,
-//             elapsed_ns: 0,
-//             duration,
-//             _marker: std::marker::PhantomData,
-//         }
-//     }
-// }
-//
-// impl Spacer<Decreasing> {
-//     fn new(widget: Widget, min_height: f32, max_height: f32, duration: Duration) -> Self {
-//         Self {
-//             widget,
-//             min_height,
-//             max_height,
-//             current_height: max_height,
-//             elapsed_ns: 0,
-//             duration,
-//             _marker: std::marker::PhantomData,
-//         }
-//     }
-// }
-//
-// impl<Direction: ChangeDirection> Spacer<Direction> {
-//     fn update(&mut self, delta_time_ns: u64) {
-//         if self.is_finished() {
-//             return;
-//         }
-//
-//         self.elapsed_ns += delta_time_ns;
-//         self.current_height = Direction::get_current_value(
-//             self.elapsed_ns as f32 / self.duration.as_nanos() as f32,
-//             self.min_height,
-//             self.max_height,
-//         )
-//     }
-//
-//     fn is_finished(&self) -> bool {
-//         self.elapsed_ns as u128 > self.duration.as_nanos()
-//     }
-// }
+
+fn correct_animation(
+    config: &Config,
+    mut animation_definition: AnimationDefinition,
+) -> AnimationDefinition {
+    if let AnimationKind::Translate(translate) = &mut animation_definition.kind {
+        const ADDITION: f32 = 50.0;
+        let max_banner_width = config.general().width as f32;
+        let horizontal_margin = config.general().offset.0 as f32;
+
+        let mut start = Point { x: 0.0, y: 0.0 };
+        let end = start;
+
+        if config.general().anchor.is_left() {
+            start.x = -(max_banner_width + horizontal_margin + ADDITION);
+        } else if config.general().anchor.is_right() {
+            start.x = max_banner_width + horizontal_margin + ADDITION;
+        } else {
+            warn!("Slide animation may work incorrectly at middle of screen!")
+        }
+
+        translate.update_path(start, end);
+    }
+
+    animation_definition
+}
