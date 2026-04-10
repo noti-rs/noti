@@ -215,6 +215,12 @@ struct EglState {
     context: EglContext,
 }
 
+impl AsRef<EglState> for EglState {
+    fn as_ref(&self) -> &EglState {
+        self
+    }
+}
+
 /// This application uses Skia as the primary module for drawing complex UI. To enable immediate
 /// surface creation, the `GrContext` must be persisted for the lifetime of the application.
 struct SkiaBackend {

@@ -75,8 +75,8 @@ pub(super) struct WindowState {
 
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
-    egl_window: WlEglSurface,
-    egl_surface: khronos_egl::Surface,
+    egl_window: Option<WlEglSurface>,
+    egl_surface: Option<khronos_egl::Surface>,
     egl_state: EglState,
 
     font_collection: skia_safe::textlayout::FontCollection,
@@ -143,7 +143,6 @@ impl Window {
 
         let (surface, layer_surface) = Self::make_surface(protocols, &event_queue.handle());
         let (pointer, cursor_device) = Self::make_pointer(protocols, &event_queue.handle());
-        let (egl_window, egl_surface) = Self::make_egl_surface(&surface, gpu, &actual_size)?;
 
         let (x_offset, y_offset) = config.general().offset;
         let margin = Margin::with_anchor(
@@ -169,8 +168,8 @@ impl Window {
 
             surface,
             layer_surface,
-            egl_window,
-            egl_surface,
+            egl_window: None,
+            egl_surface: None,
             egl_state: egl_state.clone(),
 
             font_collection,
@@ -308,17 +307,21 @@ impl Window {
     /// This allows the compositor to schedule the redraw at the correct time, ensuring smooth
     /// rendering with VSync.
     pub(super) fn frame(&mut self) {
-        self.state.surface.damage(0, 0, i32::MAX, i32::MAX);
-        self.state.surface.frame(&self.event_queue.handle(), ());
-        self.state.has_requested_frame = true;
-
-        debug!("Window: Requested a frame to the Wayland compositor");
+        if self.egl_surface.is_some() {
+            self.state.surface.damage(0, 0, i32::MAX, i32::MAX);
+            self.state.surface.frame(&self.event_queue.handle(), ());
+            self.state.has_requested_frame = true;
+            debug!("Window: Requested a frame to the Wayland compositor");
+        }
     }
 
     /// Sends a `commit` message to the Wayland compositor to apply previously requested actions.
     pub(super) fn commit(&self, wp_presentation: &wp_presentation::WpPresentation) {
         self.state.surface.commit();
-        wp_presentation.feedback(&self.state.surface, &self.event_queue.handle(), ());
+
+        if self.egl_surface.is_some() {
+            wp_presentation.feedback(&self.state.surface, &self.event_queue.handle(), ());
+        }
         debug!("Window: Commited")
     }
 
@@ -430,11 +433,58 @@ impl WindowState {
         }
     }
 
+    fn draw_surface(&mut self) {
+        self.has_requested_frame = false;
+
+        self.use_current_egl_surface()
+            .expect("The EGL surface must be available to make current and use it");
+
+        // TODO: correctly resize for specific animation
+        let gap = self.config.general().gap as usize;
+        let logical_size = Extent::new(
+            self.banner_stack.width(),
+            self.banner_stack.total_height_with_gap(gap),
+        );
+        self.resize(logical_size);
+
+        let mut sk_surface = self
+            .create_drawing_surface()
+            .expect("The skia's surface must be correct and created without issues");
+        sk_surface.canvas().clear(Color::from_argb(0, 0, 0, 0));
+
+        let mut offset = Offset::new(self.margin.left, self.margin.top);
+        let writer = |banner: &Banner| {
+            banner.draw(&offset.into(), &mut sk_surface);
+            offset.y += banner.height() + gap;
+        };
+
+        if self.config.general().anchor.is_top() {
+            self.banner_stack.banners().for_each(writer)
+        } else {
+            self.banner_stack.banners().rev().for_each(writer)
+        }
+
+        self.gr_context
+            .flush_and_submit_surface(&mut sk_surface, skia_safe::gpu::SyncCpu::No);
+
+        if let Some(egl_surface) = self.egl_surface {
+            self.egl_state
+                .instance
+                .swap_interval(self.egl_state.display, 0)
+                .and_then(|_| {
+                    self.egl_state
+                        .instance
+                        .swap_buffers(self.egl_state.display, egl_surface)
+                })
+                .expect("The buffer swapping must be errorless");
+        }
+    }
+
     fn use_current_egl_surface(&self) -> anyhow::Result<()> {
         if let Err(err) = self.egl_state.instance.make_current(
             self.egl_state.display,
-            Some(self.egl_surface),
-            Some(self.egl_surface),
+            self.egl_surface,
+            self.egl_surface,
             Some(self.egl_state.context),
         ) {
             anyhow::bail!(err);
@@ -486,7 +536,9 @@ impl WindowState {
         let Extent { width, height } = self.actual_size;
         self.layer_surface.set_size(width as u32, height as u32);
         let (dx, dy) = (0, 0);
-        self.egl_window.resize(width as i32, height as i32, dx, dy);
+        if let Some(egl_window) = &self.egl_window {
+            egl_window.resize(width as i32, height as i32, dx, dy);
+        }
 
         debug!(
             "Window: Resized to width - {}, height - {}",
@@ -502,12 +554,14 @@ impl WindowState {
         self.surface.destroy();
         self.cursor_device.destroy();
         self.pointer.release();
-        if let Err(err) = self
-            .egl_state
-            .instance
-            .destroy_surface(self.egl_state.display, self.egl_surface)
-        {
-            error!("Failed to destroy EGL surface! Further application work won't guaranteed to be normal! Error: {err}.")
+        if let Some(egl_surface) = self.egl_surface {
+            if let Err(err) = self
+                .egl_state
+                .instance
+                .destroy_surface(self.egl_state.display, egl_surface)
+            {
+                error!("Failed to destroy EGL surface! Further application work won't guaranteed to be normal! Error: {err}.")
+            }
         }
     }
 }
@@ -737,52 +791,7 @@ impl Dispatch<WlCallback, ()> for WindowState {
         _qhandle: &QueueHandle<Self>,
     ) {
         if let wayland_client::protocol::wl_callback::Event::Done { .. } = event {
-            state.has_requested_frame = false;
-
-            state
-                .use_current_egl_surface()
-                .expect("The EGL surface must be available to make current and use it");
-
-            // TODO: correctly resize for specific animation
-            let gap = state.config.general().gap as usize;
-            let logical_size = Extent::new(
-                state.banner_stack.width(),
-                state.banner_stack.total_height_with_gap(gap),
-            );
-            state.resize(logical_size);
-
-            let mut sk_surface = state
-                .create_drawing_surface()
-                .expect("The skia's surface must be correct and created without issues");
-            sk_surface.canvas().clear(Color::from_argb(0, 0, 0, 0));
-
-            let mut offset = Offset::new(state.margin.left, state.margin.top);
-            let writer = |banner: &Banner| {
-                banner.draw(&offset.into(), &mut sk_surface);
-                offset.y += banner.height() + gap;
-            };
-
-            if state.config.general().anchor.is_top() {
-                state.banner_stack.banners().for_each(writer)
-            } else {
-                state.banner_stack.banners().rev().for_each(writer)
-            }
-
-            state
-                .gr_context
-                .flush_and_submit_surface(&mut sk_surface, skia_safe::gpu::SyncCpu::No);
-
-            state
-                .egl_state
-                .instance
-                .swap_interval(state.egl_state.display, 0)
-                .and_then(|_| {
-                    state
-                        .egl_state
-                        .instance
-                        .swap_buffers(state.egl_state.display, state.egl_surface)
-                })
-                .expect("The buffer swapping must be errorless");
+            state.draw_surface();
         }
     }
 }
@@ -886,6 +895,16 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for WindowState {
             if width != 0 || height != 0 {
                 state.actual_size.width = width as usize;
                 state.actual_size.height = height as usize;
+            }
+
+            if state.egl_surface.is_none() {
+                let (egl_window, egl_surface) =
+                    Window::make_egl_surface(&state.surface, &state.egl_state, &state.actual_size)
+                        .unwrap();
+
+                state.egl_window = Some(egl_window);
+                state.egl_surface = Some(egl_surface);
+                state.draw_surface();
             }
 
             state.configuration_state = ConfigurationState::Configured;
