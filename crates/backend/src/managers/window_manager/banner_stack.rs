@@ -503,7 +503,7 @@ fn set_styles<C: SetStyleClass>(context: &mut C, notification: &Notification, co
     let colors = theme.by_urgency(&notification.hints.urgency);
 
     context.set_style_class(
-        Banner::NOTIFICATION_ANIMATED_VISIBILITY, 
+        Banner::NOTIFICATION_ANIMATED_VISIBILITY,
         widgets::types::WidgetStyle::AnimatedVisibility(make_style! {
             AnimatedVisibilityStyle {
                 primary_animation: correct_animation(config, display_config.animation.primary.clone().into()),

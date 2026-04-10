@@ -2,7 +2,10 @@ use std::collections::HashSet;
 
 use crate::{
     types::WidgetId,
-    widget::{animated_visibility::AnimatedVisibilityStyle, container::ContainerStyle, image::ImageStyle, text::TextStyle},
+    widget::{
+        animated_visibility::AnimatedVisibilityStyle, container::ContainerStyle, image::ImageStyle,
+        text::TextStyle,
+    },
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

@@ -82,6 +82,7 @@ pub(super) struct WindowState {
     font_collection: skia_safe::textlayout::FontCollection,
     gr_context: skia_safe::gpu::DirectContext,
     config: Data<Config, Borrowed>,
+    #[allow(unused)]
     cached_layouts: Data<CachedData<PathBuf, CachedLayout>, Borrowed>,
 
     pointer: WlPointer,
@@ -741,7 +742,6 @@ impl Dispatch<WlCallback, ()> for WindowState {
             state
                 .use_current_egl_surface()
                 .expect("The EGL surface must be available to make current and use it");
-
 
             // TODO: correctly resize for specific animation
             let gap = state.config.general().gap as usize;

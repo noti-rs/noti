@@ -19,6 +19,7 @@ impl CachedLayout {
     ///
     /// The layout may not exist if the file path is invalid, the file is missing, or any other
     /// error occurs while loading.
+    #[allow(unused)]
     pub(super) fn layout(&self) -> Option<&Widget> {
         self.layout.as_ref()
     }

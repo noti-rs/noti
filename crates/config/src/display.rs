@@ -3,7 +3,11 @@ use std::{collections::HashMap, marker::PhantomData, path::PathBuf, time::Durati
 use dbus::notification::Urgency;
 use macros::ConfigProperty;
 use serde::{de::Visitor, Deserialize};
-use widgets::{animations::{AnimationKind, Fade, Pop, Translate}, make_style, widget::ImageStyle};
+use widgets::{
+    animations::{AnimationKind, Fade, Pop, Translate},
+    make_style,
+    widget::ImageStyle,
+};
 
 use crate::{
     public,
@@ -290,7 +294,7 @@ impl Default for ImageProperty {
 
 impl From<ImageProperty> for ImageStyle {
     fn from(value: ImageProperty) -> Self {
-        make_style!{
+        make_style! {
             ImageStyle {
                 rounding: value.rounding,
                 margin: value.margin.into(),

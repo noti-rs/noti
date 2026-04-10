@@ -201,7 +201,8 @@ where
         let mut dirty_flags = context.get_dirty_flags(self.id);
 
         if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
-            if let Some(WidgetStyle::AnimatedVisibility(av_style)) = context.get_style(&self.class) {
+            if let Some(WidgetStyle::AnimatedVisibility(av_style)) = context.get_style(&self.class)
+            {
                 self.configure(av_style.clone());
 
                 dirty_flags |= DirtyFlags::NEEDS_MEASURE;
