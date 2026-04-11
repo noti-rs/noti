@@ -100,7 +100,7 @@ pub(super) struct WindowState {
 /// immediately. Until the compositor provides them, further resource management would be invalid,
 /// so this state helps track and wait for permission before continuing.
 pub(super) enum ConfigurationState {
-    NotConfiured,
+    NotConfigured,
     Configured,
 }
 
@@ -183,10 +183,10 @@ impl Window {
 
             has_requested_frame: false,
             last_presented_time_ns: None,
-            configuration_state: ConfigurationState::NotConfiured,
+            configuration_state: ConfigurationState::NotConfigured,
         };
 
-        while let ConfigurationState::NotConfiured = state.configuration_state {
+        while let ConfigurationState::NotConfigured = state.configuration_state {
             event_queue.blocking_dispatch(&mut state)?;
         }
 
