@@ -528,8 +528,10 @@ where
     C: DispatchContext<f32>,
 {
     fn dispatch_event(&mut self, context: &mut C, event: Event) {
-        if matches!(event.kind, crate::events::EventKind::MouseHover) && self.on_hover.is_some() {
-            (self.on_hover.as_mut().unwrap())(ScopedContext::new(context), ())
+        if matches!(event.kind, crate::events::EventKind::MouseHover) {
+            if let Some(on_hover) = self.on_hover.as_mut() {
+                on_hover(ScopedContext::new(context), ())
+            }
         }
 
         if let Some(child) = &mut self.child {

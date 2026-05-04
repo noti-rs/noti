@@ -68,9 +68,6 @@
                 freetype
                 fontconfig
                 llvmPackages_21.libllvm
-                python314
-                ninja
-                gn
               ]
               ++ additionalPackages
             );
@@ -80,11 +77,13 @@
               with pkgs;
               [
                 pkg-config
+
                 wayland
                 libGL
                 freetype
                 fontconfig
                 llvmPackages_21.libllvm
+
                 python314
                 ninja
                 gn
@@ -125,53 +124,54 @@
               }
             );
 
+            craneLib = toolchain: (crane.mkLib pkgs).overrideToolchain toolchain;
+
+            unfilteredRoot = ./.;
+
+            appSrc =
+              toolchain:
+              pkgs.lib.fileset.toSource {
+                root = unfilteredRoot;
+                fileset = pkgs.lib.fileset.unions [
+                  ((craneLib toolchain).fileset.commonCargoSources unfilteredRoot)
+                  ./crates/filetype/src/layout.pest
+                ];
+              };
+
+            appCommonArgs = toolchain: {
+              src = appSrc toolchain;
+              strictDeps = true;
+
+              buildInputs = buildInputsWith [
+                toolchain
+
+              ];
+              nativeBuildInputs = nativeBuildInputsWith [
+                toolchain
+                pkgs.makeWrapper
+              ];
+
+              SKIA_BINARIES_URL = "file://${skiaAsset}";
+              SKIA_GN_COMMAND = "${pkgs.gn}/bin/gn";
+              SKIA_NINJA_COMMAND = "${pkgs.ninja}/bin/ninja";
+              LD_LIBRARY_PATH = LD_LIBRARY_PATH;
+              RUSTFLAGS = "-L ${pkgs.libGL}/lib -lGL";
+            };
+            appCargoArtifacts = toolchain: (craneLib toolchain).buildDepsOnly (appCommonArgs toolchain);
+
             buildNotiApplication = (
-              rustToolchain:
+              toolchain:
               let
-                craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-
-                unfilteredRoot = ./.;
-                src = pkgs.lib.fileset.toSource {
-                  root = unfilteredRoot;
-                  fileset = pkgs.lib.fileset.unions [
-                    (craneLib.fileset.commonCargoSources unfilteredRoot)
-                    ./crates/filetype/src/layout.pest
-                  ];
-                };
-
-                commonArgs = {
-                  inherit src;
-                  strictDeps = true;
-
-                  buildInputs = buildInputsWith [
-                    rustToolchain
-
-                  ];
-                  nativeBuildInputs = nativeBuildInputsWith [
-                    rustToolchain
-                    pkgs.makeWrapper
-                  ];
-
-                  SKIA_BINARIES_URL = "file://${skiaAsset}";
-                  SKIA_GN_COMMAND = "${pkgs.gn}/bin/gn";
-                  SKIA_NINJA_COMMAND = "${pkgs.ninja}/bin/ninja";
-                  LD_LIBRARY_PATH = LD_LIBRARY_PATH;
-                };
-
-                cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-
                 cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
                 selectedSkiaVersion = cargoToml.workspace.dependencies.skia-safe.version or "unknown";
               in
               assert pkgs.lib.assertMsg (
                 skiaVersion == selectedSkiaVersion
               ) "SKIA VERSION MISMATCH: URL does not contain version ${skiaVersion}!";
-              craneLib.buildPackage (
-                commonArgs
+              (craneLib toolchain).buildPackage (
+                (appCommonArgs toolchain)
                 // {
-                  inherit cargoArtifacts;
-
-                  RUSTFLAGS = "-L ${pkgs.libGL}/lib -lGL";
+                  cargoArtifacts = appCargoArtifacts toolchain;
 
                   postInstall = ''
                     wrapProgram $out/bin/noti --prefix LD_LIBRARY_PATH : "${LD_LIBRARY_PATH}"
@@ -190,10 +190,35 @@
               default = buildNotiApplication rustToolchain;
               nightly = buildNotiApplication rustNightlyToolchain;
             };
+
+            checks = {
+              build = self.packages."${system}".default;
+
+              noti-test = (craneLib rustToolchain).cargoNextest (
+                (appCommonArgs rustToolchain)
+                // {
+                  cargoArtifacts = appCargoArtifacts rustToolchain;
+                  cargoNextestExtraArgs = "--workspace";
+                }
+              );
+
+              noti-clippy = (craneLib rustToolchain).cargoClippy (
+                (appCommonArgs rustToolchain)
+                // {
+                  cargoArtifacts = appCargoArtifacts rustToolchain;
+                  cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+                }
+              );
+
+              noti-fmt = (craneLib rustToolchain).cargoFmt {
+                src = appSrc rustToolchain;
+              };
+            };
           }
         ))
         devShells
         packages
+        checks
         ;
 
       homeModules.default =
