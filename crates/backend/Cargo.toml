@@ -21,6 +21,7 @@ async-channel.workspace = true
 log.workspace = true
 humantime.workspace = true
 tempfile.workspace = true
+skia-safe.workspace = true
 
 derive_builder = "0.20.0"
 wayland-client = "0.31.14"
@@ -30,5 +31,4 @@ indexmap = "2.4.0"
 chrono = "0.4.39"
 libc = { version = "0.2.174", optional = true }
 wayland-egl = "0.32.11"
-skia-safe = { version = "0.87.0", features = ["gl", "textlayout"] }
 khronos-egl = { version = "6.0.0", features = ["static"] }
