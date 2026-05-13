@@ -427,16 +427,20 @@ impl Measure<f32, WidgetId> for FlexContainer {
             }
         }
 
-        let intrinsic = match self.direction {
-            Direction::Horizontal => measure::Intrinsic::new(
-                Extent::new(main_min_intrinsic, cross_min_intrinsic) + spacing_size,
-                Extent::new(main_max_intrinsic, cross_max_intrinsic) + spacing_size,
-            ),
-            Direction::Vertical => measure::Intrinsic::new(
-                Extent::new(cross_min_intrinsic, main_min_intrinsic) + spacing_size,
-                Extent::new(cross_max_intrinsic, main_max_intrinsic) + spacing_size,
-            ),
+        let max_intrinsic = FlexExtent {
+            main: main_max_intrinsic,
+            cross: cross_max_intrinsic,
         };
+
+        let min_intrinsic = FlexExtent {
+            main: main_min_intrinsic,
+            cross: cross_min_intrinsic,
+        };
+
+        let intrinsic = measure::Intrinsic::new(
+            min_intrinsic.to_normal(&self.direction) + spacing_size,
+            max_intrinsic.to_normal(&self.direction) + spacing_size,
+        );
 
         context.save(self.id, intrinsic);
         intrinsic

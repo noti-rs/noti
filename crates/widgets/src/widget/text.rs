@@ -446,8 +446,12 @@ impl Measure<f32, WidgetId> for Text {
             return measure::Intrinsic::new(spacing_size, spacing_size);
         };
 
+        /// The Paragraph from skia has some rounding error and because of this text wraps in not
+        /// desired manner. We should explicitly round and make the max intrinsic larger to avoid
+        /// this case.
+        const EPSILON: f32 = 1.0;
         let min_width = paragraph.min_intrinsic_width();
-        let max_width = paragraph.max_intrinsic_width();
+        let max_width = paragraph.max_intrinsic_width().ceil() + EPSILON;
 
         let min_height = {
             paragraph.layout(max_width);
@@ -497,7 +501,7 @@ impl Measure<f32, WidgetId> for Text {
 
         let width = constraints.max.width - spacing_size.width;
         paragraph.layout(width);
-        let height = paragraph.height() + spacing_size.height;
+        let height = paragraph.height();
 
         let max_intrinsic_width = paragraph.max_intrinsic_width();
         paragraph.layout(max_intrinsic_width);
@@ -735,7 +739,8 @@ where
         // cannot determine once the position. Especially when a banner moves from one place to
         // another.
 
-        let inner_extent = provided_extent.shrink_to_with(&self.margin.unwrap_or_default());
+        let inner_spacing = self.margin.unwrap_or_default();
+        let inner_extent = provided_extent.shrink_to_with(&inner_spacing);
         if inner_extent.width <= 0.0 || inner_extent.height <= 0.0 {
             return;
         }
@@ -753,8 +758,8 @@ where
         let mut paint = skia_safe::Paint::default();
         paint.use_color(
             &self.color.clone().unwrap_or_default(),
-            *offset,
-            provided_extent,
+            *offset + Offset::new(inner_spacing.left as f32, inner_spacing.top as f32),
+            inner_extent,
         );
 
         base_text_style.set_foreground_paint(&paint);
@@ -764,7 +769,7 @@ where
         } else {
             self.build_paragraph(&base_text_style, Self::MAX_LINES)
         };
-        paragraph.layout(provided_extent.width);
+        paragraph.layout(inner_extent.width);
 
         let canvas = drawer.surface.canvas();
 
