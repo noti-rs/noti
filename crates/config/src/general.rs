@@ -11,8 +11,6 @@ public! {
     #[derive(ConfigProperty, Debug)]
     #[cfg_prop(name(TomlGeneralConfig), derive(Debug, Default, Deserialize, Clone))]
     struct GeneralConfig {
-        font: Font,
-
         #[cfg_prop(default(300))]
         width: u16,
         #[cfg_prop(default(150))]
@@ -22,6 +20,9 @@ public! {
         offset: (u8, u8),
         #[cfg_prop(default(10))]
         gap: u8,
+
+        #[cfg_prop(use_type(DebugTomlConfig), mergeable)]
+        debug: DebugConfig,
 
         sorting: Sorting,
 
@@ -60,28 +61,6 @@ impl Default for IdleThreshold {
             duration: humantime::parse_duration("5 min")
                 .expect("The default duration must be valid")
                 .as_millis() as u32,
-        }
-    }
-}
-
-public! {
-    #[derive(Debug, Deserialize, Clone)]
-    #[serde(from = "String")]
-    struct Font {
-        name: String,
-    }
-}
-
-impl From<String> for Font {
-    fn from(name: String) -> Self {
-        Font { name }
-    }
-}
-
-impl Default for Font {
-    fn default() -> Self {
-        Font {
-            name: "Noto Sans".to_string(),
         }
     }
 }
@@ -145,5 +124,19 @@ impl From<String> for Anchor {
                 Used: {other}"
             ),
         }
+    }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(DebugTomlConfig), derive(Debug, Default, Deserialize, Clone))]
+    struct DebugConfig {
+        /// Shows bounds of each UI component. There's two outlines:
+        /// + Dashed Magenta — provided extent for UI component, may be bigger than actual content
+        /// + Solid Green — actual extent of UI component
+        ///
+        /// Dashed Magenta and Solid Green may matches at some or all sides. And for this Solid
+        /// Green is slightly transparent to show the Dashed Magenta below it.
+        show_layout_bounds: bool,
     }
 }

@@ -130,6 +130,11 @@ By description of issue the `GenericBuilder` derive macro was written (below we'
 call GBuilder instead of GenericBuilder for brevity). Currently this macro have 3
 attributes:
 
+> [!NOTE]
+> There's some modification with `Option<T>`. If field have `Option<T>` type, then
+> it leaves as is and does not doubles `Option<T>`. Just a small note, it won't change
+> globally the behavior of building.
+
 For struct:
 
 - `#[gbuilder(name(GBuilderStruct))]` - it's neccessary attribute from which the macro

@@ -1,9 +1,13 @@
-use std::{collections::HashMap, marker::PhantomData, path::PathBuf};
+use std::{collections::HashMap, marker::PhantomData, path::PathBuf, time::Duration};
 
 use dbus::notification::Urgency;
-use macros::{ConfigProperty, GenericBuilder};
+use macros::ConfigProperty;
 use serde::{de::Visitor, Deserialize};
-use shared::{error::ConversionError, value::TryFromValue};
+use widgets::{
+    animations::{AnimationKind, Fade, Pop, Translate},
+    make_style,
+    widget::ImageStyle,
+};
 
 use crate::{
     public,
@@ -16,6 +20,9 @@ public! {
     #[cfg_prop(name(TomlDisplayConfig), derive(Debug, Deserialize, Default, Clone))]
     struct DisplayConfig {
         layout: Layout,
+
+        #[cfg_prop(use_type(AnimationProperty), mergeable)]
+        animation: Animation,
 
         theme: String,
 
@@ -98,6 +105,164 @@ impl From<String> for Layout {
 
 public! {
     #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(AnimationProperty), derive(Debug, Deserialize, Clone, Default))]
+    struct Animation {
+        #[cfg_prop(
+            use_type(AnimationDefinitionProperty),
+            mergeable,
+            default(path = AnimationDefinitionProperty::default_primary)
+        )]
+        primary: AnimationDefinition,
+
+        #[cfg_prop(
+            use_type(AnimationDefinitionProperty),
+            mergeable,
+            default(path = AnimationDefinitionProperty::default_secondary)
+        )]
+        secondary: AnimationDefinition,
+
+        #[cfg_prop(
+            use_type(SpatialChangeDefinitionProperty),
+            mergeable,
+            default
+        )]
+        primary_spatial_change: SpatialChangeDefinition,
+
+        #[cfg_prop(
+            use_type(SpatialChangeDefinitionProperty),
+            mergeable,
+            default
+        )]
+        secondary_spatial_change: SpatialChangeDefinition,
+    }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug, Clone)]
+    #[cfg_prop(name(SpatialChangeDefinitionProperty), derive(Debug, Deserialize, Clone))]
+    struct SpatialChangeDefinition {
+        easing: EasingType,
+        duration: AnimationDuration,
+    }
+}
+
+impl Default for SpatialChangeDefinitionProperty {
+    fn default() -> Self {
+        Self {
+            easing: Some(EasingType::EaseInOut),
+            duration: Some(AnimationDuration(Duration::from_secs_f32(0.15))),
+        }
+    }
+}
+
+impl From<SpatialChangeDefinition>
+    for widgets::widget::animated_visibility::SpatialChangeDefinition
+{
+    fn from(value: SpatialChangeDefinition) -> Self {
+        Self {
+            easing: value.easing.into(),
+            duration: value.duration.0,
+        }
+    }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug, Clone)]
+    #[cfg_prop(name(AnimationDefinitionProperty), derive(Debug, Deserialize, Clone, Default))]
+    struct AnimationDefinition {
+        style:  AnimationStyle,
+        easing: EasingType,
+        duration: AnimationDuration,
+    }
+}
+
+impl AnimationDefinitionProperty {
+    fn default_primary() -> Self {
+        Self {
+            style: Some(AnimationStyle::Fade),
+            easing: Some(EasingType::EaseInOut),
+            duration: Some(AnimationDuration(Duration::from_secs_f32(0.5))),
+        }
+    }
+
+    fn default_secondary() -> Self {
+        Self {
+            style: Some(AnimationStyle::Fade),
+            easing: Some(EasingType::EaseInOut),
+            duration: Some(AnimationDuration(Duration::from_secs_f32(0.5))),
+        }
+    }
+}
+
+impl From<AnimationDefinition> for widgets::widget::animated_visibility::AnimationDefinition {
+    fn from(value: AnimationDefinition) -> Self {
+        Self {
+            kind: value.style.into(),
+            easing: value.easing.into(),
+            duration: value.duration.0,
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct AnimationDuration(#[serde(with = "humantime_serde")] Duration);
+
+impl From<AnimationDuration> for Duration {
+    fn from(value: AnimationDuration) -> Self {
+        value.0
+    }
+}
+
+impl Default for AnimationDuration {
+    fn default() -> Self {
+        Self(Duration::from_secs_f32(0.5))
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub enum AnimationStyle {
+    #[default]
+    #[serde(rename = "fade")]
+    Fade,
+    #[serde(rename = "pop")]
+    Pop,
+    #[serde(rename = "slide")]
+    Slide,
+}
+
+impl From<AnimationStyle> for AnimationKind {
+    fn from(value: AnimationStyle) -> Self {
+        match value {
+            AnimationStyle::Fade => AnimationKind::Fade(Fade::new()),
+            AnimationStyle::Pop => AnimationKind::Pop(Pop::new()),
+            AnimationStyle::Slide => AnimationKind::Translate(Translate::default()),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub enum EasingType {
+    #[serde(rename = "linear")]
+    Linear,
+    #[serde(rename = "ease-out")]
+    EaseOut,
+    #[default]
+    #[serde(rename = "ease-in-out")]
+    EaseInOut,
+}
+
+impl From<EasingType> for widgets::animations::Easing {
+    fn from(value: EasingType) -> Self {
+        match value {
+            EasingType::Linear => widgets::animations::Easing::Linear,
+            EasingType::EaseOut => widgets::animations::Easing::EaseOut,
+            EasingType::EaseInOut => widgets::animations::Easing::EaseInOut,
+        }
+    }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug)]
     #[cfg_prop(name(IconInfoProperty), derive(Debug, Deserialize, Clone, Default))]
     struct IconInfo {
         #[cfg_prop(default("Adwaita".to_string()))]
@@ -109,23 +274,15 @@ public! {
 }
 
 public! {
-    #[derive(ConfigProperty, GenericBuilder, Debug, Clone)]
+    #[derive(ConfigProperty, Debug, Clone)]
     #[cfg_prop(name(TomlImageProperty), derive(Debug, Clone, Default, Deserialize))]
-    #[gbuilder(name(GBuilderImageProperty), derive(Clone))]
     struct ImageProperty {
-        #[cfg_prop(default(64))]
-        #[gbuilder(default(64))]
-        max_size: u16,
-
         #[cfg_prop(default(0))]
-        #[gbuilder(default(0))]
         rounding: u16,
-
-        #[gbuilder(default)]
         margin: Spacing,
-
-        #[gbuilder(default)]
         resizing_method: ResizingMethod,
+        mipmap_mode: MipmapMode,
+        fit_mode: FitMode,
     }
 }
 
@@ -135,55 +292,94 @@ impl Default for ImageProperty {
     }
 }
 
-impl TryFromValue for ImageProperty {}
+impl From<ImageProperty> for ImageStyle {
+    fn from(value: ImageProperty) -> Self {
+        make_style! {
+            ImageStyle {
+                rounding: value.rounding,
+                margin: value.margin.into(),
+                resizing_method: value.resizing_method.into(),
+                mipmap_mode: value.mipmap_mode.into(),
+                fit_mode: value.fit_mode.into(),
+            }
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, Default, Clone)]
 pub enum ResizingMethod {
     #[serde(rename = "nearest")]
     Nearest,
-    #[serde(rename = "triangle")]
-    Triangle,
-    #[serde(rename = "catmull-rom")]
-    CatmullRom,
     #[default]
-    #[serde(rename = "gaussian")]
-    Gaussian,
-    #[serde(rename = "lanczos3")]
-    Lanczos3,
+    #[serde(rename = "linear")]
+    Linear,
 }
 
-impl TryFromValue for ResizingMethod {
-    fn try_from_string(value: String) -> Result<Self, ConversionError> {
-        Ok(match value.to_lowercase().as_str() {
-            "nearest" => ResizingMethod::Nearest,
-            "triangle" => ResizingMethod::Triangle,
-            "catmull-rom" | "catmull_rom" => ResizingMethod::CatmullRom,
-            "gaussian" => ResizingMethod::Gaussian,
-            "lanczos3" => ResizingMethod::Lanczos3,
-            _ => Err(shared::error::ConversionError::InvalidValue {
-                expected: "nearest, triangle, gaussian, lanczos3, catmull-rom or catmull_rom",
-                actual: value,
-            })?,
-        })
+impl From<ResizingMethod> for widgets::widget::ResizingMethod {
+    fn from(value: ResizingMethod) -> Self {
+        match value {
+            ResizingMethod::Nearest => widgets::widget::ResizingMethod::Nearest,
+            ResizingMethod::Linear => widgets::widget::ResizingMethod::Linear,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub enum MipmapMode {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "nearest")]
+    Nearest,
+    #[default]
+    #[serde(rename = "linear")]
+    Linear,
+}
+
+impl From<MipmapMode> for widgets::widget::MipmapMode {
+    fn from(value: MipmapMode) -> Self {
+        match value {
+            MipmapMode::None => widgets::widget::MipmapMode::None,
+            MipmapMode::Nearest => widgets::widget::MipmapMode::Nearest,
+            MipmapMode::Linear => widgets::widget::MipmapMode::Linear,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub enum FitMode {
+    #[default]
+    #[serde(rename = "contain")]
+    Contain,
+    #[serde(rename = "cover")]
+    Cover,
+    #[serde(rename = "fill")]
+    Fill,
+    #[serde(rename = "scale-down")]
+    ScaleDown,
+}
+
+impl From<FitMode> for widgets::widget::FitMode {
+    fn from(value: FitMode) -> Self {
+        match value {
+            FitMode::Contain => widgets::widget::FitMode::Contain,
+            FitMode::Cover => widgets::widget::FitMode::Cover,
+            FitMode::Fill => widgets::widget::FitMode::Fill,
+            FitMode::ScaleDown => widgets::widget::FitMode::ScaleDown,
+        }
     }
 }
 
 public! {
-    #[derive(ConfigProperty, GenericBuilder, Debug, Default, Clone)]
+    #[derive(ConfigProperty, Debug, Default, Clone)]
     #[cfg_prop(name(TomlBorder), derive(Debug, Clone, Default, Deserialize))]
-    #[gbuilder(name(GBuilderBorder), derive(Clone))]
     struct Border {
         #[cfg_prop(default(0))]
-        #[gbuilder(default(0))]
-        size: u8,
+        size: u32,
 
         #[cfg_prop(default(0))]
-        #[gbuilder(default(0))]
-        radius: u8,
+        radius: u32,
     }
 }
-
-impl TryFromValue for Border {}
 
 #[derive(Debug, Default, Clone)]
 pub struct Timeout {

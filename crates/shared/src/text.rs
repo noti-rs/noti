@@ -2,18 +2,66 @@ use log::warn;
 use std::collections::HashMap;
 use unic_segment;
 
-#[derive(Debug, PartialEq, Eq)]
+use crate::value::TryFromValue;
+
+/// Represents text that may contain HTML entities.
+///
+/// This structure allows the text content and its HTML entities to be stored and processed
+/// separately, making it easier to parse, escape, or render the content safely and consistently.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Text {
     pub body: String,
     pub entities: Vec<Entity>,
 }
 
 impl Text {
+    /// Creates an empty text.
+    pub fn new_empty() -> Self {
+        Self {
+            body: "".to_owned(),
+            entities: vec![],
+        }
+    }
+
+    /// Parses the input text, escaping HTML entities and extracting style information.
+    ///
+    /// This ensures that the resulting text is safe to render and that any supported
+    /// formatting (e.g., `<b>`, `<i>`, `<u>`) is preserved in a structured form.
+    ///
+    /// Unmatched tags are considered invalid and will be removed during parsing.
     pub fn parse(input: String) -> Self {
         Parser::new(&input).parse()
     }
 }
 
+impl From<String> for Text {
+    fn from(value: String) -> Self {
+        Self {
+            body: value,
+            entities: vec![],
+        }
+    }
+}
+
+impl Default for Text {
+    fn default() -> Self {
+        Self::new_empty()
+    }
+}
+
+impl TryFromValue for Text {
+    fn try_from_string(value: String) -> Result<Self, crate::error::ConversionError> {
+        Ok(Text::parse(value))
+    }
+}
+
+/// Helper struct for parsing input text, escaping HTML entities, and extracting style information.
+///
+/// This allows the text to be safely rendered while preserving supported formatting
+/// (e.g., bold, italic, underline) in a structured way.
+///
+/// To parse text correctly, this struct uses [unic_segment::GraphemeCursor] instead of manual
+/// byte or char management, because multiple chars can combine into a single grapheme for display.
 struct Parser<'a> {
     input: &'a str,
     body: String,
@@ -93,6 +141,14 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Attempts to parse an HTML entity starting at the current cursor position.
+    ///
+    /// HTML entities begin with an ampersand ('&'), followed by hexadecimal digits,
+    /// and end with a semicolon (';').
+    ///
+    /// If a valid entity is found, the method returns the position after the entity.
+    /// Otherwise, `None` is returned, and the cursor remains unchanged; the caller
+    /// is responsible for advancing the cursor.
     fn try_handle_html_entity(&mut self, start_byte_pos: usize) -> Option<usize> {
         // The pattern of html entities used here:
         // https://stackoverflow.com/questions/26127775/remove-html-entities-and-extract-text-content-using-regex
@@ -174,6 +230,17 @@ impl<'a> Parser<'a> {
         Some(self.cursor.cur_cursor())
     }
 
+    /// Attempts to parse an HTML tag starting at the current cursor position.
+    ///
+    /// This method is agnostic to the tag type:
+    /// - If the tag is an opening tag, it is pushed onto the stack.
+    /// - If it is a closing tag, it attempts to close the corresponding opening tag.
+    ///
+    /// Invalid tags are ignored.
+    ///
+    /// If a valid tag is found, the method returns the position after the tag.
+    /// Otherwise, `None` is returned, and the cursor remains unchanged;
+    /// the caller is responsible for advancing the cursor.
     fn try_handle_tag(&mut self, start_byte_pos: usize) -> Option<usize> {
         let tag = Tag::try_parse(self.input, &mut self.cursor, start_byte_pos)?;
 
@@ -182,8 +249,8 @@ impl<'a> Parser<'a> {
             TagType::Opening => {
                 self.stack.push(ParsedTag {
                     tag,
-                    begin_position: self.pos,
-                    begin_position_byte: self.byte_pos,
+                    position: self.pos,
+                    position_byte: self.byte_pos,
                 });
             }
             TagType::Closing => {
@@ -197,6 +264,10 @@ impl<'a> Parser<'a> {
         Some(end)
     }
 
+    /// Handles a closing HTML tag.
+    ///
+    /// If the closing tag matches the nearest corresponding opening tag and is valid,
+    /// a new entity representing the tag is added. Otherwise, the tag is ignored.
     fn handle_closing_tag(&mut self, closing_tag: Tag) {
         if self
             .stack
@@ -205,8 +276,8 @@ impl<'a> Parser<'a> {
         {
             let ParsedTag {
                 tag,
-                begin_position,
-                begin_position_byte,
+                position: begin_position,
+                position_byte: begin_position_byte,
             } = self.stack.pop().unwrap();
 
             let length = self.pos - begin_position;
@@ -236,6 +307,10 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Handles a self-closing HTML tag.
+    ///
+    /// If the tag is valid, a new entity representing it is added.
+    /// Otherwise, the tag is ignored.
     fn handle_self_closing_tag(&mut self, tag: Tag) {
         self.entities.push(Entity {
             offset: self.pos,
@@ -246,11 +321,16 @@ impl<'a> Parser<'a> {
         });
     }
 
+    /// Closes any unclosed HTML tags at the current cursor position.
+    ///
+    /// Unlike other methods, this function appends corresponding closing tags for
+    /// all unmatched opening tags. These tags are assumed to be valid and are
+    /// pushed onto the entity stack.
     fn close_unmatched_tags(&mut self) {
         while let Some(ParsedTag {
             tag,
-            begin_position,
-            begin_position_byte,
+            position: begin_position,
+            position_byte: begin_position_byte,
         }) = self.stack.pop()
         {
             let length = self.pos - begin_position;
@@ -273,7 +353,16 @@ impl<'a> Parser<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+/// Represents an entity in text, such as an HTML tag.
+///
+/// The entity’s position in the text can be described in two ways:
+/// - By byte offset
+/// - By grapheme index
+///
+/// In most cases, the byte offset is sufficient to get a slice of the text.
+/// For accurate handling of multi-codepoint characters (e.g., emojis or accented letters),
+/// use [unic_segment] to calculate the correct g_]()
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entity {
     pub offset: usize,
     pub offset_in_byte: usize,
@@ -282,7 +371,11 @@ pub struct Entity {
     pub kind: EntityKind,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+/// Represents the type of entity parsed from an HTML tag.
+///
+/// Examples include formatting tags such as bold, italic, underline, or other
+/// supported HTML tags that affect the text’s style or semantics.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntityKind {
     Bold,      // <b> ... </b>
     Italic,    // <i> ... </i>
@@ -308,12 +401,24 @@ impl EntityKind {
     }
 }
 
+/// Represents a parsed HTML tag along with its position in the text.
+///
+/// This struct stores both the tag’s position (for correct nesting and closing)
+/// and a reference to the tag information itself, accessible through the [`Tag`] field.
+/// While [`Tag`] describes the tag’s type (e.g. bold, italic, underline),
+/// `ParsedTag` is responsible for tracking where it occurs in the text.
 struct ParsedTag {
     tag: Tag,
-    begin_position: usize,
-    begin_position_byte: usize,
+    position: usize,
+    position_byte: usize,
 }
 
+/// Represents an HTML tag parsed from text.
+///
+/// Unlike [`ParsedTag`], which focuses on the tag’s position within the text stream,
+/// `Tag` stores detailed information about the tag itself, including its kind and type.
+/// This separation makes it easier to reason about tag semantics independently from
+/// where they appear in the text.
 #[derive(Debug, PartialEq, Eq)]
 struct Tag {
     byte_pos_begin: usize,
@@ -322,6 +427,7 @@ struct Tag {
     tag_type: TagType,
 }
 
+/// Distinguishes between opening, closing, and self-closing HTML tags.
 #[derive(Debug, PartialEq, Eq)]
 enum TagType {
     Opening,
@@ -330,10 +436,12 @@ enum TagType {
 }
 
 impl Tag {
-    /// Tries to parse the HTML tags: bold, italic, underline, link and image.
+    /// Parses supported HTML tags: **bold**, *italic*, underline, links, and images.
     ///
-    /// For link supported only `href` attribute.
-    /// For image supported only `src` and `alt` attributes.
+    /// - For links, only the `href` attribute is recognized.
+    /// - For images, only the `src` and `alt` attributes are supported.
+    ///
+    /// Any other tags or attributes are ignored.
     fn try_parse(
         input: &str,
         cursor: &mut unic_segment::GraphemeCursor,
@@ -422,6 +530,15 @@ impl Tag {
         })
     }
 
+    /// Parses and closes an HTML tag **without attributes** starting at the current cursor position.
+    ///
+    /// This method validates the tag and determines its end position without expecting
+    /// any attributes.
+    ///
+    /// If the tag is valid, returns the byte position immediately after the tag.  
+    /// Otherwise, returns `None`.  
+    ///
+    /// **Note:** The caller is responsible for advancing or rewinding the cursor.
     fn close_unattributed_tag(
         input: &str,
         cursor: &mut unic_segment::GraphemeCursor,
@@ -448,6 +565,16 @@ impl Tag {
         Some(cursor.cur_cursor())
     }
 
+    /// Parses and closes an HTML tag **with attributes** starting at the current cursor position.
+    ///
+    /// This method attempts to recognize and validate tags that may contain attributes
+    /// (e.g., `href` for links, `src` and `alt` for images).
+    ///
+    /// If the tag is valid, returns the byte position immediately after the tag.  
+    /// Otherwise, returns `None`.  
+    ///
+    /// **Note:** The caller is responsible for actually advancing or rolling back
+    /// the cursor based on the result.
     fn close_attributed_tag<'a>(
         input: &'a str,
         cursor: &mut unic_segment::GraphemeCursor,

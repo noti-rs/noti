@@ -26,7 +26,6 @@ impl Scheduler {
                 let scheduled_notification = ScheduledNotification {
                     time: parsed_time.to_rfc3339(),
                     data: notification.data,
-                    id: notification.id,
                 };
                 self.queue.push(Reverse(scheduled_notification));
             }

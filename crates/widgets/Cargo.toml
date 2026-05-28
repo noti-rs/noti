@@ -1,23 +1,22 @@
 [package]
-name = "render"
+name = "widgets"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-config.workspace = true
-dbus.workspace = true
 shared.workspace = true
 macros.workspace = true
-tempfile.workspace = true
 
+tempfile.workspace = true
 log.workspace = true
 anyhow.workspace = true
 derive_more.workspace = true
-derive_builder.workspace = true
+skia-safe.workspace = true
 
+bon = "3.9.1"
+num-traits = "0.2.19"
 resvg = "0.45.1"
-image = { version = "0.25.2", features = ["png"] }
-pangocairo = "0.21.0"
-cairo-rs = { version = "0.21.0", features = ["png", "svg"] }
+image = { version = "0.25.2"}
 linicon = "2.3.0"
+bitflags = "2.11.0"

@@ -3,42 +3,53 @@ use std::{collections::HashMap, io::Write};
 use shared::file_descriptor::FileDescriptor;
 use zbus::zvariant::{Array, Structure, Value};
 
+/// Represents information about an image sent through D-Bus.
 #[derive(Debug, Clone)]
 pub struct ImageData {
-    /// Width of image in pixels
+    /// Width of image in pixels.
     pub width: i32,
 
-    /// Height of image in pixels
+    /// Height of image in pixels.
     pub height: i32,
 
-    /// Distance in bytes between row starts
+    /// Number of bytes between the start of one row and the next.
     pub rowstride: i32,
 
-    /// Whether the image has an alpha channel
+    /// Indicates whether the image has an alpha channel.
     pub has_alpha: bool,
 
-    /// Must always be 8
-    ///
-    /// It's because of specification.
+    /// Number of bits per sample. Must always be 8 according to the specification.
     pub bits_per_sample: i32,
 
-    /// If has_alpha is **true**, must be 4, otherwise 3
+    /// Number of channels. Must be 4 if `has_alpha` is true, otherwise 3.
     pub channels: i32,
 
-    /// The image data, in RGB byte order
+    /// File descriptor containing the image data in RGB byte order.
     ///
-    /// To avoid the stroing data in RAM, the image stores in temporary file which will be
-    /// destroyed if there is no handle to this file.
+    /// To avoid storing large data in RAM, the image is stored in a temporary file.
+    /// The file is automatically removed when no handles reference it.
     pub image_file_descriptor: FileDescriptor,
 }
 
 impl ImageData {
+    const WIDTH_INDEX: usize = 0;
+    const HEIGHT_INDEX: usize = 1;
+    const ROWSTRIDE_INDEX: usize = 2;
+    const HAS_ALPHA_INDEX: usize = 3;
+    const BITS_PER_SAMPLE_INDEX: usize = 4;
+    const CHANNELS_INDEX: usize = 5;
+    const FILE_INDEX: usize = 6;
+
+    /// Attempts to parse image data from a hint.
     pub fn from_hint(hint: Value<'_>) -> Option<Self> {
         Structure::try_from(hint)
             .ok()
             .and_then(Self::from_structure)
     }
 
+    /// Attempts to parse image data from a structure.
+    ///
+    /// If the data is corrupted, an [ImageData] instance will not be created.
     fn from_structure(image_structure: Structure) -> Option<Self> {
         fn get_field<'a, 'b>(
             fields: &'a mut HashMap<usize, Value<'b>>,
@@ -59,14 +70,15 @@ impl ImageData {
             return None;
         }
 
-        let width = i32::try_from(get_field(&mut fields, &0)).ok()?;
-        let height = i32::try_from(get_field(&mut fields, &1)).ok()?;
-        let rowstride = i32::try_from(get_field(&mut fields, &2)).ok()?;
-        let has_alpha = bool::try_from(get_field(&mut fields, &3)).ok()?;
-        let bits_per_sample = i32::try_from(get_field(&mut fields, &4)).ok()?;
-        let channels = i32::try_from(get_field(&mut fields, &5)).ok()?;
+        let width = i32::try_from(get_field(&mut fields, &Self::WIDTH_INDEX)).ok()?;
+        let height = i32::try_from(get_field(&mut fields, &Self::HEIGHT_INDEX)).ok()?;
+        let rowstride = i32::try_from(get_field(&mut fields, &Self::ROWSTRIDE_INDEX)).ok()?;
+        let has_alpha = bool::try_from(get_field(&mut fields, &Self::HAS_ALPHA_INDEX)).ok()?;
+        let bits_per_sample =
+            i32::try_from(get_field(&mut fields, &Self::BITS_PER_SAMPLE_INDEX)).ok()?;
+        let channels = i32::try_from(get_field(&mut fields, &Self::CHANNELS_INDEX)).ok()?;
 
-        let file = match Array::try_from(get_field(&mut fields, &6)) {
+        let file = match Array::try_from(get_field(&mut fields, &Self::FILE_INDEX)) {
             Ok(array) => {
                 const BUF_SIZE_4KB: usize = 4096;
                 let mut file = tempfile::tempfile().expect("The temp file must be created!");

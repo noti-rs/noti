@@ -7,6 +7,9 @@ use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtId
 
 mod idle_notifier;
 
+/// Handles idle state events from the Wayland compositor to pause or resume the application.
+///
+/// This is useful to avoid wasting resources when the user is inactive.
 pub struct IdleManager {
     event_queue: EventQueue<IdleNotifier>,
     pub idle_notifier: IdleNotifier,
@@ -23,6 +26,7 @@ impl Dispatcher for IdleManager {
 }
 
 impl IdleManager {
+    /// Initializes the idle manager and makes the idle notifier.
     pub(crate) fn init<P>(
         wayland_connection: &Connection,
         protocols: &P,
@@ -43,6 +47,7 @@ impl IdleManager {
         Ok(idle_manager)
     }
 
+    /// Updates the idle configuration with the new user configuration.
     pub(crate) fn update_by_config<P>(&mut self, protocols: &P, config: &Config)
     where
         P: AsRef<WlSeat> + AsRef<ExtIdleNotifierV1>,
@@ -51,14 +56,20 @@ impl IdleManager {
             .recreate(protocols, &self.event_queue.handle(), config);
     }
 
+    /// Refreshes the idle state, allowing it to wait for the next idle event.
+    ///
+    /// The idle manager does not refresh the state automatically; this explicit call ensures that
+    /// the caller waits for the state to change only after the previous idle state has been handled.
     pub(crate) fn reset_idle_state(&mut self) {
         self.idle_notifier.was_idled = false;
     }
 
+    /// Checks whether an idle event has occurred.
     pub(crate) fn was_idled(&self) -> bool {
         self.idle_notifier.was_idled
     }
 
+    /// Checks whether the state is idle.
     pub(crate) fn is_idled(&self) -> bool {
         self.idle_notifier
             .idle_state

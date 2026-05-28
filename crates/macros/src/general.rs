@@ -190,6 +190,16 @@ impl ExpectIdent for syn::Field {
     }
 }
 
+pub(crate) fn is_option(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(syn::TypePath { qself: None, path }) = ty {
+        if let Some(segment) = path.segments.last() {
+            return segment.ident == "Option";
+        }
+    }
+
+    false
+}
+
 pub(crate) fn wrap_by_option(ty: syn::Type) -> syn::Type {
     use proc_macro2::Span;
     use syn::PathSegment;

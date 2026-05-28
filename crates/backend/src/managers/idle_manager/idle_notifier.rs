@@ -6,9 +6,22 @@ use wayland_protocols::ext::idle_notify::v1::client::{
     ext_idle_notifier_v1::ExtIdleNotifierV1,
 };
 
+/// Represents a simple object that tracks the idle state reported by the Wayland compositor,
+/// indicating whether the user has been inactive long enough to be considered idle.
+///
+/// Requires a `threshold` (in milliseconds) after which the compositor reports the object as idle.
+///
+/// This object also provides a way to handle cases where an idle event has occurred even if
+/// the current state is [IdleState::Resumed], allowing important actions to be processed
+/// (e.g., refreshing notifications, timeouts, and similar tasks).
 pub struct IdleNotifier {
+    /// The use of an option here is intentional: if `threshold` is zero, it would be pointless
+    /// to create a notification object from the Wayland compositor.
     notification: Option<ExtIdleNotificationV1>,
 
+    /// The `threshold` value, in milliseconds.  
+    ///
+    /// A value of zero indicates no limit.
     threshold: u32,
     pub idle_state: Option<IdleState>,
     pub was_idled: bool,
@@ -20,6 +33,7 @@ pub enum IdleState {
 }
 
 impl IdleNotifier {
+    /// Initializes the idle notifier object.
     pub(crate) fn init<P>(
         protocotls: &P,
         qhandle: &QueueHandle<Self>,
@@ -55,6 +69,8 @@ impl IdleNotifier {
         Ok(idle_notifier)
     }
 
+    /// Updates the `threshold` value from the user configuration and recreates the idle notifier
+    /// with the new value. The idle notifier is not created if the `threshold` is zero.
     pub(super) fn recreate<P>(
         &mut self,
         protocotls: &P,
