@@ -26,8 +26,8 @@ use crate::{
         Color,
     },
     widget::{
-        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
-        WidgetBase,
+        draw_debug_bounds, Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext,
+        Layout, LayoutContext, WidgetBase,
     },
 };
 
@@ -740,6 +740,8 @@ where
         // another.
 
         let inner_spacing = self.margin.unwrap_or_default();
+        let actual_offset =
+            *offset + Offset::new(inner_spacing.left as f32, inner_spacing.top as f32);
         let inner_extent = provided_extent.shrink_to_with(&inner_spacing);
         if inner_extent.width <= 0.0 || inner_extent.height <= 0.0 {
             return;
@@ -758,7 +760,7 @@ where
         let mut paint = skia_safe::Paint::default();
         paint.use_color(
             &self.color.clone().unwrap_or_default(),
-            *offset + Offset::new(inner_spacing.left as f32, inner_spacing.top as f32),
+            actual_offset,
             inner_extent,
         );
 
@@ -788,6 +790,16 @@ where
         paragraph.paint(canvas, (offset.x, offset.y));
 
         canvas.restore();
+
+        if context.get_debug_options().show_layout_bounds {
+            draw_debug_bounds(
+                canvas,
+                *offset,
+                provided_extent,
+                actual_offset,
+                inner_extent,
+            );
+        }
     }
 }
 

@@ -11,7 +11,7 @@ use std::{cmp::Ordering, collections::VecDeque, hash::Hash, time};
 use widgets::{
     self,
     animations::AnimationKind,
-    context::{Context, CreateState, GetState, SetState, SetStyleClass, Tick},
+    context::{Context, CreateState, DebugOptions, GetState, SetState, SetStyleClass, Tick},
     drawer::Drawer,
     events::Event,
     make_style, make_widget,
@@ -289,6 +289,8 @@ impl Banner {
         let display = config.display_by_app(&notification.app_name);
 
         let mut context = Context::new(font_collection);
+        context.update_debug_options(to_debug_options(config));
+
         let summary_state = context.create_state_mut(notification.summary.clone());
         let summary_widget = make_widget! {
             Text {
@@ -435,6 +437,8 @@ impl Banner {
             config.general().width as f32,
             config.general().height as f32,
         );
+
+        self.ui_root.update_debug_options(to_debug_options(config));
 
         let display_config = config.display_by_app(&self.notification.app_name);
         self.banner_state.timeout = display_config
@@ -645,6 +649,12 @@ impl CloseStatus {
             CloseStatus::NotClosed => None,
             CloseStatus::Closed(reason) => Some(reason),
         }
+    }
+}
+
+fn to_debug_options(config: &Config) -> DebugOptions {
+    DebugOptions {
+        show_layout_bounds: config.general().debug.show_layout_bounds,
     }
 }
 

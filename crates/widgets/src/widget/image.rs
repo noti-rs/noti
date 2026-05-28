@@ -26,8 +26,8 @@ use crate::{
         style::{Configure, StyleProperty, WidgetStyle},
     },
     widget::{
-        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
-        WidgetBase,
+        draw_debug_bounds, Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext,
+        Layout, LayoutContext, WidgetBase,
     },
 };
 
@@ -461,7 +461,7 @@ impl<C> Draw<C, f32> for Image
 where
     C: DrawContext<f32>,
 {
-    fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
+    fn draw_on(&self, context: &C, original_offset: &Offset<f32>, drawer: &mut Drawer) {
         if self.value.is_none() {
             return;
         }
@@ -490,7 +490,7 @@ where
             return;
         };
 
-        let offset = *offset + self.margin.unwrap_or_default().into();
+        let offset = *original_offset + self.margin.unwrap_or_default().into();
 
         let mut file = image_file_descriptor.get_file();
         file.seek(std::io::SeekFrom::Start(0))
@@ -577,6 +577,16 @@ where
         );
 
         canvas.restore();
+
+        if context.get_debug_options().show_layout_bounds {
+            draw_debug_bounds(
+                canvas,
+                *original_offset,
+                provided_extent,
+                actual_offset,
+                final_extent,
+            );
+        }
     }
 }
 

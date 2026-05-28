@@ -23,8 +23,8 @@ use crate::{
         Color, Point,
     },
     widget::{
-        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
-        Widget, WidgetBase,
+        draw_debug_bounds, Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext,
+        Layout, LayoutContext, Widget, WidgetBase,
     },
 };
 
@@ -692,6 +692,7 @@ where
 
         let cross_axis_start = plane.cross.start;
         let cross_axis_alignment = self.cross_axis_alignment();
+
         for child in &self.children {
             let child_extent = <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
                 .unwrap_or_default()
@@ -708,6 +709,26 @@ where
         drawer.outline_border(*offset, provided_extent, &border);
 
         drawer.surface.canvas().restore();
+
+        if context.get_debug_options().show_layout_bounds {
+            let plane = self.get_plane(provided_extent);
+            let shift = match self.direction {
+                Direction::Horizontal => Offset::new(plane.main.start, plane.cross.start),
+                Direction::Vertical => Offset::new(plane.cross.start, plane.main.start),
+            };
+
+            draw_debug_bounds(
+                drawer.surface.canvas(),
+                *offset,
+                provided_extent,
+                *offset + shift,
+                FlexExtent {
+                    main: plane.main.extent,
+                    cross: plane.cross.extent,
+                }
+                .to_normal(&self.direction),
+            );
+        }
     }
 }
 

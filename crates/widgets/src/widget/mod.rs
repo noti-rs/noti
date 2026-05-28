@@ -6,7 +6,7 @@ pub mod text;
 
 use crate::{
     context::{
-        AnimationQuery, GenerateId, GetFont, GetState, GetStyle, LoadExtent,
+        AnimationQuery, GenerateId, GetDebugOptions, GetFont, GetState, GetStyle, LoadExtent,
         ManageAnimationRegistry, ManageDirtyFlags, ManageIntrinsic, RegisterKey, ScopedManageState,
         StateSubscription, StyleSubscription,
     },
@@ -144,7 +144,8 @@ where
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags;
 }
 
-pub(crate) trait DrawContext<T>: LoadExtent<T, WidgetId> + AnimationQuery<WidgetId>
+pub(crate) trait DrawContext<T>:
+    LoadExtent<T, WidgetId> + AnimationQuery<WidgetId> + GetDebugOptions
 where
     T: Default + Copy,
 {
@@ -152,7 +153,7 @@ where
 
 impl<C, T> DrawContext<T> for C
 where
-    C: LoadExtent<T, WidgetId> + AnimationQuery<WidgetId>,
+    C: LoadExtent<T, WidgetId> + AnimationQuery<WidgetId> + GetDebugOptions,
     T: Default + Copy,
 {
 }
@@ -324,4 +325,46 @@ macro_rules! make_widget {
                 $(.$field_name($val))*
                 .build()
     };
+}
+
+fn draw_debug_bounds(
+    canvas: &skia_safe::Canvas,
+    original_offset: Offset<f32>,
+    provided_extent: Extent<f32>,
+    actual_offset: Offset<f32>,
+    actual_extent: Extent<f32>,
+) {
+    let mut paint = skia_safe::Paint::default();
+    paint.set_anti_alias(true);
+
+    paint.set_color4f(skia_safe::Color4f::new(0.95, 0.23, 0.99, 1.0), None);
+    paint.set_style(skia_safe::PaintStyle::Stroke);
+    paint.set_stroke_width(2.0);
+
+    if let Some(dash) = skia_safe::PathEffect::dash(&[6.0, 6.0], 0.0) {
+        paint.set_path_effect(dash);
+    }
+
+    canvas.draw_rect(
+        skia_safe::Rect::from_xywh(
+            original_offset.x,
+            original_offset.y,
+            provided_extent.width,
+            provided_extent.height,
+        ),
+        &paint,
+    );
+
+    paint.set_color4f(skia_safe::Color4f::new(0.53, 0.97, 0.48, 0.7), None);
+    paint.set_path_effect(None);
+
+    canvas.draw_rect(
+        skia_safe::Rect::from_xywh(
+            actual_offset.x,
+            actual_offset.y,
+            actual_extent.width,
+            actual_extent.height,
+        ),
+        &paint,
+    );
 }

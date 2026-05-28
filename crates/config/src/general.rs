@@ -21,6 +21,9 @@ public! {
         #[cfg_prop(default(10))]
         gap: u8,
 
+        #[cfg_prop(use_type(DebugTomlConfig), mergeable)]
+        debug: DebugConfig,
+
         sorting: Sorting,
 
         #[cfg_prop(default(0))]
@@ -121,5 +124,19 @@ impl From<String> for Anchor {
                 Used: {other}"
             ),
         }
+    }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(DebugTomlConfig), derive(Debug, Default, Deserialize, Clone))]
+    struct DebugConfig {
+        /// Shows bounds of each UI component. There's two outlines:
+        /// + Dashed Magenta — provided extent for UI component, may be bigger than actual content
+        /// + Solid Green — actual extent of UI component
+        ///
+        /// Dashed Magenta and Solid Green may matches at some or all sides. And for this Solid
+        /// Green is slightly transparent to show the Dashed Magenta below it.
+        show_layout_bounds: bool,
     }
 }

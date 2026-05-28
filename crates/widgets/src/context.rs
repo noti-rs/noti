@@ -10,6 +10,7 @@ use crate::{
 use std::{any::Any, collections::HashMap, time::Duration};
 
 pub struct Context {
+    debug_options: DebugOptions,
     id_counter: u64,
     state_descriptor_counter: usize,
     measure_cache: HashMap<WidgetId, MeasureCache>,
@@ -24,6 +25,7 @@ pub struct Context {
 impl Context {
     pub fn new(font_collection: skia_safe::textlayout::FontCollection) -> Self {
         Self {
+            debug_options: DebugOptions::default(),
             id_counter: 1,
             state_descriptor_counter: 1,
             font_collection,
@@ -36,6 +38,10 @@ impl Context {
         }
     }
 
+    pub fn update_debug_options(&mut self, debug_options: DebugOptions) {
+        self.debug_options = debug_options;
+    }
+
     fn register_state(&mut self, state_info: StateInfo) -> usize {
         let descriptor = self.state_descriptor_counter;
         self.state_descriptor_counter += 1;
@@ -45,6 +51,20 @@ impl Context {
 
     pub(super) fn is_invalidation_required(&self) -> bool {
         !self.dirty_registry.is_empty()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DebugOptions {
+    pub show_layout_bounds: bool,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for DebugOptions {
+    fn default() -> Self {
+        Self {
+            show_layout_bounds: false,
+        }
     }
 }
 
@@ -122,6 +142,16 @@ impl Tick for AnimationProgress {
                 self.elapsed_ns = self.elapsed_ns - delta_ns.min(self.elapsed_ns);
             }
         }
+    }
+}
+
+pub trait GetDebugOptions {
+    fn get_debug_options(&self) -> &DebugOptions;
+}
+
+impl GetDebugOptions for Context {
+    fn get_debug_options(&self) -> &DebugOptions {
+        &self.debug_options
     }
 }
 

@@ -21,8 +21,8 @@ use crate::{
         Color, Point,
     },
     widget::{
-        flex_container::FlexContainer, Draw, DrawContext, Init, InitContext, Invalidate,
-        InvalidateContext, Layout, LayoutContext, Widget, WidgetBase,
+        draw_debug_bounds, flex_container::FlexContainer, Draw, DrawContext, Init, InitContext,
+        Invalidate, InvalidateContext, Layout, LayoutContext, Widget, WidgetBase,
     },
 };
 
@@ -382,6 +382,7 @@ where
             actual_extent.width,
             actual_extent.height,
         );
+
         let border = self.border.clone().unwrap_or_default();
         let border_radius = border.radius as f32;
         let rrect = skia_safe::RRect::new_rect_xy(rect, border_radius, border_radius);
@@ -417,6 +418,16 @@ where
         drawer.outline_border(actual_offset, actual_extent, &border);
 
         drawer.surface.canvas().restore();
+
+        if context.get_debug_options().show_layout_bounds {
+            draw_debug_bounds(
+                drawer.surface.canvas(),
+                *offset,
+                provided_extent,
+                actual_offset,
+                actual_extent,
+            );
+        }
     }
 }
 

@@ -7,7 +7,9 @@ pub mod types;
 pub mod widget;
 
 use crate::{
-    context::{Context, CreateState, GetState, LoadExtent, SetState, SetStyleClass, Tick},
+    context::{
+        Context, CreateState, DebugOptions, GetState, LoadExtent, SetState, SetStyleClass, Tick,
+    },
     events::{DispatchEvent, Event},
     types::{
         measure::{Constraints, Measure},
@@ -31,6 +33,10 @@ impl UiRoot {
             context,
             cached_constraints: Constraints::new_tight(Extent::default()),
         }
+    }
+
+    pub fn update_debug_options(&mut self, debug_options: DebugOptions) {
+        self.context.update_debug_options(debug_options);
     }
 
     pub fn width(&self) -> f32 {
