@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use macros::{widget, widget_style};
+
 use crate::{
     animations::{AnimationFilter, AnimationKind, Easing},
     context::{
@@ -8,32 +10,27 @@ use crate::{
         ScopedContext, StateSubscription, StyleSubscription,
     },
     drawer::Drawer,
-    events::{Callback, DispatchContext, DispatchEvent, Event, FunctionCallback},
-    make_configuration,
+    events::{DispatchContext, DispatchEvent, Event},
     state::State,
     types::{
         dirty_flags::DirtyFlags,
         identifiers::WidgetKey,
         measure::{Constraints, Intrinsic, Measure, MeasureContext, SizingMode},
-        style::{Configure, StyleProperty},
+        style::Configure,
         Extent, Offset, WidgetClass, WidgetId, WidgetStyle,
     },
     widget::{
         Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
-        Widget, WidgetBase,
+        Widget, WidgetGetType, WidgetInformation, WidgetSizingMode,
     },
 };
 
+#[widget(kind = minimal)]
+#[callback(on_visible)]
+#[callback(on_hidden)]
+#[callback(on_hover)]
 #[derive(bon::Builder, Default)]
 pub struct AnimatedVisibility {
-    #[builder(skip)]
-    id: WidgetId,
-
-    key: Option<WidgetKey>,
-
-    #[builder(into, default)]
-    class: WidgetClass,
-
     #[builder(default = true)]
     visible: bool,
 
@@ -46,46 +43,29 @@ pub struct AnimatedVisibility {
     #[builder(skip)]
     animation_state: AnimationState,
 
-    #[builder(with = |v: AnimationDefinition| StyleProperty::Explicit(v))]
-    primary_animation: StyleProperty<AnimationDefinition>,
+    #[style(required)]
+    primary_animation: AnimationDefinition,
 
-    #[builder(with = |v: AnimationDefinition| StyleProperty::Explicit(v), default)]
-    secondary_animation: StyleProperty<AnimationDefinition>,
+    #[style]
+    secondary_animation: AnimationDefinition,
 
-    #[builder(with = |v: SpatialChangeDefinition| StyleProperty::Explicit(v))]
-    primary_spatial_change: StyleProperty<SpatialChangeDefinition>,
+    #[style(required)]
+    primary_spatial_change: SpatialChangeDefinition,
 
-    #[builder(with = |v: SpatialChangeDefinition| StyleProperty::Explicit(v), default)]
-    secondary_spatial_change: StyleProperty<SpatialChangeDefinition>,
+    #[style]
+    secondary_spatial_change: SpatialChangeDefinition,
 
     #[builder(into)]
     child: Option<Widget>,
-
-    #[builder(with = |f: impl for<'a> FunctionCallback<'a, ()> + 'static| Box::new(f))]
-    on_visible: Option<Callback<()>>,
-
-    #[builder(with = |f: impl for<'a> FunctionCallback<'a, ()> + 'static| Box::new(f))]
-    on_hidden: Option<Callback<()>>,
-
-    #[builder(with = |f: impl for<'a> FunctionCallback<'a, ()> + 'static| Box::new(f))]
-    on_hover: Option<Callback<()>>,
 }
 
-make_configuration! {
-    #[derive(bon::Builder, Debug, Default, Clone)]
-    pub struct AnimatedVisibilityStyle {
-        #[builder(with = |v: AnimationDefinition| StyleProperty::FromClass(v), default)]
-        primary_animation: StyleProperty<AnimationDefinition>,
-
-        #[builder(with = |v: AnimationDefinition| StyleProperty::FromClass(v), default)]
-        secondary_animation: StyleProperty<AnimationDefinition>,
-
-        #[builder(with = |v: SpatialChangeDefinition| StyleProperty::FromClass(v), default)]
-        primary_spatial_change: StyleProperty<SpatialChangeDefinition>,
-
-        #[builder(with = |v: SpatialChangeDefinition| StyleProperty::FromClass(v), default)]
-        secondary_spatial_change: StyleProperty<SpatialChangeDefinition>,
-    } <<= AnimatedVisibility
+#[widget_style(targets(AnimatedVisibility))]
+#[derive(bon::Builder, Debug, Default, Clone)]
+pub struct AnimatedVisibilityStyle {
+    primary_animation: AnimationDefinition,
+    secondary_animation: AnimationDefinition,
+    primary_spatial_change: SpatialChangeDefinition,
+    secondary_spatial_change: SpatialChangeDefinition,
 }
 
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -118,27 +98,13 @@ pub struct SpatialChangeDefinition {
     pub duration: Duration,
 }
 
-impl WidgetBase for AnimatedVisibility {
-    fn get_id(&self) -> WidgetId {
-        self.id
-    }
-
-    fn set_id(&mut self, id: WidgetId) {
-        self.id = id;
-    }
-
-    fn get_key(&self) -> Option<&WidgetKey> {
-        self.key.as_ref()
-    }
-
-    fn get_class(&self) -> WidgetClass {
-        self.class.clone()
-    }
-
+impl WidgetGetType for AnimatedVisibility {
     fn get_type(&self) -> &'static str {
         "animated_visibility"
     }
+}
 
+impl WidgetSizingMode for AnimatedVisibility {
     fn sizing_mode(&self) -> SizingMode {
         match self.phase {
             VisibilityPhase::SpatialChange => SizingMode::Dynamic,

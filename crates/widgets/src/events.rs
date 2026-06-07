@@ -32,10 +32,10 @@ pub enum MouseButton {
     Right,
 }
 
-pub trait FunctionCallback<'a, T>: FnMut(ScopedContext<'a>, T) {}
-impl<'a, T, F> FunctionCallback<'a, T> for F where F: FnMut(ScopedContext<'a>, T) {}
+pub trait FunctionCallback<'a, T, R>: FnMut(ScopedContext<'a>, T) -> R {}
+impl<'a, T, R, F> FunctionCallback<'a, T, R> for F where F: FnMut(ScopedContext<'a>, T) -> R {}
 
-pub type Callback<T> = Box<dyn for<'a> FunctionCallback<'a, T>>;
+pub type Callback<T, R> = Box<dyn for<'a> FunctionCallback<'a, T, R>>;
 
 pub(crate) trait DispatchContext<T>: LoadExtent<T, WidgetId> + ScopedManageState
 where

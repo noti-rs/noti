@@ -15,7 +15,7 @@ use crate::{
         measure::{Constraints, Measure},
         Extent, WidgetId, WidgetStyle,
     },
-    widget::{Draw, Init, Invalidate, Layout, Widget, WidgetBase},
+    widget::{Draw, Init, Invalidate, Layout, Widget, WidgetInformation},
 };
 
 pub struct UiRoot {
