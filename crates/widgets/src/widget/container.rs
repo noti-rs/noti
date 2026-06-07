@@ -1,4 +1,5 @@
 use log::warn;
+use macros::widget_style;
 
 use crate::{
     context::{
@@ -7,7 +8,6 @@ use crate::{
     },
     drawer::Drawer,
     events::{DispatchContext, DispatchEvent, Event},
-    make_configuration,
     types::{
         alignment::Alignment,
         border::Border,
@@ -22,7 +22,8 @@ use crate::{
     },
     widget::{
         draw_debug_bounds, flex_container::FlexContainer, Draw, DrawContext, Init, InitContext,
-        Invalidate, InvalidateContext, Layout, LayoutContext, Widget, WidgetBase,
+        Invalidate, InvalidateContext, Layout, LayoutContext, Widget, WidgetGetType,
+        WidgetInformation, WidgetSizingMode,
     },
 };
 
@@ -116,29 +117,21 @@ pub struct Container {
     child: Option<Widget>,
 }
 
-make_configuration! {
-    /// A targeted configuration set used to override or provide specific
-    /// parameters for a Container widget based on its unique identifier.
-    ///
-    /// Instead of traversing the widget tree to modify an existing Container,
-    /// this struct allows external systems to inject layout and styling
-    /// data—such as alignment and borders—directly into the widget's
-    /// compilation phase. If no configuration is associated with a
-    /// widget's ID, it continues to use its own internal state.
-    #[derive(bon::Builder, Debug, Clone)]
-    pub struct ContainerStyle {
-        #[builder(with = |v: Color| StyleProperty::FromClass(v), default)]
-        pub background_color: StyleProperty<Color>,
-
-        #[builder(with = |v: Border| StyleProperty::FromClass(v), default)]
-        pub border: StyleProperty<Border>,
-
-        #[builder(with = |v: Spacing| StyleProperty::FromClass(v), default)]
-        pub spacing: StyleProperty<Spacing>,
-
-        #[builder(with = |v: Alignment| StyleProperty::FromClass(v), default)]
-        pub alignment: StyleProperty<Alignment>,
-    } <<= Container, FlexContainer
+/// A targeted configuration set used to override or provide specific
+/// parameters for a Container widget based on its unique identifier.
+///
+/// Instead of traversing the widget tree to modify an existing Container,
+/// this struct allows external systems to inject layout and styling
+/// data—such as alignment and borders—directly into the widget's
+/// compilation phase. If no configuration is associated with a
+/// widget's ID, it continues to use its own internal state.
+#[widget_style(targets(Container, FlexContainer))]
+#[derive(bon::Builder, Debug, Clone)]
+pub struct ContainerStyle {
+    pub background_color: Color,
+    pub border: Border,
+    pub spacing: Spacing,
+    pub alignment: Alignment,
 }
 
 impl Container {
@@ -172,7 +165,7 @@ impl Container {
     }
 }
 
-impl WidgetBase for Container {
+impl WidgetInformation for Container {
     fn get_id(&self) -> WidgetId {
         self.id
     }
@@ -188,11 +181,15 @@ impl WidgetBase for Container {
     fn get_class(&self) -> WidgetClass {
         self.class.clone()
     }
+}
 
+impl WidgetGetType for Container {
     fn get_type(&self) -> &'static str {
         "container"
     }
+}
 
+impl WidgetSizingMode for Container {
     fn sizing_mode(&self) -> SizingMode {
         SizingMode::Fixed
     }

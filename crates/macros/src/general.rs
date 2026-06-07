@@ -150,9 +150,9 @@ impl Parse for DefaultAssignment {
 }
 
 pub struct DeriveInfo {
-    ident: syn::Ident,
-    paren: syn::token::Paren,
-    traits: syn::punctuated::Punctuated<syn::Ident, Token![,]>,
+    pub ident: syn::Ident,
+    pub paren: syn::token::Paren,
+    pub traits: syn::punctuated::Punctuated<syn::Path, Token![,]>,
 }
 
 impl DeriveInfo {
@@ -164,7 +164,7 @@ impl DeriveInfo {
         Ok(Self {
             ident,
             paren: syn::parenthesized!(content in input),
-            traits: content.parse_terminated(syn::Ident::parse_any, Token![,])?,
+            traits: content.parse_terminated(syn::Path::parse, Token![,])?,
         })
     }
 }

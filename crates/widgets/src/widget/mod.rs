@@ -30,13 +30,7 @@ pub use {
     text::{Font, FontStyle, Text, TextAlignment, TextBuilder, TextStyle},
 };
 
-/// A metadata interface for inspecting a widget's identity and dimensions.
-///
-/// This trait acts as a standardized "Request" system. It allows the
-/// layout engine or debugging tools to query essential information
-/// from any widget variant without needing to understand that
-/// widget's specific internal logic.
-pub trait WidgetBase {
+pub trait WidgetInformation {
     fn get_id(&self) -> WidgetId;
 
     fn set_id(&mut self, id: WidgetId);
@@ -44,14 +38,28 @@ pub trait WidgetBase {
     fn get_key(&self) -> Option<&WidgetKey>;
 
     fn get_class(&self) -> WidgetClass;
+}
 
+pub trait WidgetGetType {
     fn get_type(&self) -> &'static str;
+}
 
+pub trait WidgetSizingMode {
     /// Returns the sizing policy of the widget.
     ///
     /// This method is used to distinguish between widgets with pre-defined (fixed) dimensions and those that adapt their size dynamically based on the layout context.
     fn sizing_mode(&self) -> SizingMode;
 }
+
+/// A metadata interface for inspecting a widget's identity and dimensions.
+///
+/// This trait acts as a standardized "Request" system. It allows the
+/// layout engine or debugging tools to query essential information
+/// from any widget variant without needing to understand that
+/// widget's specific internal logic.
+pub trait WidgetBase: WidgetInformation + WidgetGetType + WidgetSizingMode {}
+
+impl<W> WidgetBase for W where W: WidgetInformation + WidgetGetType + WidgetSizingMode {}
 
 pub(crate) trait InitContext:
     GenerateId
@@ -196,7 +204,7 @@ macro_rules! delegate {
     };
 }
 
-impl WidgetBase for Widget {
+impl WidgetInformation for Widget {
     fn get_id(&self) -> WidgetId {
         delegate!(self.get_id())
     }
@@ -212,7 +220,9 @@ impl WidgetBase for Widget {
     fn get_class(&self) -> WidgetClass {
         delegate!(self.get_class())
     }
+}
 
+impl WidgetGetType for Widget {
     /// Returns the type of this widget as a human-readable string.
     ///
     /// This is primarily intended for logging and debugging, allowing developers
@@ -220,7 +230,10 @@ impl WidgetBase for Widget {
     fn get_type(&self) -> &'static str {
         delegate!(self.get_type())
     }
+}
 
+
+impl WidgetSizingMode for Widget {
     fn sizing_mode(&self) -> SizingMode {
         delegate!(self.sizing_mode())
     }

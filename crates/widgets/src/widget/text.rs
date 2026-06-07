@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 
 use log::warn;
+use macros::widget;
 use shared::{
     text::{self, Entity, EntityKind},
     value::TryFromValue,
@@ -13,7 +14,6 @@ use crate::{
     },
     drawer::{Drawer, UseColor},
     events::{DispatchContext, DispatchEvent, Event},
-    make_configuration,
     state::State,
     types::{
         dirty_flags::DirtyFlags,
@@ -22,12 +22,12 @@ use crate::{
         measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
-        style::{Configure, StyleProperty, WidgetStyle},
+        style::{Configure, WidgetStyle},
         Color,
     },
     widget::{
         draw_debug_bounds, Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext,
-        Layout, LayoutContext, WidgetBase,
+        Layout, LayoutContext, WidgetGetType, WidgetSizingMode,
     },
 };
 
@@ -36,30 +36,17 @@ use crate::{
 ///
 /// `WText` aims to be simple but flexible, providing a consistent API
 /// for compilation and querying its dimensions after layout.
+#[widget]
+#[make_widget_style(TextStyle, derive(bon::Builder, Debug, Clone))]
 #[derive(bon::Builder, Default)]
 pub struct Text {
-    /// An optional identifier for this widget.
-    ///
-    /// If left empty, an ID will be automatically generated during
-    /// compilation. Setting this manually allows the widget to be
-    /// targeted by external configurations and makes the widget tree
-    /// significantly easier to navigate during debugging.
-    #[builder(skip)]
-    id: WidgetId,
-
-    #[builder(into)]
-    key: Option<WidgetKey>,
-
-    #[builder(into, default)]
-    class: WidgetClass,
-
     /// The specific typeface and sizing rules used to render this text.
     ///
     /// This field points to a [`Font`] struct that contains the font family
     /// name, the size (in px), and the style (like Bold or Italic). It ensures
     /// that the text is drawn with the correct visual weight and proportions.
-    #[builder(with = |v: Font| StyleProperty::Explicit(v), default)]
-    font: StyleProperty<Font>,
+    #[style]
+    font: Font,
 
     /// Determines if text should break into multiple lines when it hits the
     /// edge of its container.
@@ -68,17 +55,8 @@ pub struct Text {
     /// to stay within the available width. When disabled, the text remains
     /// on a single line, potentially overflowing the container if it
     /// is too long.
-    #[builder(with = |v: bool| StyleProperty::Explicit(v), default)]
-    wrap: StyleProperty<bool>,
-
-    /// The internal spacing between the widget's boundary box and its actual content.
-    ///
-    /// This field defines a buffer zone (Top, Right, Bottom, Left) that
-    /// effectively shrinks the available area for the widget's content
-    /// without changing the widget's outer dimensions. It ensures
-    /// content does not touch the edges of its container.
-    #[builder(with = |v: Spacing| StyleProperty::Explicit(v), default)]
-    margin: StyleProperty<Spacing>,
+    #[style]
+    wrap: bool,
 
     /// Controls the horizontal distribution of text within its boundary.
     ///
@@ -86,8 +64,8 @@ pub struct Text {
     /// should hug the left side, sit in the center, or be pushed to the
     /// right. It can also spread the words out (space-between) to fill
     /// the entire width of the line.
-    #[builder(with = |v: TextAlignment| StyleProperty::Explicit(v), default)]
-    alignment: StyleProperty<TextAlignment>,
+    #[style]
+    alignment: TextAlignment,
 
     /// The extra vertical space added between lines, measured in the same units as font size.
     ///
@@ -97,8 +75,8 @@ pub struct Text {
     ///
     /// Note: Internally, this is converted to a ratio to satisfy the rendering
     /// engine's requirement for a line-height multiplier.
-    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
-    line_spacing: StyleProperty<usize>,
+    #[style]
+    line_spacing: usize,
 
     /// The foreground color applied to the text characters.
     ///
@@ -107,8 +85,8 @@ pub struct Text {
     /// bounding box; it only colors the "ink" used to draw the text.
     /// Use this to ensure your text has enough contrast against the
     /// background it is sitting on.
-    #[builder(with = |v: Color| StyleProperty::Explicit(v), default)]
-    color: StyleProperty<Color>,
+    #[style]
+    color: Color,
 
     /// The actual text data that this widget is responsible for rendering.
     ///
@@ -152,38 +130,6 @@ pub struct Text {
     /// starting from scratch.
     #[builder(skip)]
     total_lines: Option<usize>,
-}
-
-make_configuration! {
-    /// A targeted configuration set used to override or provide specific
-    /// parameters for a Text widget based on its unique identifier.
-    ///
-    /// This allows for precise control over text properties—such as font
-    /// choice, wrapping, and color—by associating these values with
-    /// a specific widget ID. It enables the caller to update the visual
-    /// presentation of text elements independently of the widget's
-    /// initial construction, ensuring a clean separation between the
-    /// layout structure and the final styling data.
-    #[derive(bon::Builder, Debug, Clone)]
-    pub struct TextStyle {
-        #[builder(with = |v: Font| StyleProperty::FromClass(v), default)]
-        pub font: StyleProperty<Font>,
-
-        #[builder(with = |v: bool| StyleProperty::FromClass(v), default)]
-        pub wrap: StyleProperty<bool>,
-
-        #[builder(with = |v: Spacing| StyleProperty::FromClass(v), default)]
-        pub margin: StyleProperty<Spacing>,
-
-        #[builder(with = |v: TextAlignment| StyleProperty::FromClass(v), default)]
-        pub alignment: StyleProperty<TextAlignment>,
-
-        #[builder(with = |v: usize| StyleProperty::FromClass(v), default)]
-        pub line_spacing: StyleProperty<usize>,
-
-        #[builder(with = |v: Color| StyleProperty::FromClass(v), default)]
-        pub color: StyleProperty<Color>,
-    } <<= Text
 }
 
 /// A collection of typographic settings that define the "look" and scale of a typeface.
@@ -312,27 +258,13 @@ impl Text {
     }
 }
 
-impl WidgetBase for Text {
-    fn get_id(&self) -> WidgetId {
-        self.id
-    }
-
-    fn set_id(&mut self, id: WidgetId) {
-        self.id = id;
-    }
-
-    fn get_key(&self) -> Option<&WidgetKey> {
-        self.key.as_ref()
-    }
-
-    fn get_class(&self) -> WidgetClass {
-        self.class.clone()
-    }
-
+impl WidgetGetType for Text {
     fn get_type(&self) -> &'static str {
         "text"
     }
+}
 
+impl WidgetSizingMode for Text {
     fn sizing_mode(&self) -> SizingMode {
         SizingMode::Dynamic
     }

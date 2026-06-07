@@ -24,7 +24,7 @@ use crate::{
     },
     widget::{
         draw_debug_bounds, Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext,
-        Layout, LayoutContext, Widget, WidgetBase,
+        Layout, LayoutContext, Widget, WidgetGetType, WidgetInformation, WidgetSizingMode,
     },
 };
 
@@ -298,7 +298,7 @@ impl FlexContainer {
     }
 }
 
-impl WidgetBase for FlexContainer {
+impl WidgetInformation for FlexContainer {
     fn get_id(&self) -> WidgetId {
         self.id
     }
@@ -314,11 +314,15 @@ impl WidgetBase for FlexContainer {
     fn get_class(&self) -> WidgetClass {
         self.class.clone()
     }
+}
 
+impl WidgetGetType for FlexContainer {
     fn get_type(&self) -> &'static str {
         "flex_container"
     }
+}
 
+impl WidgetSizingMode for FlexContainer {
     fn sizing_mode(&self) -> SizingMode {
         SizingMode::Dynamic
     }

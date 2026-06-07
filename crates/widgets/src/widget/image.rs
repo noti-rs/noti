@@ -5,6 +5,7 @@ use std::{
 
 use linicon::IconPath;
 use log::{debug, error, warn};
+use macros::widget;
 use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::TryFromValue};
 
 use crate::{
@@ -14,7 +15,6 @@ use crate::{
     },
     drawer::Drawer,
     events::{DispatchContext, DispatchEvent, Event},
-    make_configuration,
     state::State,
     types::{
         dirty_flags::DirtyFlags,
@@ -23,11 +23,11 @@ use crate::{
         measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
-        style::{Configure, StyleProperty, WidgetStyle},
+        style::{Configure, WidgetStyle},
     },
     widget::{
         draw_debug_bounds, Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext,
-        Layout, LayoutContext, WidgetBase,
+        Layout, LayoutContext, WidgetGetType, WidgetSizingMode,
     },
 };
 
@@ -48,23 +48,10 @@ const DEFAULT_ICON_THEME: &str = "hicolor";
 /// - Choosing the right way to load the picture you provided.
 /// - Getting the picture ready to be drawn (like unpacking it and making it the right size).
 /// - Telling the rest of the layout how much space it needs so everything stays organized.
+#[widget]
+#[make_widget_style(ImageStyle, derive(bon::Builder, Debug, Clone))]
 #[derive(bon::Builder, Default)]
 pub struct Image {
-    /// An optional identifier for this widget.
-    ///
-    /// If left empty, an ID will be automatically generated during
-    /// compilation. Setting this manually allows the widget to be
-    /// targeted by external configurations and makes the widget tree
-    /// significantly easier to navigate during debugging.
-    #[builder(skip)]
-    id: WidgetId,
-
-    #[builder(into)]
-    key: Option<WidgetKey>,
-
-    #[builder(into, default)]
-    class: WidgetClass,
-
     /// The source data for the image being rendered.
     ///
     /// Unlike other widgets, this field is strictly populated via
@@ -76,11 +63,11 @@ pub struct Image {
     #[builder(into)]
     state: Option<State<ImageProvider>>,
 
-    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
-    width: StyleProperty<usize>,
+    #[style]
+    width: usize,
 
-    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
-    height: StyleProperty<usize>,
+    #[style]
+    height: usize,
 
     /// The corner radius applied to the image's edges.
     ///
@@ -88,20 +75,11 @@ pub struct Image {
     /// images handle their own clipping independently of the standard
     /// `Border` struct, this field defines how much to "curve" the
     /// rectangular boundary of the image.
-    #[builder(with = |v: u16| StyleProperty::Explicit(v), default)]
-    rounding: StyleProperty<u16>,
+    #[style]
+    rounding: u16,
 
-    /// The internal spacing between the widget's boundary box and its actual content.
-    ///
-    /// This field defines a buffer zone (Top, Right, Bottom, Left) that
-    /// effectively shrinks the available area for the widget's content
-    /// without changing the widget's outer dimensions. It ensures
-    /// content does not touch the edges of its container.
-    #[builder(with = |v: Spacing| StyleProperty::Explicit(v), default)]
-    margin: StyleProperty<Spacing>,
-
-    #[builder(with = |v: FitMode| StyleProperty::Explicit(v), default)]
-    fit_mode: StyleProperty<FitMode>,
+    #[style]
+    fit_mode: FitMode,
 
     /// The mathematical approach used to scale the image up or down.
     ///
@@ -110,8 +88,8 @@ pub struct Image {
     /// it uses a linear approach to prevent jagged edges, but can be
     /// set to a simpler method for performance or specific aesthetic
     /// styles (like pixel art).
-    #[builder(with = |v: ResizingMethod| StyleProperty::Explicit(v), default)]
-    resizing_method: StyleProperty<ResizingMethod>,
+    #[style]
+    resizing_method: ResizingMethod,
 
     /// The strategy for using pre-calculated, lower-resolution versions
     /// of the image.
@@ -120,42 +98,8 @@ pub struct Image {
     /// can occur. This field tells the engine how to sample from these
     /// pre-scaled versions (mipmaps) to ensure the image remains clean
     /// and stable even at very small sizes.
-    #[builder(with = |v: MipmapMode| StyleProperty::Explicit(v), default)]
-    mipmap_mode: StyleProperty<MipmapMode>,
-}
-
-make_configuration! {
-    /// A targeted configuration set used to override or provide specific
-    /// parameters for an Image widget based on its unique identifier.
-    ///
-    /// This struct facilitates the fine-tuning of image-specific rendering
-    /// and layout properties (like resizing methods or max dimensions)
-    /// from outside the main widget tree. It is particularly useful for
-    /// applying data-driven changes to specific images during the final
-    /// layout pass without needing to manually find and update the widget node.
-    #[derive(bon::Builder, Debug, Clone)]
-    pub struct ImageStyle {
-        #[builder(with = |v: usize| StyleProperty::FromClass(v), default)]
-        pub width: StyleProperty<usize>,
-
-        #[builder(with = |v: usize| StyleProperty::FromClass(v), default)]
-        pub height: StyleProperty<usize>,
-
-        #[builder(with = |v: u16| StyleProperty::FromClass(v), default)]
-        pub rounding: StyleProperty<u16>,
-
-        #[builder(with = |v: Spacing| StyleProperty::FromClass(v), default)]
-        pub margin: StyleProperty<Spacing>,
-
-        #[builder(with = |v: ResizingMethod| StyleProperty::FromClass(v), default)]
-        pub resizing_method: StyleProperty<ResizingMethod>,
-
-        #[builder(with = |v: MipmapMode| StyleProperty::FromClass(v), default)]
-        pub mipmap_mode: StyleProperty<MipmapMode>,
-
-        #[builder(with = |v: FitMode| StyleProperty::FromClass(v), default)]
-        pub fit_mode: StyleProperty<FitMode>,
-    } <<= Image
+    #[style]
+    mipmap_mode: MipmapMode,
 }
 
 impl Image {
@@ -191,27 +135,13 @@ impl Image {
     }
 }
 
-impl WidgetBase for Image {
-    fn get_id(&self) -> WidgetId {
-        self.id
-    }
-
-    fn set_id(&mut self, id: WidgetId) {
-        self.id = id;
-    }
-
-    fn get_key(&self) -> Option<&WidgetKey> {
-        self.key.as_ref()
-    }
-
-    fn get_class(&self) -> WidgetClass {
-        self.class.clone()
-    }
-
+impl WidgetGetType for Image {
     fn get_type(&self) -> &'static str {
         "image"
     }
+}
 
+impl WidgetSizingMode for Image {
     fn sizing_mode(&self) -> SizingMode {
         SizingMode::Dynamic
     }
