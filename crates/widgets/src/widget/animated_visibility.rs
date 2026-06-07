@@ -5,19 +5,16 @@ use macros::{widget, widget_style};
 use crate::{
     animations::{AnimationFilter, AnimationKind, Easing},
     context::{
-        AnimationDirection, AnimationProgress, LoadConstraints, LoadExtent,
-        ManageAnimationRegistry, ManageDirtyFlags, ManageIntrinsic, SaveConstraints, SaveExtent,
-        ScopedContext, StateSubscription, StyleSubscription,
+        AnimationDirection, AnimationProgress, ManageAnimationRegistry, ManageDirtyFlags,
+        ManageIntrinsic, ScopedContext, StateSubscription, StyleSubscription,
     },
     drawer::Drawer,
     events::{DispatchContext, DispatchEvent, Event},
+    measure::{self, Constraints, Intrinsic, Measure, MeasureContext, SizingMode},
     state::State,
     types::{
-        dirty_flags::DirtyFlags,
-        identifiers::WidgetKey,
-        measure::{Constraints, Intrinsic, Measure, MeasureContext, SizingMode},
-        style::Configure,
-        Extent, Offset, WidgetClass, WidgetId, WidgetStyle,
+        dirty_flags::DirtyFlags, identifiers::WidgetKey, style::Configure, Extent, Offset,
+        WidgetClass, WidgetId, WidgetStyle,
     },
     widget::{
         Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
@@ -59,7 +56,7 @@ pub struct AnimatedVisibility {
     child: Option<Widget>,
 }
 
-#[widget_style(targets(AnimatedVisibility))]
+#[widget_style(kind = minimal,targets(AnimatedVisibility))]
 #[derive(bon::Builder, Debug, Default, Clone)]
 pub struct AnimatedVisibilityStyle {
     primary_animation: AnimationDefinition,
@@ -247,66 +244,31 @@ where
     }
 }
 
-impl Measure<f32, WidgetId> for AnimatedVisibility {
-    fn get_intrinsic<C>(&self, context: &mut C) -> Intrinsic<f32>
+impl Measure<f32> for AnimatedVisibility {
+    fn intrinsic_content<C>(&self, context: &mut C) -> Intrinsic<f32>
     where
         C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let dirty_flags = context.get_dirty_flags(self.id);
-        let cached_intrinsic = context.load(self.id);
-
-        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE) && cached_intrinsic.is_some() {
-            return cached_intrinsic.unwrap_or_default();
-        }
-
-        let intrinsic = self
-            .child
+        self.child
             .as_ref()
-            .map(|child| child.get_intrinsic(context))
-            .unwrap_or_default();
-        context.save(self.id, intrinsic);
-
-        intrinsic
+            .map(|child| child.intrinsic(context))
+            .unwrap_or_default()
     }
 
-    fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
+    fn visit_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
+        if let Some(child) = &self.child {
+            visitor.visit(child);
+        }
+    }
+
+    fn measure_content<C>(
+        &self,
+        context: &mut C,
+        constraints: Constraints<Extent<f32>>,
+    ) -> Extent<f32>
     where
         C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-        let constraints_changed =
-            Some(constraints) != <C as LoadConstraints<f32, WidgetId>>::load(context, self.id);
-        let cached_extent = <C as LoadExtent<f32, WidgetId>>::load(context, self.id);
-
-        if !dirty_flags.intersects(DirtyFlags::NEEDS_MEASURE | DirtyFlags::CHILD_NEEDS_MEASURE)
-            && !constraints_changed
-            && cached_extent.is_some()
-        {
-            return cached_extent.unwrap_or_default();
-        }
-
-        if dirty_flags.contains(DirtyFlags::CHILD_NEEDS_MEASURE)
-            && !constraints_changed
-            && cached_extent.is_some()
-        {
-            if let Some(child) = &self.child {
-                let child_constraints =
-                    <C as LoadConstraints<f32, WidgetId>>::load(context, child.get_id())
-                        .or_else(|| {
-                            <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
-                                .map(Constraints::new_tight)
-                        })
-                        .unwrap_or_default();
-
-                child.measure(context, child_constraints);
-            }
-
-            dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
-            context.set_dirty_flags(self.id, dirty_flags);
-
-            return cached_extent.unwrap_or_default();
-        }
-
         let mut used_extent = self
             .child
             .as_ref()
@@ -322,12 +284,6 @@ impl Measure<f32, WidgetId> for AnimatedVisibility {
         if let VisibilityPhase::Hidden = self.phase {
             used_extent *= 0.0;
         }
-
-        <C as SaveConstraints<f32, WidgetId>>::save(context, self.id, constraints);
-        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, used_extent);
-
-        dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
-        context.set_dirty_flags(self.id, dirty_flags);
 
         used_extent
     }

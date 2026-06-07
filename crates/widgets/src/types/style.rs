@@ -75,6 +75,7 @@ impl<T> StyleProperty<T> {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn is_default(&self) -> bool {
         matches!(self, StyleProperty::Default)
     }

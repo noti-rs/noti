@@ -3,12 +3,11 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 use log::warn;
 
 use crate::{
-    context::{
-        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints,
-        SaveExtent, StyleSubscription,
-    },
+    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic, StyleSubscription},
+    decorator::{content::Content, DecoratorExt, MeasureDecorator},
     drawer::Drawer,
     events::{DispatchContext, DispatchEvent, Event},
+    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     types::{
         alignment::{Alignment, Position},
         border::Border,
@@ -16,7 +15,6 @@ use crate::{
         dirty_flags::DirtyFlags,
         extent::{Extent, FlexExtent},
         identifiers::{WidgetClass, WidgetId, WidgetKey},
-        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
         style::{Configure, StyleProperty, WidgetStyle},
@@ -383,254 +381,183 @@ where
     }
 }
 
-impl Measure<f32, WidgetId> for FlexContainer {
-    fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
+impl Measure<f32> for FlexContainer {
+    fn intrinsic_content<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
         C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let dirty_flags = context.get_dirty_flags(self.id);
-        let cached_intrinsic = context.load(self.id);
-
-        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE) && cached_intrinsic.is_some() {
-            return cached_intrinsic.unwrap_or_default();
-        }
-
-        let inner_spacing = self.inner_spacing();
-        let spacing_size = Extent::from(inner_spacing);
-
-        if self.children.is_empty() {
-            return measure::Intrinsic::new(spacing_size, spacing_size);
-        }
-
-        let mut main_min_intrinsic = 0.0;
-        let mut main_max_intrinsic = 0.0;
-        let mut cross_min_intrinsic = 0.0;
-        let mut cross_max_intrinsic = 0.0;
-        for child in &self.children {
-            let child_intrinsic = child.get_intrinsic(context);
-
-            let main_min = child_intrinsic.min.by_direction(&self.direction);
-            let cross_min = child_intrinsic
-                .min
-                .by_direction(&self.direction.orthogonalize());
-
-            let main_max = child_intrinsic.max.by_direction(&self.direction);
-            let cross_max = child_intrinsic
-                .max
-                .by_direction(&self.direction.orthogonalize());
-
-            main_min_intrinsic += main_min;
-            main_max_intrinsic += main_max;
-
-            if cross_min_intrinsic < cross_min {
-                cross_min_intrinsic = cross_min;
+        Content::intrinsic_fn(|| {
+            if self.children.is_empty() {
+                return measure::Intrinsic::default();
             }
 
-            if cross_max_intrinsic < cross_max {
-                cross_max_intrinsic = cross_max;
+            let mut min_intrinsic = FlexExtent::<f32> {
+                main: 0.0,
+                cross: 0.0,
+            };
+
+            let mut max_intrinsic = FlexExtent::<f32> {
+                main: 0.0,
+                cross: 0.0,
+            };
+
+            for child in &self.children {
+                let child_intrinsic = child.intrinsic(context);
+
+                let child_min_intrinsic = child_intrinsic.min.to_flex(&self.direction);
+                min_intrinsic.main += child_min_intrinsic.main;
+                min_intrinsic.cross = min_intrinsic.cross.max(child_min_intrinsic.cross);
+
+                let child_max_intrinsic = child_intrinsic.max.to_flex(&self.direction);
+                max_intrinsic.main += child_max_intrinsic.main;
+                max_intrinsic.cross = max_intrinsic.cross.max(child_max_intrinsic.cross);
             }
-        }
 
-        let max_intrinsic = FlexExtent {
-            main: main_max_intrinsic,
-            cross: cross_max_intrinsic,
-        };
-
-        let min_intrinsic = FlexExtent {
-            main: main_min_intrinsic,
-            cross: cross_min_intrinsic,
-        };
-
-        let intrinsic = measure::Intrinsic::new(
-            min_intrinsic.to_normal(&self.direction) + spacing_size,
-            max_intrinsic.to_normal(&self.direction) + spacing_size,
-        );
-
-        context.save(self.id, intrinsic);
-        intrinsic
+            measure::Intrinsic::new(
+                min_intrinsic.to_normal(&self.direction),
+                max_intrinsic.to_normal(&self.direction),
+            )
+        })
+        .spacing(self.spacing.unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .intrinsic()
     }
 
-    fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
+    fn visit_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
+        for child in &self.children {
+            visitor.visit(child);
+        }
+    }
+
+    fn measure_content<C>(
+        &self,
+        context: &mut C,
+        constraints: Constraints<Extent<f32>>,
+    ) -> Extent<f32>
     where
         C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-        let constraints_changed =
-            Some(constraints) != <C as LoadConstraints<f32, WidgetId>>::load(context, self.id);
-        let cached_extent = <C as LoadExtent<f32, WidgetId>>::load(context, self.id);
+        Content::measure_fn(|constraints| {
+            let mut fixed_children = vec![];
+            let mut dynamic_children = vec![];
 
-        if !dirty_flags.intersects(DirtyFlags::NEEDS_MEASURE | DirtyFlags::CHILD_NEEDS_MEASURE)
-            && !constraints_changed
-            && cached_extent.is_some()
-        {
-            return cached_extent.unwrap_or_default();
-        }
-
-        if dirty_flags.contains(DirtyFlags::CHILD_NEEDS_MEASURE)
-            && !constraints_changed
-            && cached_extent.is_some()
-        {
             for child in &self.children {
+                let intrinsic = child.intrinsic(context);
+
+                match child.sizing_mode() {
+                    SizingMode::Fixed => fixed_children.push((child, intrinsic)),
+                    SizingMode::Dynamic => dynamic_children.push((child, intrinsic)),
+                }
+            }
+
+            let flex_constraints = Constraints {
+                min: constraints.min.to_flex(&self.direction),
+                max: constraints.max.to_flex(&self.direction),
+            };
+
+            let mut used_extent = <FlexExtent<f32>>::default();
+
+            for (child, child_intrinsic) in fixed_children {
+                let child_constraints = Constraints::new_tight(
+                    FlexExtent {
+                        main: child_intrinsic.max.by_direction(&self.direction),
+                        cross: flex_constraints.max.cross,
+                    }
+                    .to_normal(&self.direction),
+                );
+                let child_used = child
+                    .measure(context, child_constraints)
+                    .to_flex(&self.direction);
+                used_extent.main += child_used.main;
+                used_extent.cross = used_extent.cross.max(child_used.cross);
+            }
+
+            let mut remainder = flex_constraints.max.main - used_extent.main;
+            let mut freezed_childs = vec![];
+            let mut base_fair_share = 0.0;
+
+            'outer: while !dynamic_children.is_empty() {
+                let fair_share = remainder / dynamic_children.len() as f32;
+
+                for i in 0..dynamic_children.len() {
+                    let (child, child_intrinsic) = dynamic_children[i];
+
+                    let child_min_main = child_intrinsic.min.by_direction(&self.direction);
+                    let child_max_main = child_intrinsic.max.by_direction(&self.direction);
+
+                    if fair_share > child_max_main {
+                        dynamic_children.remove(i);
+
+                        freezed_childs.push((
+                            child,
+                            FlexExtent {
+                                main: child_max_main,
+                                cross: flex_constraints.max.cross,
+                            },
+                        ));
+
+                        remainder -= child_max_main;
+                        continue 'outer;
+                    } else if fair_share < child_min_main {
+                        dynamic_children.remove(i);
+
+                        freezed_childs.push((
+                            child,
+                            FlexExtent {
+                                main: child_min_main,
+                                cross: flex_constraints.max.cross,
+                            },
+                        ));
+
+                        remainder = (remainder - child_min_main).max(0.0);
+                        continue 'outer;
+                    }
+                }
+
+                base_fair_share = fair_share;
+                break;
+            }
+
+            for (child, fair_share_extent) in freezed_childs {
                 let child_constraints =
-                    <C as LoadConstraints<f32, WidgetId>>::load(context, child.get_id())
-                        .or_else(|| {
-                            <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
-                                .map(Constraints::new_tight)
-                        })
-                        .unwrap();
-
-                child.measure(context, child_constraints);
+                    Constraints::new_soft(fair_share_extent.to_normal(&self.direction));
+                let child_used = child
+                    .measure(context, child_constraints)
+                    .to_flex(&self.direction);
+                used_extent.main += child_used.main;
+                used_extent.cross = used_extent.cross.max(child_used.cross);
             }
 
-            dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
-            context.set_dirty_flags(self.id, dirty_flags);
-
-            return cached_extent.unwrap_or_default();
-        }
-
-        let inner_spacing = self.inner_spacing();
-        let spacing_size = Extent::from(inner_spacing);
-
-        let mut fixed_children = vec![];
-        let mut dynamic_children = vec![];
-
-        for child in &self.children {
-            let intrinsic = child.get_intrinsic(context);
-
-            match child.sizing_mode() {
-                SizingMode::Fixed => fixed_children.push((child, intrinsic)),
-                SizingMode::Dynamic => dynamic_children.push((child, intrinsic)),
+            for (child, _) in dynamic_children {
+                let child_constraints = Constraints::new_soft(
+                    FlexExtent {
+                        main: base_fair_share,
+                        cross: flex_constraints.max.cross,
+                    }
+                    .to_normal(&self.direction),
+                );
+                let child_used = child
+                    .measure(context, child_constraints)
+                    .to_flex(&self.direction);
+                used_extent.main += child_used.main;
+                used_extent.cross = used_extent.cross.max(child_used.cross);
             }
-        }
 
-        let mut inner_constraints = constraints;
-        inner_constraints.max.shrink_by(&inner_spacing);
-        inner_constraints.min.shrink_by(&inner_spacing);
+            let mut used_extent = (used_extent.to_normal(&self.direction))
+                .clamp_with(constraints.min, constraints.max);
 
-        inner_constraints.max.width = inner_constraints.max.width.max(0.0);
-        inner_constraints.max.height = inner_constraints.max.height.max(0.0);
-
-        inner_constraints.min.width = inner_constraints
-            .min
-            .width
-            .max(0.0)
-            .min(inner_constraints.max.height);
-        inner_constraints.min.height = inner_constraints
-            .min
-            .height
-            .max(0.0)
-            .min(inner_constraints.max.height);
-
-        let inner_constraints = Constraints {
-            min: inner_constraints.min.to_flex(&self.direction),
-            max: inner_constraints.max.to_flex(&self.direction),
-        };
-
-        let mut used_extent = <FlexExtent<f32>>::default();
-
-        for (child, child_intrinsic) in fixed_children {
-            let child_constraints = Constraints::new_tight(
-                FlexExtent {
-                    main: child_intrinsic.max.by_direction(&self.direction),
-                    cross: inner_constraints.max.cross,
-                }
-                .to_normal(&self.direction),
-            );
-            let child_used = child
-                .measure(context, child_constraints)
-                .to_flex(&self.direction);
-            used_extent.main += child_used.main;
-            used_extent.cross = used_extent.cross.max(child_used.cross);
-        }
-
-        let mut remainder = inner_constraints.max.main - used_extent.main;
-        let mut freezed_childs = vec![];
-        let mut base_fair_share = 0.0;
-
-        'outer: while !dynamic_children.is_empty() {
-            let fair_share = remainder / dynamic_children.len() as f32;
-
-            for i in 0..dynamic_children.len() {
-                let (child, child_intrinsic) = dynamic_children[i];
-
-                let child_min_main = child_intrinsic.min.by_direction(&self.direction);
-                let child_max_main = child_intrinsic.max.by_direction(&self.direction);
-
-                if fair_share > child_max_main {
-                    dynamic_children.remove(i);
-
-                    freezed_childs.push((
-                        child,
-                        FlexExtent {
-                            main: child_max_main,
-                            cross: inner_constraints.max.cross,
-                        },
-                    ));
-
-                    remainder -= child_max_main;
-                    continue 'outer;
-                } else if fair_share < child_min_main {
-                    dynamic_children.remove(i);
-
-                    freezed_childs.push((
-                        child,
-                        FlexExtent {
-                            main: child_min_main,
-                            cross: inner_constraints.max.cross,
-                        },
-                    ));
-
-                    remainder = (remainder - child_min_main).max(0.0);
-                    continue 'outer;
+            if self.expand {
+                match self.direction {
+                    Direction::Horizontal => used_extent.width = constraints.max.width,
+                    Direction::Vertical => used_extent.height = constraints.max.height,
                 }
             }
 
-            base_fair_share = fair_share;
-            break;
-        }
-
-        for (child, fair_share_extent) in freezed_childs {
-            let child_constraints =
-                Constraints::new_soft(fair_share_extent.to_normal(&self.direction));
-            let child_used = child
-                .measure(context, child_constraints)
-                .to_flex(&self.direction);
-            used_extent.main += child_used.main;
-            used_extent.cross = used_extent.cross.max(child_used.cross);
-        }
-
-        for (child, _) in dynamic_children {
-            let child_constraints = Constraints::new_soft(
-                FlexExtent {
-                    main: base_fair_share,
-                    cross: inner_constraints.max.cross,
-                }
-                .to_normal(&self.direction),
-            );
-            let child_used = child
-                .measure(context, child_constraints)
-                .to_flex(&self.direction);
-            used_extent.main += child_used.main;
-            used_extent.cross = used_extent.cross.max(child_used.cross);
-        }
-
-        let mut used_extent = (used_extent.to_normal(&self.direction) + spacing_size)
-            .clamp_with(constraints.min, constraints.max);
-
-        if self.expand {
-            match self.direction {
-                Direction::Horizontal => used_extent.width = constraints.max.width,
-                Direction::Vertical => used_extent.height = constraints.max.height,
-            }
-        }
-
-        <C as SaveConstraints<f32, WidgetId>>::save(context, self.id, constraints);
-        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, used_extent);
-
-        dirty_flags -= DirtyFlags::NEEDS_MEASURE | DirtyFlags::CHILD_NEEDS_MEASURE;
-        context.set_dirty_flags(self.id, dirty_flags);
-
-        used_extent
+            used_extent
+        })
+        .spacing(self.spacing.unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .measure(constraints)
     }
 }
 

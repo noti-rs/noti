@@ -1,10 +1,9 @@
 use crate::{
+    measure::{Constraints, Intrinsic},
     state::{MutableState, State, StateInfo},
     types::{
-        dirty_flags::DirtyFlags,
-        identifiers::WidgetKey,
-        measure::{Constraints, Intrinsic},
-        Extent, StyleInfo, WidgetClass, WidgetId, WidgetStyle,
+        dirty_flags::DirtyFlags, identifiers::WidgetKey, Extent, StyleInfo, WidgetClass, WidgetId,
+        WidgetStyle,
     },
 };
 use std::{any::Any, collections::HashMap, time::Duration};

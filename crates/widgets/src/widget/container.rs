@@ -2,28 +2,26 @@ use log::warn;
 use macros::widget_style;
 
 use crate::{
-    context::{
-        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints,
-        SaveExtent, StyleSubscription,
-    },
+    context::{ManageDirtyFlags, ManageIntrinsic, StyleSubscription},
+    decorator::{content::Content, DecoratorExt, MeasureDecorator},
     drawer::Drawer,
     events::{DispatchContext, DispatchEvent, Event},
+    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     types::{
         alignment::Alignment,
         border::Border,
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
-        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
         style::{Configure, StyleProperty, WidgetStyle},
-        Color, Point,
+        Color,
     },
     widget::{
-        draw_debug_bounds, flex_container::FlexContainer, Draw, DrawContext, Init, InitContext,
-        Invalidate, InvalidateContext, Layout, LayoutContext, Widget, WidgetGetType,
-        WidgetInformation, WidgetSizingMode,
+        flex_container::FlexContainer, Draw, DrawContext, Init, InitContext, Invalidate,
+        InvalidateContext, Layout, LayoutContext, Widget, WidgetGetType, WidgetInformation,
+        WidgetSizingMode,
     },
 };
 
@@ -99,7 +97,8 @@ pub struct Container {
     /// of its content's size or the parent's constraints. This effectively
     /// "locks" the widget's size, preventing it from expanding or
     /// shrinking during the layout pass.
-    width: usize,
+    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
+    width: StyleProperty<usize>,
 
     /// A hard-coded, fixed dimension for this axis.
     ///
@@ -107,7 +106,8 @@ pub struct Container {
     /// of its content's size or the parent's constraints. This effectively
     /// "locks" the widget's size, preventing it from expanding or
     /// shrinking during the layout pass.
-    height: usize,
+    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
+    height: StyleProperty<usize>,
 
     /// The single nested widget managed by this container.
     ///
@@ -125,7 +125,7 @@ pub struct Container {
 /// data—such as alignment and borders—directly into the widget's
 /// compilation phase. If no configuration is associated with a
 /// widget's ID, it continues to use its own internal state.
-#[widget_style(targets(Container, FlexContainer))]
+#[widget_style(kind = minimal, targets(Container, FlexContainer))]
 #[derive(bon::Builder, Debug, Clone)]
 pub struct ContainerStyle {
     pub background_color: Color,
@@ -251,79 +251,53 @@ where
     }
 }
 
-impl Measure<f32, WidgetId> for Container {
-    fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
+impl Measure<f32> for Container {
+    fn intrinsic_content<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
         C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let dirty_flags = context.get_dirty_flags(self.id);
-        let cached_intrinsic = context.load(self.id);
-
-        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE) && cached_intrinsic.is_some() {
-            return cached_intrinsic.unwrap_or_default();
-        }
-
-        let exact_extent = Extent::new(self.width as f32, self.height as f32);
-        let intrinsic = measure::Intrinsic::new(exact_extent, exact_extent);
-        context.save(self.id, intrinsic);
-
-        intrinsic
+        Content::intrinsic_fn(|| {
+            if let Some(child) = &self.child {
+                child.intrinsic(context)
+            } else {
+                measure::Intrinsic::default()
+            }
+        })
+        .spacing(self.spacing.unwrap_or_default())
+        .box_size(
+            self.width.as_option().map(|&width| width as f32),
+            self.height.as_option().map(|&height| height as f32),
+        )
+        .intrinsic()
     }
 
-    fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
+    fn visit_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
+        if let Some(child) = &self.child {
+            visitor.visit(child);
+        }
+    }
+
+    fn measure_content<C>(
+        &self,
+        context: &mut C,
+        constraints: Constraints<Extent<f32>>,
+    ) -> Extent<f32>
     where
         C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-        let constraints_changed =
-            Some(constraints) != <C as LoadConstraints<f32, WidgetId>>::load(context, self.id);
-        let cached_extent = <C as LoadExtent<f32, WidgetId>>::load(context, self.id);
-
-        if !dirty_flags.contains(DirtyFlags::CHILD_NEEDS_MEASURE)
-            && !constraints_changed
-            && cached_extent.is_some()
-        {
-            return cached_extent.unwrap_or_default();
-        }
-
-        if dirty_flags.contains(DirtyFlags::CHILD_NEEDS_MEASURE)
-            && !constraints_changed
-            && cached_extent.is_some()
-        {
+        Content::measure_fn(|container_constraints| {
             if let Some(child) = &self.child {
-                let child_constraints =
-                    <C as LoadConstraints<f32, WidgetId>>::load(context, child.get_id())
-                        .or_else(|| {
-                            <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
-                                .map(Constraints::new_tight)
-                        })
-                        .unwrap_or_default();
-
-                child.measure(context, child_constraints);
+                child.measure(context, container_constraints)
+            } else {
+                Extent::default()
             }
-
-            dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
-            context.set_dirty_flags(self.id, dirty_flags);
-
-            return cached_extent.unwrap_or_default();
-        }
-
-        let extent = Extent::new(self.width as f32, self.height as f32);
-        let inner_extent = extent.shrink_to_with(&self.inner_spacing());
-
-        if let Some(child) = &self.child {
-            child.measure(context, Constraints::new_soft(inner_extent));
-        }
-
-        let clamped_extent = extent.clamp_with(constraints.min, constraints.max);
-
-        <C as SaveConstraints<f32, WidgetId>>::save(context, self.id, constraints);
-        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, clamped_extent);
-
-        dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
-        context.set_dirty_flags(self.id, dirty_flags);
-
-        clamped_extent
+        })
+        .spacing(self.spacing.unwrap_or_default())
+        .box_size(
+            self.width.as_option().map(|&width| width as f32),
+            self.height.as_option().map(|&height| height as f32),
+        )
+        .measure(constraints)
     }
 }
 
@@ -347,84 +321,84 @@ where
     C: DrawContext<f32>,
 {
     fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
-        let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
-            warn!(
-                "Container with id {} wasn't measured. Refused to draw.",
-                *self.id
-            );
-            return;
-        };
+        todo!()
 
-        let actual_extent = Extent::new(self.width as f32, self.height as f32);
-
-        if provided_extent.width < actual_extent.width
-            || provided_extent.height < actual_extent.height
-            || self.width == 0
-            || self.height == 0
-        {
-            return;
-        }
-
-        let actual_offset = *offset
-            + Offset::new(
-                (provided_extent.width - actual_extent.width) / 2.0,
-                (provided_extent.height - actual_extent.height) / 2.0,
-            );
-
-        let canvas = drawer.surface.canvas();
-        canvas.save();
-        let rect = skia_safe::Rect::from_xywh(
-            actual_offset.x,
-            actual_offset.y,
-            actual_extent.width,
-            actual_extent.height,
-        );
-
-        let border = self.border.clone().unwrap_or_default();
-        let border_radius = border.radius as f32;
-        let rrect = skia_safe::RRect::new_rect_xy(rect, border_radius, border_radius);
-        canvas.clip_rrect(rrect, skia_safe::ClipOp::Intersect, true);
-
-        let background_color = self.background_color.clone().unwrap_or_default();
-        if !background_color.is_transparent() {
-            drawer.fill_background(actual_offset, actual_extent, &border, &background_color);
-        }
-
-        let inner_spacing = self.inner_spacing();
-        let mut inner_extent = actual_extent;
-        inner_extent.shrink_by(&inner_spacing);
-
-        if let Some(child) = &self.child {
-            let alignment = self.alignment.clone().unwrap_or_default();
-            let child_extent =
-                <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id()).unwrap_or_default();
-
-            let horizontal_start = alignment
-                .horizontal
-                .get_start(inner_extent.width, child_extent.width)
-                + inner_spacing.left as f32;
-            let vertical_start = alignment
-                .vertical
-                .get_start(inner_extent.height, child_extent.height)
-                + inner_spacing.top as f32;
-
-            let offset_for_child = actual_offset + Offset::new(horizontal_start, vertical_start);
-            child.draw(context, &offset_for_child, drawer);
-        }
-
-        drawer.outline_border(actual_offset, actual_extent, &border);
-
-        drawer.surface.canvas().restore();
-
-        if context.get_debug_options().show_layout_bounds {
-            draw_debug_bounds(
-                drawer.surface.canvas(),
-                *offset,
-                provided_extent,
-                actual_offset,
-                actual_extent,
-            );
-        }
+        // let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
+        //     warn!(
+        //         "Container with id {} wasn't measured. Refused to draw.",
+        //         *self.id
+        //     );
+        //     return;
+        // };
+        //
+        // let actual_extent = Extent::new(self.width as f32, self.height as f32);
+        //
+        // if provided_extent.width < actual_extent.width
+        //     || provided_extent.height < actual_extent.height
+        // {
+        //     return;
+        // }
+        //
+        // let actual_offset = *offset
+        //     + Offset::new(
+        //         (provided_extent.width - actual_extent.width) / 2.0,
+        //         (provided_extent.height - actual_extent.height) / 2.0,
+        //     );
+        //
+        // let canvas = drawer.surface.canvas();
+        // canvas.save();
+        // let rect = skia_safe::Rect::from_xywh(
+        //     actual_offset.x,
+        //     actual_offset.y,
+        //     actual_extent.width,
+        //     actual_extent.height,
+        // );
+        //
+        // let border = self.border.clone().unwrap_or_default();
+        // let border_radius = border.radius as f32;
+        // let rrect = skia_safe::RRect::new_rect_xy(rect, border_radius, border_radius);
+        // canvas.clip_rrect(rrect, skia_safe::ClipOp::Intersect, true);
+        //
+        // let background_color = self.background_color.clone().unwrap_or_default();
+        // if !background_color.is_transparent() {
+        //     drawer.fill_background(actual_offset, actual_extent, &border, &background_color);
+        // }
+        //
+        // let inner_spacing = self.inner_spacing();
+        // let mut inner_extent = actual_extent;
+        // inner_extent.shrink_by(&inner_spacing);
+        //
+        // if let Some(child) = &self.child {
+        //     let alignment = self.alignment.clone().unwrap_or_default();
+        //     let child_extent =
+        //         <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id()).unwrap_or_default();
+        //
+        //     let horizontal_start = alignment
+        //         .horizontal
+        //         .get_start(inner_extent.width, child_extent.width)
+        //         + inner_spacing.left as f32;
+        //     let vertical_start = alignment
+        //         .vertical
+        //         .get_start(inner_extent.height, child_extent.height)
+        //         + inner_spacing.top as f32;
+        //
+        //     let offset_for_child = actual_offset + Offset::new(horizontal_start, vertical_start);
+        //     child.draw(context, &offset_for_child, drawer);
+        // }
+        //
+        // drawer.outline_border(actual_offset, actual_extent, &border);
+        //
+        // drawer.surface.canvas().restore();
+        //
+        // if context.get_debug_options().show_layout_bounds {
+        //     draw_debug_bounds(
+        //         drawer.surface.canvas(),
+        //         *offset,
+        //         provided_extent,
+        //         actual_offset,
+        //         actual_extent,
+        //     );
+        // }
     }
 }
 
@@ -433,47 +407,49 @@ where
     C: DispatchContext<f32>,
 {
     fn dispatch_event(&mut self, context: &mut C, event: Event) {
-        if !event.kind.is_mouse() {
-            return;
-        }
+        todo!()
 
-        let inner_spacing = self.inner_spacing();
-        let mut inner_extent = Extent::new(self.width as f32, self.height as f32);
-        inner_extent.shrink_by(&inner_spacing);
-
-        let Some(child) = &mut self.child else {
-            return;
-        };
-
-        if event.local_coord.x > self.width as f32 || event.local_coord.y > self.height as f32 {
-            return;
-        }
-
-        let alignment = self.alignment.clone().unwrap_or_default();
-        let child_extent = context.load(child.get_id()).unwrap_or_default();
-        let horizontal_start = alignment
-            .horizontal
-            .get_start(inner_extent.width, child_extent.width)
-            + inner_spacing.left as f32;
-        let vertical_start = alignment
-            .vertical
-            .get_start(inner_extent.height, child_extent.height)
-            + inner_spacing.top as f32;
-
-        if event.local_coord.x < horizontal_start
-            || event.local_coord.y < vertical_start
-            || event.local_coord.x > horizontal_start + child_extent.width
-            || event.local_coord.y > vertical_start + child_extent.height
-        {
-            return;
-        }
-
-        let mut modified_event = event.clone();
-        modified_event.local_coord = Point {
-            x: horizontal_start - event.local_coord.x,
-            y: vertical_start - event.local_coord.y,
-        };
-
-        child.dispatch_event(context, modified_event)
+        // if !event.kind.is_mouse() {
+        //     return;
+        // }
+        //
+        // let inner_spacing = self.inner_spacing();
+        // let mut inner_extent = Extent::new(self.width as f32, self.height as f32);
+        // inner_extent.shrink_by(&inner_spacing);
+        //
+        // let Some(child) = &mut self.child else {
+        //     return;
+        // };
+        //
+        // if event.local_coord.x > self.width as f32 || event.local_coord.y > self.height as f32 {
+        //     return;
+        // }
+        //
+        // let alignment = self.alignment.clone().unwrap_or_default();
+        // let child_extent = context.load(child.get_id()).unwrap_or_default();
+        // let horizontal_start = alignment
+        //     .horizontal
+        //     .get_start(inner_extent.width, child_extent.width)
+        //     + inner_spacing.left as f32;
+        // let vertical_start = alignment
+        //     .vertical
+        //     .get_start(inner_extent.height, child_extent.height)
+        //     + inner_spacing.top as f32;
+        //
+        // if event.local_coord.x < horizontal_start
+        //     || event.local_coord.y < vertical_start
+        //     || event.local_coord.x > horizontal_start + child_extent.width
+        //     || event.local_coord.y > vertical_start + child_extent.height
+        // {
+        //     return;
+        // }
+        //
+        // let mut modified_event = event.clone();
+        // modified_event.local_coord = Point {
+        //     x: horizontal_start - event.local_coord.x,
+        //     y: vertical_start - event.local_coord.y,
+        // };
+        //
+        // child.dispatch_event(context, modified_event)
     }
 }

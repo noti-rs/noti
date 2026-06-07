@@ -88,17 +88,20 @@ where
     where
         T: PartialOrd + Sub<Output = T> + num_traits::FromPrimitive,
     {
-        let mut width = self.width - T::from_usize(spacing.horizontal()).unwrap_or_default();
-        if let Some(Ordering::Less) = width.partial_cmp(&Default::default()) {
-            width = Default::default();
-        }
-        self.width = width;
+        let horizontal = T::from_usize(spacing.horizontal()).unwrap_or_default();
+        let vertical = T::from_usize(spacing.vertical()).unwrap_or_default();
 
-        let mut height = self.height - T::from_usize(spacing.vertical()).unwrap_or_default();
-        if let Some(Ordering::Less) = height.partial_cmp(&Default::default()) {
-            height = Default::default();
-        }
-        self.height = height;
+        self.width = if self.width > horizontal {
+            self.width - horizontal
+        } else {
+            T::default()
+        };
+
+        self.height = if self.height > vertical {
+            self.height - vertical
+        } else {
+            T::default()
+        };
     }
 
     pub fn shrink_to_with(&self, spacing: &Spacing) -> Self

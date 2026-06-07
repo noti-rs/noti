@@ -10,17 +10,17 @@ use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::Try
 
 use crate::{
     context::{
-        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints,
-        SaveExtent, StateSubscription, StyleSubscription,
+        LoadExtent, ManageDirtyFlags, ManageIntrinsic, StateSubscription, StyleSubscription,
     },
+    decorator::{content::Content, DecoratorExt, MeasureDecorator},
     drawer::Drawer,
     events::{DispatchContext, DispatchEvent, Event},
+    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     state::State,
     types::{
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
-        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
         style::{Configure, WidgetStyle},
@@ -206,170 +206,45 @@ where
     }
 }
 
-impl Measure<f32, WidgetId> for Image {
-    /// Calculates the "natural" size of the widget without external influence.
-    ///
-    /// Min Intrinsic: Represents the absolute floor for the widget's size.
-    ///
-    ///  - Logic: Sum of horizontal_spacing and vertical_spacing.
-    ///  - Intention: Prevents layout collapse. If an image is loading or missing, the widget still occupies the space defined by its margins/padding to avoid layout shifts.
-    ///
-    /// Max Intrinsic: Represents the "ideal" unconstrained size.
-    ///
-    /// - Logic: content.extent + spacing.
-    /// - Intention: Tells the parent container (like a Flex) the native resolution of the asset plus its required offsets.
-    fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
+impl Measure<f32> for Image {
+    fn intrinsic_content<C>(&self, _context: &mut C) -> measure::Intrinsic<f32>
     where
         C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let dirty_flags = context.get_dirty_flags(self.id);
-        let cached_intrinsic = context.load(self.id);
-
-        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE) && cached_intrinsic.is_some() {
-            return cached_intrinsic.unwrap_or_default();
-        }
-
-        let inner_spacing = self.margin.unwrap_or_default();
-        let spacing_size = Extent::from(inner_spacing);
-
-        let Some(content) = &self.value else {
-            return measure::Intrinsic::new(spacing_size, spacing_size);
-        };
-
-        let mut extent = Extent::new(0., 0.);
-        if let Some(width) = self.width.as_option() {
-            extent.width = *width as f32;
-
-            if self.height.is_default() {
-                extent.height = extent.width / content.aspect_ratio;
+        Content::intrinsic_fn(|| {
+            if let Some(content) = &self.value {
+                measure::Intrinsic::new(Extent::default(), content.extent)
+            } else {
+                measure::Intrinsic::default()
             }
-        }
-
-        if let Some(height) = self.height.as_option() {
-            extent.height = *height as f32;
-
-            if self.width.is_default() {
-                extent.width = extent.height * content.aspect_ratio;
-            }
-        }
-
-        if self.width.is_default() && self.height.is_default() {
-            extent = content.extent;
-        }
-
-        let max = extent + spacing_size;
-        let intrinsic = measure::Intrinsic::new(spacing_size, max);
-
-        context.save(self.id, intrinsic);
-        intrinsic
+        })
+        .box_size_with_ratio(
+            self.width.as_option().map(|width| *width as f32),
+            self.height.as_option().map(|height| *height as f32),
+            self.value.as_ref().map(|val| val.aspect_ratio),
+        )
+        .spacing(self.margin.unwrap_or_default())
+        .intrinsic()
     }
 
-    ///Determines the final size of the widget based on the parent's Constraints.
-    ///
-    /// 1. Constraint Adjustment
-    ///
-    /// Before any calculation, the Constraints must be reduced by the spacing (margins/padding).
-    ///
-    /// `inner_max = constraints.max - spacing`
-    ///
-    /// If inner_max dimensions are negative, return spacing (the minimum allowed size).
-    ///
-    /// 2. Determining Content Size
-    ///
-    /// The widget resolves its size based on the following priority:
-    ///
-    /// Case A: Explicit Dimensions (Hard/Partial Fixation)
-    /// If width or height (or both) are provided as Option<usize>, they override the content's native extent.
-    ///
-    /// Both set: The size is fixed to these values.
-    /// Only one set: The missing dimension is calculated using content.aspect_ratio.
-    ///
-    /// Case B: Dynamic Scaling (Soft Fixation)
-    /// If no explicit dimensions are set, the widget attempts to fit the image as large as possible within
-    /// inner_max while preserving aspect_ratio.
-    ///
-    /// Assume width = inner_max.width.
-    ///
-    /// Calculate height = width / aspect_ratio.
-    /// If height > inner_max.height:
-    /// Set height = inner_max.height.
-    /// Set width = height * aspect_ratio.
-    ///
-    /// 3. Contract Enforcement (Clamping)
-    ///
-    /// The resulting size from the steps above must be validated against the original inner_constraints.
-    ///
-    /// Logic: final_content_size = size.clamp(inner_min, inner_max).
-    ///
-    /// Intention: Ensures the widget never returns a value smaller than constraints.min or larger than constraints.max,
-    /// even if the aspect ratio calculation suggests otherwise. This handles "tight" constraints where a parent forces
-    /// a specific size.
-    fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
+    fn visit_children(&self, _visitor: &mut impl measure::MeasureVisitor<f32>) {}
+
+    fn measure_content<C>(
+        &self,
+        _context: &mut C,
+        constraints: Constraints<Extent<f32>>,
+    ) -> Extent<f32>
     where
         C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-        let constraints_changed =
-            Some(constraints) != <C as LoadConstraints<f32, WidgetId>>::load(context, self.id);
-        let cached_extent = <C as LoadExtent<f32, WidgetId>>::load(context, self.id);
-
-        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE)
-            && !constraints_changed
-            && cached_extent.is_some()
-        {
-            return cached_extent.unwrap_or_default();
-        }
-
-        let inner_spacing = self.margin.unwrap_or_default();
-        let spacing_size = Extent::from(inner_spacing);
-        let inner_constraints = constraints.max.shrink_to_with(&inner_spacing);
-
-        if inner_constraints.width <= 0. || inner_constraints.height <= 0. {
-            return spacing_size.clamp_with(constraints.min, constraints.max);
-        }
-
-        let Some(content) = &self.value else {
-            return spacing_size.clamp_with(constraints.min, constraints.max);
-        };
-
-        let mut fixed_extent = Extent::new(0., 0.);
-        if let Some(width) = self.width.as_option() {
-            fixed_extent.width = *width as f32;
-
-            if self.height.is_default() {
-                fixed_extent.height = fixed_extent.width / content.aspect_ratio;
-            }
-        }
-
-        if let Some(height) = self.height.as_option() {
-            fixed_extent.height = *height as f32;
-
-            if self.width.is_default() {
-                fixed_extent.width = fixed_extent.height * content.aspect_ratio;
-            }
-        }
-
-        if self.width.is_default() && self.height.is_default() {
-            let proportional_height = inner_constraints.width / content.aspect_ratio;
-
-            if proportional_height > inner_constraints.height {
-                let proportional_width = inner_constraints.height * content.aspect_ratio;
-                fixed_extent = Extent::new(proportional_width, inner_constraints.height);
-            } else {
-                fixed_extent = Extent::new(inner_constraints.width, proportional_height);
-            }
-        }
-
-        let used_extent =
-            (fixed_extent + spacing_size).clamp_with(constraints.min, constraints.max);
-
-        <C as SaveConstraints<f32, WidgetId>>::save(context, self.id, constraints);
-        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, used_extent);
-
-        dirty_flags -= DirtyFlags::NEEDS_MEASURE;
-        context.set_dirty_flags(self.id, dirty_flags);
-
-        used_extent
+        Content::measure_fn(|child_constraints| child_constraints.max)
+            .box_size_with_ratio(
+                self.width.as_option().map(|width| *width as f32),
+                self.height.as_option().map(|height| *height as f32),
+                self.value.as_ref().map(|val| val.aspect_ratio),
+            )
+            .spacing(self.margin.unwrap_or_default())
+            .measure(constraints)
     }
 }
 

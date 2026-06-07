@@ -12,11 +12,11 @@ use crate::{
     },
     drawer::Drawer,
     events::{self, DispatchContext, DispatchEvent},
+    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     types::{
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetKey},
-        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         WidgetId,
     },
@@ -256,19 +256,27 @@ where
     }
 }
 
-impl Measure<f32, WidgetId> for Widget {
-    fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
+impl Measure<f32> for Widget {
+    fn intrinsic_content<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
         C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        delegate!(self.get_intrinsic(context))
+        delegate!(self.intrinsic_content(context))
     }
 
-    fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
+    fn visit_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
+        delegate!(self.visit_children(visitor))
+    }
+
+    fn measure_content<C>(
+        &self,
+        context: &mut C,
+        constraints: Constraints<Extent<f32>>,
+    ) -> Extent<f32>
     where
         C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        delegate!(self.measure(context, constraints))
+        delegate!(self.measure_content(context, constraints))
     }
 }
 

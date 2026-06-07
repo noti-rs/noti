@@ -24,7 +24,6 @@ pub mod direction;
 pub mod dirty_flags;
 pub mod extent;
 pub mod identifiers;
-pub mod measure;
 pub mod offset;
 pub mod point;
 pub mod shader_builder;

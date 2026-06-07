@@ -698,7 +698,7 @@ fn impls_configure(
 ) -> proc_macro2::TokenStream {
     let Structure { name, fields, .. } = structure;
 
-    let body = fields
+    let mut body = fields
         .iter()
         .fold(proc_macro2::TokenStream::new(), |mut acc, field| {
             let field_ident = field.ident.as_ref().expect("Field must be named");
@@ -708,6 +708,24 @@ fn impls_configure(
             .to_tokens(&mut acc);
             acc
         });
+
+    let standard_fields = quote! {
+        self.margin.override_if_higher(config.margin);
+    };
+
+    let container_fields = quote! {
+        #standard_fields
+        self.paddin.override_if_higher(config.padding);
+        self.background_color.override_if_higher(config.background_color);
+        self.border.override_if_higher(config.border);
+        self.alignment.override_if_higher(config.alignment);
+    };
+
+    match macro_attributes.widget_kind {
+        WidgetKind::Minimal => (),
+        WidgetKind::Standard => standard_fields.to_tokens(&mut body),
+        WidgetKind::Container => container_fields.to_tokens(&mut body),
+    }
 
     let mut impls = proc_macro2::TokenStream::new();
 

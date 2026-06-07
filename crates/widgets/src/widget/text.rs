@@ -9,17 +9,17 @@ use shared::{
 
 use crate::{
     context::{
-        LoadConstraints, LoadExtent, ManageDirtyFlags, ManageIntrinsic, SaveConstraints,
-        SaveExtent, StateSubscription, StyleSubscription,
+        LoadExtent, ManageDirtyFlags, ManageIntrinsic, StateSubscription, StyleSubscription,
     },
+    decorator::{content::Content, DecoratorExt, MeasureDecorator},
     drawer::{Drawer, UseColor},
     events::{DispatchContext, DispatchEvent, Event},
+    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     state::State,
     types::{
         dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
-        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
         offset::Offset,
         spacing::Spacing,
         style::{Configure, WidgetStyle},
@@ -356,98 +356,69 @@ where
     }
 }
 
-impl Measure<f32, WidgetId> for Text {
-    fn get_intrinsic<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
+impl Measure<f32> for Text {
+    fn intrinsic_content<C>(&self, _context: &mut C) -> measure::Intrinsic<f32>
     where
         C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let dirty_flags = context.get_dirty_flags(self.id);
-        let cached_intrinsic = context.load(self.id);
+        Content::intrinsic_fn(|| {
+            let Some(mut paragraph) = self.paragraph.as_ref().map(RefCell::borrow_mut) else {
+                return measure::Intrinsic::default();
+            };
 
-        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE) && cached_intrinsic.is_some() {
-            return cached_intrinsic.unwrap_or_default();
-        }
+            /// The Paragraph from skia has some rounding error and because of this text wraps in not
+            /// desired manner. We should explicitly round and make the max intrinsic larger to avoid
+            /// this case.
+            const EPSILON: f32 = 1.0;
+            let min_width = paragraph.min_intrinsic_width();
+            let max_width = paragraph.max_intrinsic_width().ceil() + EPSILON;
 
-        let inner_spacing = self.margin.unwrap_or_default();
-        let spacing_size = Extent::new(
-            inner_spacing.horizontal() as f32,
-            inner_spacing.vertical() as f32,
-        );
+            let min_height = {
+                paragraph.layout(max_width);
+                paragraph.height()
+            };
+            let max_height = {
+                paragraph.layout(min_width);
+                paragraph.height()
+            };
 
-        let Some(mut paragraph) = self.paragraph.as_ref().map(RefCell::borrow_mut) else {
-            return measure::Intrinsic::new(spacing_size, spacing_size);
-        };
-
-        /// The Paragraph from skia has some rounding error and because of this text wraps in not
-        /// desired manner. We should explicitly round and make the max intrinsic larger to avoid
-        /// this case.
-        const EPSILON: f32 = 1.0;
-        let min_width = paragraph.min_intrinsic_width();
-        let max_width = paragraph.max_intrinsic_width().ceil() + EPSILON;
-
-        let min_height = {
             paragraph.layout(max_width);
-            paragraph.height()
-        };
-        let max_height = {
-            paragraph.layout(min_width);
-            paragraph.height()
-        };
 
-        paragraph.layout(max_width);
-
-        let intrinsic = measure::Intrinsic::new(
-            Extent::new(min_width, min_height) + spacing_size,
-            Extent::new(max_width, max_height) + spacing_size,
-        );
-
-        context.save(self.id, intrinsic);
-        intrinsic
+            measure::Intrinsic::new(
+                Extent::new(min_width, min_height),
+                Extent::new(max_width, max_height),
+            )
+        })
+        .spacing(self.margin.unwrap_or_default())
+        .intrinsic()
     }
 
-    fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
+    fn visit_children(&self, _visitor: &mut impl measure::MeasureVisitor<f32>) {}
+
+    fn measure_content<C>(
+        &self,
+        _context: &mut C,
+        constraints: Constraints<Extent<f32>>,
+    ) -> Extent<f32>
     where
         C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-        let constraints_changed =
-            Some(constraints) != <C as LoadConstraints<f32, WidgetId>>::load(context, self.id);
-        let cached_extent = <C as LoadExtent<f32, WidgetId>>::load(context, self.id);
+        Content::measure_fn(|child_constraints| {
+            let Some(mut paragraph) = self.paragraph.as_ref().map(RefCell::borrow_mut) else {
+                return Extent::default();
+            };
 
-        if !dirty_flags.contains(DirtyFlags::NEEDS_MEASURE)
-            && !constraints_changed
-            && cached_extent.is_some()
-        {
-            return cached_extent.unwrap_or_default();
-        }
+            let width = child_constraints.max.width;
+            paragraph.layout(width);
+            let height = paragraph.height();
 
-        let inner_spacing = self.margin.unwrap_or_default();
-        let spacing_size = Extent::new(
-            inner_spacing.horizontal() as f32,
-            inner_spacing.vertical() as f32,
-        );
+            let max_intrinsic_width = paragraph.max_intrinsic_width();
+            paragraph.layout(max_intrinsic_width);
 
-        let Some(mut paragraph) = self.paragraph.as_ref().map(RefCell::borrow_mut) else {
-            return spacing_size.clamp_with(constraints.min, constraints.max);
-        };
-
-        let width = constraints.max.width - spacing_size.width;
-        paragraph.layout(width);
-        let height = paragraph.height();
-
-        let max_intrinsic_width = paragraph.max_intrinsic_width();
-        paragraph.layout(max_intrinsic_width);
-
-        let used_extent = (Extent::new(width, height) + spacing_size)
-            .clamp_with(constraints.min, constraints.max);
-
-        <C as SaveConstraints<f32, WidgetId>>::save(context, self.id, constraints);
-        <C as SaveExtent<f32, WidgetId>>::save(context, self.id, used_extent);
-
-        dirty_flags -= DirtyFlags::NEEDS_MEASURE;
-        context.set_dirty_flags(self.id, dirty_flags);
-
-        used_extent
+            Extent::new(width, height)
+        })
+        .spacing(self.margin.unwrap_or_default())
+        .measure(constraints)
     }
 }
 

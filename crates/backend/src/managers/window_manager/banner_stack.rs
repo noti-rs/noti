@@ -15,8 +15,9 @@ use widgets::{
     drawer::Drawer,
     events::Event,
     make_style, make_widget,
+    measure::Constraints,
     state::MutableState,
-    types::{measure::Constraints, Alignment, Border, Direction, Extent, Offset, Point, Position},
+    types::{Alignment, Border, Direction, Extent, Offset, Point, Position},
     widget::{
         animated_visibility::{AnimatedVisibility, AnimatedVisibilityStyle, AnimationDefinition},
         image::ImageProvider,

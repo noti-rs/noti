@@ -1,7 +1,9 @@
 pub mod animations;
 pub mod context;
+pub mod decorator;
 pub mod drawer;
 pub mod events;
+pub mod measure;
 pub mod state;
 pub mod types;
 pub mod widget;
@@ -11,10 +13,8 @@ use crate::{
         Context, CreateState, DebugOptions, GetState, LoadExtent, SetState, SetStyleClass, Tick,
     },
     events::{DispatchEvent, Event},
-    types::{
-        measure::{Constraints, Measure},
-        Extent, WidgetId, WidgetStyle,
-    },
+    measure::{Constraints, Measure},
+    types::{Extent, WidgetId, WidgetStyle},
     widget::{Draw, Init, Invalidate, Layout, Widget, WidgetInformation},
 };
 
