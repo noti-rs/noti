@@ -143,6 +143,13 @@ where
         clamped_extent
     }
 
+    pub fn is_collapsed(&self) -> bool
+    where
+        T: PartialEq,
+    {
+        self.width == T::default() || self.height == T::default()
+    }
+
     pub fn to_flex(&self, direction: &Direction) -> FlexExtent<T> {
         match direction {
             Direction::Horizontal => FlexExtent {

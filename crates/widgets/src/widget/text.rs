@@ -8,11 +8,9 @@ use shared::{
 };
 
 use crate::{
-    context::{
-        LoadExtent, ManageDirtyFlags, ManageIntrinsic, StateSubscription, StyleSubscription,
-    },
-    decorator::{content::Content, DecoratorExt, MeasureDecorator},
-    drawer::{Drawer, UseColor},
+    context::{ManageDirtyFlags, ManageIntrinsic, StateSubscription, StyleSubscription},
+    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
+    draw::{draw_debug_bounds, Drawer, UseColor},
     events::{DispatchContext, DispatchEvent, Event},
     measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     state::State,
@@ -26,8 +24,8 @@ use crate::{
         Color,
     },
     widget::{
-        draw_debug_bounds, Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext,
-        Layout, LayoutContext, WidgetGetType, WidgetSizingMode,
+        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
+        WidgetGetType, WidgetSizingMode,
     },
 };
 
@@ -628,81 +626,56 @@ impl<C> Draw<C, f32> for Text
 where
     C: DrawContext<f32>,
 {
-    fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
-        let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
-            warn!(
-                "Text widget with id {} didn't measured! Refused to draw.",
-                *self.id
-            );
-            return;
-        };
+    fn draw_content(
+        &self,
+        context: &C,
+        offset: &Offset<f32>,
+        provided_extent: Extent<f32>,
+        drawer: &mut Drawer,
+    ) {
+        Content::draw_fn(
+            |offset: &Offset<f32>, provided_extent: Extent<f32>, drawer: &mut Drawer| {
+                // INFO: as you see, there's re-building paragraph. Since I want to use `Paint` type for
+                // coloring the text, it requires the exact position on surface, and because of this I
+                // cannot determine once the position. Especially when a banner moves from one place to
+                // another.
 
-        // INFO: as you see, there's re-building paragraph. Since I want to use `Paint` type for
-        // coloring the text, it requires the exact position on surface, and because of this I
-        // cannot determine once the position. Especially when a banner moves from one place to
-        // another.
+                let font = self.font.clone().unwrap_or_default();
+                let mut base_text_style = skia_safe::textlayout::TextStyle::new();
+                base_text_style.set_font_families(&[&font.name]);
+                base_text_style.set_font_style(match font.style {
+                    FontStyle::Regular => skia_safe::FontStyle::normal(),
+                    FontStyle::Bold => skia_safe::FontStyle::bold(),
+                    FontStyle::Italic => skia_safe::FontStyle::italic(),
+                    FontStyle::BoldItalic => skia_safe::FontStyle::bold_italic(),
+                });
 
-        let inner_spacing = self.margin.unwrap_or_default();
-        let actual_offset =
-            *offset + Offset::new(inner_spacing.left as f32, inner_spacing.top as f32);
-        let inner_extent = provided_extent.shrink_to_with(&inner_spacing);
-        if inner_extent.width <= 0.0 || inner_extent.height <= 0.0 {
-            return;
-        }
+                let mut paint = skia_safe::Paint::default();
+                paint.use_color(
+                    &self.color.clone().unwrap_or_default(),
+                    *offset,
+                    provided_extent,
+                );
 
-        let font = self.font.clone().unwrap_or_default();
-        let mut base_text_style = skia_safe::textlayout::TextStyle::new();
-        base_text_style.set_font_families(&[&font.name]);
-        base_text_style.set_font_style(match font.style {
-            FontStyle::Regular => skia_safe::FontStyle::normal(),
-            FontStyle::Bold => skia_safe::FontStyle::bold(),
-            FontStyle::Italic => skia_safe::FontStyle::italic(),
-            FontStyle::BoldItalic => skia_safe::FontStyle::bold_italic(),
-        });
+                base_text_style.set_foreground_paint(&paint);
 
-        let mut paint = skia_safe::Paint::default();
-        paint.use_color(
-            &self.color.clone().unwrap_or_default(),
-            actual_offset,
-            inner_extent,
-        );
+                let mut paragraph = if let Some(total_lines) = self.total_lines {
+                    self.build_paragraph(&base_text_style, total_lines)
+                } else {
+                    self.build_paragraph(&base_text_style, Self::MAX_LINES)
+                };
+                paragraph.layout(provided_extent.width);
 
-        base_text_style.set_foreground_paint(&paint);
+                let canvas = drawer.surface.canvas();
+                paragraph.paint(canvas, (offset.x, offset.y));
 
-        let mut paragraph = if let Some(total_lines) = self.total_lines {
-            self.build_paragraph(&base_text_style, total_lines)
-        } else {
-            self.build_paragraph(&base_text_style, Self::MAX_LINES)
-        };
-        paragraph.layout(inner_extent.width);
-
-        let canvas = drawer.surface.canvas();
-
-        canvas.save();
-        canvas.clip_rect(
-            skia_safe::Rect::from_xywh(
-                offset.x,
-                offset.y,
-                provided_extent.width,
-                provided_extent.height,
-            ),
-            skia_safe::ClipOp::Intersect,
-            true,
-        );
-
-        paragraph.paint(canvas, (offset.x, offset.y));
-
-        canvas.restore();
-
-        if context.get_debug_options().show_layout_bounds {
-            draw_debug_bounds(
-                canvas,
-                *offset,
-                provided_extent,
-                actual_offset,
-                inner_extent,
-            );
-        }
+                if context.get_debug_options().show_layout_bounds {
+                    draw_debug_bounds(canvas, *offset, provided_extent);
+                }
+            },
+        )
+        .spacing(self.margin.unwrap_or_default())
+        .draw(offset, provided_extent, drawer);
     }
 }
 

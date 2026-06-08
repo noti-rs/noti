@@ -4,8 +4,8 @@ use log::warn;
 
 use crate::{
     context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic, StyleSubscription},
-    decorator::{content::Content, DecoratorExt, MeasureDecorator},
-    drawer::Drawer,
+    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
+    draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
     events::{DispatchContext, DispatchEvent, Event},
     measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     types::{
@@ -21,8 +21,8 @@ use crate::{
         Color, Point,
     },
     widget::{
-        draw_debug_bounds, Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext,
-        Layout, LayoutContext, Widget, WidgetGetType, WidgetInformation, WidgetSizingMode,
+        Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext, Widget,
+        WidgetGetType, WidgetInformation, WidgetSizingMode,
     },
 };
 
@@ -118,7 +118,7 @@ impl FlexContainer {
     ///
     /// - **Horizontal Direction:** the sum of all children's widths.
     /// - **Vertical Direction:** the width of the widest child.
-    pub(crate) fn inner_width<C>(&self, context: &C) -> f32
+    pub(crate) fn children_width<C>(&self, context: &C) -> f32
     where
         C: LoadExtent<f32, WidgetId>,
     {
@@ -137,7 +137,7 @@ impl FlexContainer {
     ///
     /// - **Horizontal Direction:** the height of the tallest child.
     /// - **Vertical Direction:** the sum of all children's heights.
-    pub(crate) fn inner_height<C>(&self, context: &C) -> f32
+    pub(crate) fn children_height<C>(&self, context: &C) -> f32
     where
         C: LoadExtent<f32, WidgetId>,
     {
@@ -156,13 +156,13 @@ impl FlexContainer {
     ///
     /// The **Main Extent** follows the container's `direction` (e.g., total
     /// width in a row).
-    fn main_inner_extent<C>(&self, context: &C) -> f32
+    fn main_children_extent<C>(&self, context: &C) -> f32
     where
         C: LoadExtent<f32, WidgetId>,
     {
         match &self.direction {
-            Direction::Horizontal => self.inner_width(context),
-            Direction::Vertical => self.inner_height(context),
+            Direction::Horizontal => self.children_width(context),
+            Direction::Vertical => self.children_height(context),
         }
     }
 
@@ -170,13 +170,13 @@ impl FlexContainer {
     ///
     /// **Cross Extent** measures the "thickness" of the layout (e.g., the height of a row).
     #[allow(unused)]
-    fn cross_inner_extent<C>(&self, context: &C) -> f32
+    fn cross_children_extent<C>(&self, context: &C) -> f32
     where
         C: LoadExtent<f32, WidgetId>,
     {
         match &self.direction {
-            Direction::Horizontal => self.inner_height(context),
-            Direction::Vertical => self.inner_width(context),
+            Direction::Horizontal => self.children_height(context),
+            Direction::Vertical => self.children_width(context),
         }
     }
 
@@ -275,7 +275,7 @@ impl FlexContainer {
             return (0.0, 0.0);
         }
 
-        let main_inner_extent = self.main_inner_extent(context);
+        let main_inner_extent = self.main_children_extent(context);
         let start = self
             .main_axis_alignment()
             .get_start(restricted_extent, main_inner_extent);
@@ -580,86 +580,76 @@ impl<C> Draw<C, f32> for FlexContainer
 where
     C: DrawContext<f32>,
 {
-    fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
-        let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
-            warn!(
-                "FlexContainer with id {} didn't measured. Refused to draw.",
-                *self.id
-            );
-            return;
-        };
+    fn draw_content(
+        &self,
+        context: &C,
+        offset: &Offset<f32>,
+        provided_extent: Extent<f32>,
+        drawer: &mut Drawer,
+    ) {
+        Content::draw_fn(
+            |offset: &Offset<f32>, provided_extent: Extent<f32>, drawer: &mut Drawer| {
+                let mut plane =
+                    FCPlane::new(Offset::<f32>::default(), provided_extent, self.direction);
 
-        let inner_spacing = self.inner_spacing();
+                let main_children_extent = self.main_children_extent(context);
+                plane.main.start = self
+                    .main_axis_alignment()
+                    .get_start(plane.main.extent, main_children_extent);
 
-        if provided_extent.width < inner_spacing.horizontal() as f32
-            || provided_extent.height <= inner_spacing.vertical() as f32
-        {
-            return;
-        }
+                let incrementor = match self.main_axis_alignment() {
+                    Position::Start | Position::Center | Position::End => 0.0,
+                    Position::SpaceBetween => {
+                        if self.children.len() <= 1 {
+                            0.0
+                        } else {
+                            (plane.main.extent - main_children_extent)
+                                / self.children.len().saturating_sub(1) as f32
+                        }
+                    }
+                };
 
-        let mut plane = self.get_plane(provided_extent);
-        let (start, incrementor) = self.get_start_and_incrementor(context, plane.main.extent);
-        plane.main.start += start;
+                let cross_axis_start = plane.cross.start;
+                let cross_axis_alignment = self.cross_axis_alignment();
 
-        let background_color = self.background_color.clone().unwrap_or_default();
-        let border = self.border.clone().unwrap_or_default();
+                for child in &self.children {
+                    let child_extent =
+                        <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
+                            .unwrap_or_default()
+                            .to_flex(&self.direction);
 
-        let canvas = drawer.surface.canvas();
-        canvas.save();
+                    plane.cross.start = cross_axis_start
+                        + cross_axis_alignment.get_start(plane.cross.extent, child_extent.cross);
 
-        let rect = skia_safe::Rect::from_xywh(
-            offset.x,
-            offset.y,
-            provided_extent.width,
-            provided_extent.height,
-        );
-        let rrect = skia_safe::RRect::new_rect_xy(rect, border.radius as f32, border.radius as f32);
+                    child.draw(context, &(plane.as_offset() + *offset), drawer);
 
-        canvas.clip_rrect(rrect, skia_safe::ClipOp::Intersect, true);
-
-        if !background_color.is_transparent() {
-            drawer.fill_background(*offset, provided_extent, &border, &background_color);
-        }
-
-        let cross_axis_start = plane.cross.start;
-        let cross_axis_alignment = self.cross_axis_alignment();
-
-        for child in &self.children {
-            let child_extent = <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
-                .unwrap_or_default()
-                .to_flex(&self.direction);
-
-            plane.cross.start = cross_axis_start
-                + cross_axis_alignment.get_start(plane.cross.extent, child_extent.cross);
-
-            child.draw(context, &(plane.as_offset() + *offset), drawer);
-
-            plane.cut_front(child_extent.main + incrementor);
-        }
-
-        drawer.outline_border(*offset, provided_extent, &border);
-
-        drawer.surface.canvas().restore();
-
-        if context.get_debug_options().show_layout_bounds {
-            let plane = self.get_plane(provided_extent);
-            let shift = match self.direction {
-                Direction::Horizontal => Offset::new(plane.main.start, plane.cross.start),
-                Direction::Vertical => Offset::new(plane.cross.start, plane.main.start),
-            };
-
-            draw_debug_bounds(
-                drawer.surface.canvas(),
-                *offset,
-                provided_extent,
-                *offset + shift,
-                FlexExtent {
-                    main: plane.main.extent,
-                    cross: plane.cross.extent,
+                    plane.cut_front(child_extent.main + incrementor);
                 }
-                .to_normal(&self.direction),
-            );
-        }
+
+                if context.get_debug_options().show_layout_bounds {
+                    let plane =
+                        FCPlane::new(Offset::<f32>::default(), provided_extent, self.direction);
+                    let shift = match self.direction {
+                        Direction::Horizontal => Offset::new(plane.main.start, plane.cross.start),
+                        Direction::Vertical => Offset::new(plane.cross.start, plane.main.start),
+                    };
+
+                    draw_debug_bounds(
+                        drawer.surface.canvas(),
+                        *offset + shift,
+                        FlexExtent {
+                            main: plane.main.extent,
+                            cross: plane.cross.extent,
+                        }
+                        .to_normal(&self.direction),
+                    );
+                }
+            },
+        )
+        .spacing(self.spacing.unwrap_or_default())
+        .background(self.background_color.clone().unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .draw(offset, provided_extent, drawer);
     }
 }
 

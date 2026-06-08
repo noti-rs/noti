@@ -3,9 +3,13 @@ use std::ops::{Add, Sub};
 use num_traits::FromPrimitive;
 
 use crate::{
-    decorator::{border::BorderDecorator, box_size::BoxSizeDecorator, spacing::SpacingDecorator},
+    decorator::{
+        background::BackgroundDecorator, border::BorderDecorator, box_size::BoxSizeDecorator,
+        spacing::SpacingDecorator,
+    },
+    draw::Drawer,
     measure::{Constraints, Intrinsic},
-    types::{Border, Extent, Spacing},
+    types::{Border, Color, Extent, Offset, Spacing},
 };
 
 pub(crate) mod background;
@@ -32,7 +36,14 @@ where
     fn measure(&mut self, constraints: Constraints<Extent<T>>) -> Extent<T>;
 }
 
-pub(crate) trait DecoratorExt<T>: MeasureDecorator<T> + Sized
+pub(crate) trait DrawDecorator<T>
+where
+    T: DecoratorType,
+{
+    fn draw(&self, offset: &Offset<T>, provided_extent: Extent<T>, drawer: &mut Drawer);
+}
+
+pub(crate) trait DecoratorExt<T>: MeasureDecorator<T> + DrawDecorator<T> + Sized
 where
     T: DecoratorType,
 {
@@ -69,11 +80,18 @@ where
             next: self,
         }
     }
+
+    fn background(self, background_color: Color) -> BackgroundDecorator<Self> {
+        BackgroundDecorator {
+            background_color,
+            next: self,
+        }
+    }
 }
 
 impl<D, T> DecoratorExt<T> for D
 where
-    D: MeasureDecorator<T>,
+    D: MeasureDecorator<T> + DrawDecorator<T> + Sized,
     T: DecoratorType,
 {
 }

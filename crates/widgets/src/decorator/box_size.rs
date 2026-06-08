@@ -1,7 +1,7 @@
 use std::ops::{Div, Mul};
 
 use crate::{
-    decorator::{DecoratorType, MeasureDecorator},
+    decorator::{DecoratorType, DrawDecorator, MeasureDecorator},
     measure::{Constraints, Intrinsic},
     types::Extent,
 };
@@ -94,5 +94,65 @@ where
         self.next
             .measure(new_constraints)
             .clamp_with(constraints.min, constraints.max)
+    }
+}
+
+impl<N, T> DrawDecorator<T> for BoxSizeDecorator<N, T>
+where
+    N: DrawDecorator<T>,
+    T: DecoratorType + Div<f32, Output = T> + Mul<f32, Output = T> + Into<f32>,
+{
+    fn draw(
+        &self,
+        offset: &crate::types::Offset<T>,
+        provided_extent: Extent<T>,
+        drawer: &mut crate::draw::Drawer,
+    ) {
+        let mut new_extent = provided_extent;
+
+        if let Some(width) = self.width {
+            new_extent.width = width;
+
+            if self.height.is_none() {
+                if let Some(ratio) = self.ratio {
+                    let height = width / ratio;
+
+                    new_extent.height = height;
+                }
+            }
+        }
+
+        if let Some(height) = self.height {
+            new_extent.height = height;
+
+            if self.width.is_none() {
+                if let Some(ratio) = self.ratio {
+                    let width = height * ratio;
+
+                    new_extent.width = width;
+                }
+            }
+        }
+
+        if new_extent.is_collapsed() {
+            return;
+        }
+
+        let canvas = drawer.surface.canvas();
+        canvas.save();
+        canvas.clip_rect(
+            skia_safe::Rect::from_xywh(
+                offset.x.into(),
+                offset.y.into(),
+                new_extent.width.into(),
+                new_extent.height.into(),
+            ),
+            skia_safe::ClipOp::Intersect,
+            true,
+        );
+
+        self.next.draw(offset, new_extent, drawer);
+
+        drawer.surface.canvas().restore();
     }
 }

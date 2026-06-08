@@ -1,9 +1,75 @@
 use log::warn;
 
 use crate::{
-    types::{border::Border, extent::Extent, offset::Offset, Bgra, Color},
-    widget::{Draw, DrawContext, Widget},
+    context::{AnimationQuery, GetDebugOptions, LoadExtent},
+    types::{extent::Extent, offset::Offset, Bgra, Color, WidgetId},
+    widget::{Widget, WidgetBase},
 };
+
+pub(crate) trait DrawContext<T>:
+    LoadExtent<T, WidgetId> + AnimationQuery<WidgetId> + GetDebugOptions
+where
+    T: Default + Copy,
+{
+}
+
+impl<C, T> DrawContext<T> for C
+where
+    C: LoadExtent<T, WidgetId> + AnimationQuery<WidgetId> + GetDebugOptions,
+    T: Default + Copy,
+{
+}
+
+pub(crate) trait Draw<C, T>: WidgetBase
+where
+    C: DrawContext<T>,
+    T: Default + Copy + Into<f32>,
+{
+    fn draw(&self, context: &C, offset: &Offset<T>, drawer: &mut Drawer) {
+        let Some(provided_extent) = <C as LoadExtent<T, WidgetId>>::load(context, self.get_id())
+        else {
+            warn!(
+                "{} widget with id {} didn't measured! Refused to draw.",
+                self.get_type(),
+                *self.get_id()
+            );
+            return;
+        };
+
+        self.draw_content(context, offset, provided_extent, drawer);
+
+        if context.get_debug_options().show_layout_bounds {
+            let mut paint = skia_safe::Paint::default();
+            paint.set_anti_alias(true);
+
+            paint.set_color4f(skia_safe::Color4f::new(0.95, 0.23, 0.99, 1.0), None);
+            paint.set_style(skia_safe::PaintStyle::Stroke);
+            paint.set_stroke_width(2.0);
+
+            if let Some(dash) = skia_safe::PathEffect::dash(&[6.0, 6.0], 0.0) {
+                paint.set_path_effect(dash);
+            }
+
+            drawer.surface.canvas().draw_rect(
+                skia_safe::Rect::from_xywh(
+                    offset.x.into(),
+                    offset.y.into(),
+                    provided_extent.width.into(),
+                    provided_extent.height.into(),
+                ),
+                &paint,
+            );
+        }
+    }
+
+    fn draw_content(
+        &self,
+        context: &C,
+        offset: &Offset<T>,
+        provided_extent: Extent<T>,
+        drawer: &mut Drawer,
+    );
+}
 
 /// A simple wrapper around [`skia_safe::Surface`] used as the main
 /// drawing target for widgets.
@@ -38,98 +104,6 @@ impl Drawer {
         let mut offscreen_drawer = Drawer::use_surface(offscreen);
         widget.draw(context, offset, &mut offscreen_drawer);
         offscreen_drawer.surface.image_snapshot()
-    }
-
-    /// Fills the container’s background before drawing children.
-    ///
-    /// If configured, the background will be filled with rounded corners.
-    /// This is the first step of the `draw` routine, ensuring that child
-    /// widgets are rendered on top of a consistent background.
-    pub(crate) fn fill_background(
-        &mut self,
-        offset: Offset<f32>,
-        extent: Extent<f32>,
-        border: &Border,
-        background_color: &Color,
-    ) {
-        let outer_radius = (border.radius as f32)
-            .min(extent.width / 2.0)
-            .min(extent.height / 2.0);
-        let inner_radius = (outer_radius - border.size as f32).max(0.0);
-        let difference = border.size as f32;
-
-        let canvas = self.surface.canvas();
-
-        let rounded_rect = skia_safe::RRect::new_rect_xy(
-            skia_safe::Rect::from_xywh(
-                offset.x + difference,
-                offset.y + difference,
-                extent.width - difference * 2.0,
-                extent.height - difference * 2.0,
-            ),
-            inner_radius,
-            inner_radius,
-        );
-
-        let mut paint = skia_safe::Paint::default();
-        paint.use_color(background_color, offset, extent);
-        paint.set_anti_alias(true);
-
-        canvas.draw_rrect(rounded_rect, &paint);
-    }
-
-    /// Draws the container’s border after all children have been rendered.
-    ///
-    /// This is the final step of the `draw` routine, allowing the border
-    /// to visually wrap around both the background and the children.
-    pub(crate) fn outline_border(
-        &mut self,
-        offset: Offset<f32>,
-        extent: Extent<f32>,
-        border: &Border,
-    ) {
-        if border.size == 0 {
-            return;
-        }
-
-        let outer_radius = (border.radius as f32)
-            .min(extent.width / 2.0)
-            .min(extent.height / 2.0);
-        let inner_radius = outer_radius - border.size as f32;
-
-        let mut path = skia_safe::Path::new();
-
-        path.add_rrect(
-            skia_safe::RRect::new_rect_xy(
-                skia_safe::Rect::from_xywh(offset.x, offset.y, extent.width, extent.height),
-                outer_radius,
-                outer_radius,
-            ),
-            None,
-        );
-
-        let border_size = border.size as f32;
-        let base_rect = skia_safe::Rect::from_xywh(
-            offset.x + border_size,
-            offset.y + border_size,
-            extent.width - border_size * 2.0,
-            extent.height - border_size * 2.0,
-        );
-        if inner_radius <= 0.0 {
-            path.add_rect(base_rect, None);
-        } else {
-            path.add_rrect(
-                skia_safe::RRect::new_rect_xy(base_rect, inner_radius, inner_radius),
-                None,
-            );
-        }
-
-        let mut paint = skia_safe::Paint::default();
-        paint.use_color(&border.color, offset, extent);
-        paint.set_anti_alias(true);
-
-        path.set_fill_type(skia_safe::path::FillType::EvenOdd);
-        self.surface.canvas().draw_path(&path, &paint);
     }
 }
 
@@ -207,4 +181,23 @@ impl UseColor for skia_safe::Paint {
             }
         }
     }
+}
+
+pub(crate) fn draw_debug_bounds(
+    canvas: &skia_safe::Canvas,
+    offset: Offset<f32>,
+    extent: Extent<f32>,
+) {
+    let mut paint = skia_safe::Paint::default();
+    paint.set_anti_alias(true);
+
+    paint.set_style(skia_safe::PaintStyle::Stroke);
+    paint.set_stroke_width(2.0);
+    paint.set_color4f(skia_safe::Color4f::new(0.53, 0.97, 0.48, 0.7), None);
+    paint.set_path_effect(None);
+
+    canvas.draw_rect(
+        skia_safe::Rect::from_xywh(offset.x, offset.y, extent.width, extent.height),
+        &paint,
+    );
 }

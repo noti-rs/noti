@@ -2,9 +2,9 @@ use log::warn;
 use macros::widget_style;
 
 use crate::{
-    context::{ManageDirtyFlags, ManageIntrinsic, StyleSubscription},
-    decorator::{content::Content, DecoratorExt, MeasureDecorator},
-    drawer::Drawer,
+    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic, StyleSubscription},
+    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
+    draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
     events::{DispatchContext, DispatchEvent, Event},
     measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     types::{
@@ -19,9 +19,8 @@ use crate::{
         Color,
     },
     widget::{
-        flex_container::FlexContainer, Draw, DrawContext, Init, InitContext, Invalidate,
-        InvalidateContext, Layout, LayoutContext, Widget, WidgetGetType, WidgetInformation,
-        WidgetSizingMode,
+        flex_container::FlexContainer, Init, InitContext, Invalidate, InvalidateContext, Layout,
+        LayoutContext, Widget, WidgetGetType, WidgetInformation, WidgetSizingMode,
     },
 };
 
@@ -132,37 +131,6 @@ pub struct ContainerStyle {
     pub border: Border,
     pub spacing: Spacing,
     pub alignment: Alignment,
-}
-
-impl Container {
-    /// Calculates the total internal offset required to protect the container's
-    /// content from its boundaries.
-    ///
-    /// This method provides a unified [`Spacing`] value by combining the
-    /// widget's defined internal padding with the physical thickness of
-    /// the [`Border`].
-    ///
-    /// **The Calculation:**
-    /// `Total Inner Spacing = Manual Spacing + All-Directional Border Size`
-    ///
-    /// By using this combined value during the compilation and drawing
-    /// stages, the container ensures that its children are correctly
-    /// "inset." This prevents nested widgets from overlapping with the
-    /// border strokes and accurately determines the remaining available
-    /// area for the layout.
-    ///
-    /// # Returns
-    /// A [`Spacing`] struct representing the total margin that must be
-    /// respected by any child widgets.
-    fn inner_spacing(&self) -> Spacing {
-        self.spacing.unwrap_or_default()
-            + Spacing::all_directional(
-                self.border
-                    .as_ref()
-                    .map(|border| border.size)
-                    .unwrap_or_default(),
-            )
-    }
 }
 
 impl WidgetInformation for Container {
@@ -320,85 +288,45 @@ impl<C> Draw<C, f32> for Container
 where
     C: DrawContext<f32>,
 {
-    fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
-        todo!()
+    fn draw_content(
+        &self,
+        context: &C,
+        offset: &Offset<f32>,
+        provided_extent: Extent<f32>,
+        drawer: &mut Drawer,
+    ) {
+        Content::draw_fn(
+            |offset: &Offset<f32>, provided_extent: Extent<f32>, drawer: &mut Drawer| {
+                if let Some(child) = &self.child {
+                    let alignment = self.alignment.clone().unwrap_or_default();
+                    let child_extent =
+                        <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
+                            .unwrap_or_default();
 
-        // let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
-        //     warn!(
-        //         "Container with id {} wasn't measured. Refused to draw.",
-        //         *self.id
-        //     );
-        //     return;
-        // };
-        //
-        // let actual_extent = Extent::new(self.width as f32, self.height as f32);
-        //
-        // if provided_extent.width < actual_extent.width
-        //     || provided_extent.height < actual_extent.height
-        // {
-        //     return;
-        // }
-        //
-        // let actual_offset = *offset
-        //     + Offset::new(
-        //         (provided_extent.width - actual_extent.width) / 2.0,
-        //         (provided_extent.height - actual_extent.height) / 2.0,
-        //     );
-        //
-        // let canvas = drawer.surface.canvas();
-        // canvas.save();
-        // let rect = skia_safe::Rect::from_xywh(
-        //     actual_offset.x,
-        //     actual_offset.y,
-        //     actual_extent.width,
-        //     actual_extent.height,
-        // );
-        //
-        // let border = self.border.clone().unwrap_or_default();
-        // let border_radius = border.radius as f32;
-        // let rrect = skia_safe::RRect::new_rect_xy(rect, border_radius, border_radius);
-        // canvas.clip_rrect(rrect, skia_safe::ClipOp::Intersect, true);
-        //
-        // let background_color = self.background_color.clone().unwrap_or_default();
-        // if !background_color.is_transparent() {
-        //     drawer.fill_background(actual_offset, actual_extent, &border, &background_color);
-        // }
-        //
-        // let inner_spacing = self.inner_spacing();
-        // let mut inner_extent = actual_extent;
-        // inner_extent.shrink_by(&inner_spacing);
-        //
-        // if let Some(child) = &self.child {
-        //     let alignment = self.alignment.clone().unwrap_or_default();
-        //     let child_extent =
-        //         <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id()).unwrap_or_default();
-        //
-        //     let horizontal_start = alignment
-        //         .horizontal
-        //         .get_start(inner_extent.width, child_extent.width)
-        //         + inner_spacing.left as f32;
-        //     let vertical_start = alignment
-        //         .vertical
-        //         .get_start(inner_extent.height, child_extent.height)
-        //         + inner_spacing.top as f32;
-        //
-        //     let offset_for_child = actual_offset + Offset::new(horizontal_start, vertical_start);
-        //     child.draw(context, &offset_for_child, drawer);
-        // }
-        //
-        // drawer.outline_border(actual_offset, actual_extent, &border);
-        //
-        // drawer.surface.canvas().restore();
-        //
-        // if context.get_debug_options().show_layout_bounds {
-        //     draw_debug_bounds(
-        //         drawer.surface.canvas(),
-        //         *offset,
-        //         provided_extent,
-        //         actual_offset,
-        //         actual_extent,
-        //     );
-        // }
+                    let horizontal_start = alignment
+                        .horizontal
+                        .get_start(provided_extent.width, child_extent.width);
+                    let vertical_start = alignment
+                        .vertical
+                        .get_start(provided_extent.height, child_extent.height);
+
+                    let offset_for_child = *offset + Offset::new(horizontal_start, vertical_start);
+                    child.draw(context, &offset_for_child, drawer);
+
+                    if context.get_debug_options().show_layout_bounds {
+                        draw_debug_bounds(drawer.surface.canvas(), *offset, provided_extent);
+                    }
+                }
+            },
+        )
+        .spacing(self.spacing.unwrap_or_default())
+        .background(self.background_color.clone().unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .box_size(
+            self.width.as_option().map(|&width| width as f32),
+            self.height.as_option().map(|&height| height as f32),
+        )
+        .draw(offset, provided_extent, drawer);
     }
 }
 
@@ -406,7 +334,7 @@ impl<C> DispatchEvent<C, f32> for Container
 where
     C: DispatchContext<f32>,
 {
-    fn dispatch_event(&mut self, context: &mut C, event: Event) {
+    fn dispatch_event(&mut self, _context: &mut C, _event: Event) {
         todo!()
 
         // if !event.kind.is_mouse() {

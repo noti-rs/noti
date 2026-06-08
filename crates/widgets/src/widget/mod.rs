@@ -6,11 +6,11 @@ pub mod text;
 
 use crate::{
     context::{
-        AnimationQuery, GenerateId, GetDebugOptions, GetFont, GetState, GetStyle, LoadExtent,
+        AnimationQuery, GenerateId, GetFont, GetState, GetStyle, LoadExtent,
         ManageAnimationRegistry, ManageDirtyFlags, ManageIntrinsic, RegisterKey, ScopedManageState,
         StateSubscription, StyleSubscription,
     },
-    drawer::Drawer,
+    draw::{Draw, DrawContext, Drawer},
     events::{self, DispatchContext, DispatchEvent},
     measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     types::{
@@ -152,34 +152,6 @@ where
     fn invalidate(&mut self, context: &mut C) -> DirtyFlags;
 }
 
-pub(crate) trait DrawContext<T>:
-    LoadExtent<T, WidgetId> + AnimationQuery<WidgetId> + GetDebugOptions
-where
-    T: Default + Copy,
-{
-}
-
-impl<C, T> DrawContext<T> for C
-where
-    C: LoadExtent<T, WidgetId> + AnimationQuery<WidgetId> + GetDebugOptions,
-    T: Default + Copy,
-{
-}
-
-pub(crate) trait Draw<C, T>: WidgetBase
-where
-    C: DrawContext<T>,
-    T: Default + Copy,
-{
-    fn draw(&self, context: &C, offset: &Offset<T>, drawer: &mut Drawer) {
-        // TODO: use this method as pre-action before actual drawing widget
-
-        self.draw_on(context, offset, drawer);
-    }
-
-    fn draw_on(&self, context: &C, offset: &Offset<T>, drawer: &mut Drawer);
-}
-
 /// A container enum for all supported widget types.
 ///
 /// This allows dynamic storage and composition of widgets, including complex
@@ -293,9 +265,14 @@ impl<C> Draw<C, f32> for Widget
 where
     C: DrawContext<f32>,
 {
-    fn draw_on(&self, context: &C, offset: &Offset<f32>, output: &mut Drawer) {
-        // INFO: DO NOT USE `draw` METHOD! ONLY `draw_on`
-        delegate!(self.draw_on(context, offset, output));
+    fn draw_content(
+        &self,
+        context: &C,
+        offset: &Offset<f32>,
+        provided_extent: Extent<f32>,
+        output: &mut Drawer,
+    ) {
+        delegate!(self.draw_content(context, offset, provided_extent, output));
     }
 }
 
@@ -345,46 +322,4 @@ macro_rules! make_widget {
                 $(.$field_name($val))*
                 .build()
     };
-}
-
-fn draw_debug_bounds(
-    canvas: &skia_safe::Canvas,
-    original_offset: Offset<f32>,
-    provided_extent: Extent<f32>,
-    actual_offset: Offset<f32>,
-    actual_extent: Extent<f32>,
-) {
-    let mut paint = skia_safe::Paint::default();
-    paint.set_anti_alias(true);
-
-    paint.set_color4f(skia_safe::Color4f::new(0.95, 0.23, 0.99, 1.0), None);
-    paint.set_style(skia_safe::PaintStyle::Stroke);
-    paint.set_stroke_width(2.0);
-
-    if let Some(dash) = skia_safe::PathEffect::dash(&[6.0, 6.0], 0.0) {
-        paint.set_path_effect(dash);
-    }
-
-    canvas.draw_rect(
-        skia_safe::Rect::from_xywh(
-            original_offset.x,
-            original_offset.y,
-            provided_extent.width,
-            provided_extent.height,
-        ),
-        &paint,
-    );
-
-    paint.set_color4f(skia_safe::Color4f::new(0.53, 0.97, 0.48, 0.7), None);
-    paint.set_path_effect(None);
-
-    canvas.draw_rect(
-        skia_safe::Rect::from_xywh(
-            actual_offset.x,
-            actual_offset.y,
-            actual_extent.width,
-            actual_extent.height,
-        ),
-        &paint,
-    );
 }

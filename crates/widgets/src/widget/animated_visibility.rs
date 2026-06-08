@@ -8,7 +8,7 @@ use crate::{
         AnimationDirection, AnimationProgress, ManageAnimationRegistry, ManageDirtyFlags,
         ManageIntrinsic, ScopedContext, StateSubscription, StyleSubscription,
     },
-    drawer::Drawer,
+    draw::{Draw, DrawContext, Drawer},
     events::{DispatchContext, DispatchEvent, Event},
     measure::{self, Constraints, Intrinsic, Measure, MeasureContext, SizingMode},
     state::State,
@@ -17,8 +17,8 @@ use crate::{
         WidgetClass, WidgetId, WidgetStyle,
     },
     widget::{
-        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
-        Widget, WidgetGetType, WidgetInformation, WidgetSizingMode,
+        Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext, Widget,
+        WidgetGetType, WidgetInformation, WidgetSizingMode,
     },
 };
 
@@ -304,7 +304,13 @@ impl<C> Draw<C, f32> for AnimatedVisibility
 where
     C: DrawContext<f32>,
 {
-    fn draw_on(&self, context: &C, offset: &Offset<f32>, drawer: &mut Drawer) {
+    fn draw_content(
+        &self,
+        context: &C,
+        offset: &Offset<f32>,
+        _provided_extent: Extent<f32>,
+        drawer: &mut Drawer,
+    ) {
         match self.phase {
             VisibilityPhase::Hidden | VisibilityPhase::SpatialChange => (),
             VisibilityPhase::Transition => {

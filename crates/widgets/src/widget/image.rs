@@ -9,11 +9,9 @@ use macros::widget;
 use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::TryFromValue};
 
 use crate::{
-    context::{
-        LoadExtent, ManageDirtyFlags, ManageIntrinsic, StateSubscription, StyleSubscription,
-    },
-    decorator::{content::Content, DecoratorExt, MeasureDecorator},
-    drawer::Drawer,
+    context::{ManageDirtyFlags, ManageIntrinsic, StateSubscription, StyleSubscription},
+    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
+    draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
     events::{DispatchContext, DispatchEvent, Event},
     measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     state::State,
@@ -24,10 +22,11 @@ use crate::{
         offset::Offset,
         spacing::Spacing,
         style::{Configure, WidgetStyle},
+        Border,
     },
     widget::{
-        draw_debug_bounds, Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext,
-        Layout, LayoutContext, WidgetGetType, WidgetSizingMode,
+        Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext, WidgetGetType,
+        WidgetSizingMode,
     },
 };
 
@@ -266,132 +265,109 @@ impl<C> Draw<C, f32> for Image
 where
     C: DrawContext<f32>,
 {
-    fn draw_on(&self, context: &C, original_offset: &Offset<f32>, drawer: &mut Drawer) {
-        if self.value.is_none() {
-            return;
-        }
-
-        let Some(provided_extent) = <C as LoadExtent<f32, WidgetId>>::load(context, self.id) else {
-            warn!(
-                "Image widget with id {} didn't measured! Refused to draw.",
-                *self.id
-            );
-            return;
-        };
-
-        let inner_spacing = self.margin.unwrap_or_default();
-        let inner_extent = provided_extent.shrink_to_with(&inner_spacing);
-
-        if inner_extent.width <= 0.0 || inner_extent.height <= 0.0 {
-            return;
-        }
-
+    fn draw_content(
+        &self,
+        context: &C,
+        original_offset: &Offset<f32>,
+        provided_extent: Extent<f32>,
+        drawer: &mut Drawer,
+    ) {
         let Some(ImageData {
             image_file_descriptor,
             extent: image_extent,
+            aspect_ratio,
             ..
         }) = &self.value
         else {
             return;
         };
 
-        let offset = *original_offset + self.margin.unwrap_or_default().into();
+        Content::draw_fn(|offset: &Offset<f32>, provided_extent, drawer| {
+            let mut file = image_file_descriptor.get_file();
+            file.seek(std::io::SeekFrom::Start(0))
+                .expect("The temp file should be seekable");
 
-        let mut file = image_file_descriptor.get_file();
-        file.seek(std::io::SeekFrom::Start(0))
-            .expect("The temp file should be seekable");
-
-        let mut buffer = vec![];
-        if let Err(err) = file.read_to_end(&mut buffer) {
-            ImageData::print_readable_fs_error(err, None);
-        }
-
-        let data = skia_safe::Data::new_copy(&buffer);
-        let image_info = skia_safe::ImageInfo::new(
-            (image_extent.width as i32, image_extent.height as i32),
-            skia_safe::ColorType::RGBA8888,
-            skia_safe::AlphaType::Premul,
-            None,
-        );
-        let image =
-            skia_safe::images::raster_from_data(&image_info, data, image_extent.width as usize * 4)
-                .expect("Image must be valid");
-
-        let scale_x = inner_extent.width / image_extent.width;
-        let scale_y = inner_extent.height / image_extent.height;
-
-        let final_extent = match self.fit_mode.clone().unwrap_or_default() {
-            FitMode::Contain => {
-                let scale = scale_x.min(scale_y);
-                image_extent * scale
+            let mut buffer = vec![];
+            if let Err(err) = file.read_to_end(&mut buffer) {
+                ImageData::print_readable_fs_error(err, None);
             }
-            FitMode::Cover => {
-                let scale = scale_x.max(scale_y);
-                image_extent * scale
-            }
-            FitMode::Fill => inner_extent,
-            FitMode::ScaleDown => {
-                let scale = scale_x.min(scale_y).min(1.0);
-                image_extent * scale
-            }
-        };
 
-        let actual_offset = offset
-            + Offset::new(
-                (inner_extent.width - final_extent.width) / 2.0,
-                (inner_extent.height - final_extent.height) / 2.0,
-            )
-            + inner_spacing.into();
-
-        let src_rect =
-            skia_safe::Rect::from_xywh(0., 0., image.width() as f32, image.height() as f32);
-
-        let dst_rect = skia_safe::Rect::from_xywh(
-            actual_offset.x,
-            actual_offset.y,
-            final_extent.width,
-            final_extent.height,
-        );
-
-        let corner_radius = (final_extent.width.min(final_extent.height) / 2.0)
-            .min(self.rounding.unwrap_or_default() as f32);
-        let rrect = skia_safe::RRect::new_rect_xy(dst_rect, corner_radius, corner_radius);
-
-        let canvas = drawer.surface.canvas();
-
-        canvas.save();
-        canvas.clip_rrect(rrect, skia_safe::ClipOp::Intersect, true);
-
-        let sampling = skia_safe::SamplingOptions::new(
-            self.resizing_method
-                .clone()
-                .unwrap_or_default()
-                .to_skia_value(),
-            self.mipmap_mode.clone().unwrap_or_default().to_skia_value(),
-        );
-
-        let mut paint = skia_safe::Paint::default();
-        paint.set_anti_alias(true);
-
-        canvas.draw_image_rect_with_sampling_options(
-            image,
-            Some((&src_rect, skia_safe::canvas::SrcRectConstraint::Fast)),
-            dst_rect,
-            sampling,
-            &paint,
-        );
-
-        canvas.restore();
-
-        if context.get_debug_options().show_layout_bounds {
-            draw_debug_bounds(
-                canvas,
-                *original_offset,
-                provided_extent,
-                actual_offset,
-                final_extent,
+            let data = skia_safe::Data::new_copy(&buffer);
+            let image_info = skia_safe::ImageInfo::new(
+                (image_extent.width as i32, image_extent.height as i32),
+                skia_safe::ColorType::RGBA8888,
+                skia_safe::AlphaType::Premul,
+                None,
             );
-        }
+            let image = skia_safe::images::raster_from_data(
+                &image_info,
+                data,
+                image_extent.width as usize * 4,
+            )
+            .expect("Image must be valid");
+
+            let scale_x = provided_extent.width / image_extent.width;
+            let scale_y = provided_extent.height / image_extent.height;
+
+            let final_extent = match self.fit_mode.clone().unwrap_or_default() {
+                FitMode::Contain => image_extent * scale_x.min(scale_y),
+                FitMode::Cover => image_extent * scale_x.max(scale_y),
+                FitMode::Fill => provided_extent,
+                FitMode::ScaleDown => image_extent * scale_x.min(scale_y).min(1.0),
+            };
+
+            let actual_offset = *offset
+                + Offset::new(
+                    (provided_extent.width - final_extent.width) / 2.0,
+                    (provided_extent.height - final_extent.height) / 2.0,
+                );
+
+            let src_rect =
+                skia_safe::Rect::from_xywh(0., 0., image.width() as f32, image.height() as f32);
+
+            let dst_rect = skia_safe::Rect::from_xywh(
+                actual_offset.x,
+                actual_offset.y,
+                final_extent.width,
+                final_extent.height,
+            );
+
+            let canvas = drawer.surface.canvas();
+
+            let sampling = skia_safe::SamplingOptions::new(
+                self.resizing_method
+                    .clone()
+                    .unwrap_or_default()
+                    .to_skia_value(),
+                self.mipmap_mode.clone().unwrap_or_default().to_skia_value(),
+            );
+
+            let mut paint = skia_safe::Paint::default();
+            paint.set_anti_alias(true);
+
+            canvas.draw_image_rect_with_sampling_options(
+                image,
+                Some((&src_rect, skia_safe::canvas::SrcRectConstraint::Fast)),
+                dst_rect,
+                sampling,
+                &paint,
+            );
+
+            if context.get_debug_options().show_layout_bounds {
+                draw_debug_bounds(canvas, *offset, provided_extent);
+            }
+        })
+        .border(Border {
+            radius: self.rounding.unwrap_or_default() as usize,
+            ..Default::default()
+        })
+        .box_size_with_ratio(
+            self.width.as_option().map(|&width| width as f32),
+            self.height.as_option().map(|&height| height as f32),
+            Some(*aspect_ratio),
+        )
+        .spacing(self.margin.unwrap_or_default())
+        .draw(original_offset, provided_extent, drawer);
     }
 }
 

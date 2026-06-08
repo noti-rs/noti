@@ -12,7 +12,7 @@ use widgets::{
     self,
     animations::AnimationKind,
     context::{Context, CreateState, DebugOptions, GetState, SetState, SetStyleClass, Tick},
-    drawer::Drawer,
+    draw::Drawer,
     events::Event,
     make_style, make_widget,
     measure::Constraints,

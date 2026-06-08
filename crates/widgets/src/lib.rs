@@ -1,7 +1,7 @@
 pub mod animations;
 pub mod context;
 pub mod decorator;
-pub mod drawer;
+pub mod draw;
 pub mod events;
 pub mod measure;
 pub mod state;
@@ -12,10 +12,11 @@ use crate::{
     context::{
         Context, CreateState, DebugOptions, GetState, LoadExtent, SetState, SetStyleClass, Tick,
     },
+    draw::Draw,
     events::{DispatchEvent, Event},
     measure::{Constraints, Measure},
     types::{Extent, WidgetId, WidgetStyle},
-    widget::{Draw, Init, Invalidate, Layout, Widget, WidgetInformation},
+    widget::{Init, Invalidate, Layout, Widget, WidgetInformation},
 };
 
 pub struct UiRoot {
@@ -67,7 +68,7 @@ impl UiRoot {
         self.root_widget.layout(&self.context);
     }
 
-    pub fn draw(&self, offset: &types::Offset<f32>, drawer: &mut drawer::Drawer) {
+    pub fn draw(&self, offset: &types::Offset<f32>, drawer: &mut draw::Drawer) {
         self.root_widget.draw(&self.context, offset, drawer);
     }
 
