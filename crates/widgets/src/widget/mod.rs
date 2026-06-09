@@ -5,20 +5,17 @@ pub mod image;
 pub mod text;
 
 use crate::{
-    context::{
-        AnimationQuery, GenerateId, GetFont, GetState, GetStyle, LoadExtent,
-        ManageAnimationRegistry, ManageDirtyFlags, ManageIntrinsic, RegisterKey, ScopedManageState,
-        StateSubscription, StyleSubscription,
+    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic},
+    events::{self, DispatchEvent, EventContext, EventHitTest},
+    stage::{
+        draw::{Draw, DrawContext, Drawer},
+        init::{Init, InitContext},
+        invalidate::{Invalidate, InvalidateContext, InvalidateVisitor, RebuildStatus},
+        layout::Layout,
+        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     },
-    draw::{Draw, DrawContext, Drawer},
-    events::{self, DispatchContext, DispatchEvent},
-    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     types::{
-        dirty_flags::DirtyFlags,
-        extent::Extent,
-        identifiers::{WidgetClass, WidgetKey},
-        offset::Offset,
-        WidgetId,
+        Point, WidgetId, WidgetStyle, extent::Extent, identifiers::{WidgetClass, WidgetKey}, offset::Offset
     },
     widget::animated_visibility::AnimatedVisibility,
 };
@@ -60,97 +57,6 @@ pub trait WidgetSizingMode {
 pub trait WidgetBase: WidgetInformation + WidgetGetType + WidgetSizingMode {}
 
 impl<W> WidgetBase for W where W: WidgetInformation + WidgetGetType + WidgetSizingMode {}
-
-pub(crate) trait InitContext:
-    GenerateId
-    + RegisterKey<WidgetKey, WidgetId>
-    + GetState
-    + StateSubscription<WidgetId>
-    + StyleSubscription<WidgetClass, WidgetId>
-    + ManageAnimationRegistry<WidgetId>
-    + GetStyle
-    + GetFont
-{
-}
-
-impl<C> InitContext for C where
-    C: GenerateId
-        + RegisterKey<WidgetKey, WidgetId>
-        + GetState
-        + StateSubscription<WidgetId>
-        + StyleSubscription<WidgetClass, WidgetId>
-        + ManageAnimationRegistry<WidgetId>
-        + GetStyle
-        + GetFont
-{
-}
-
-pub(crate) trait Init<C>: WidgetBase
-where
-    C: InitContext,
-{
-    fn init(&mut self, context: &mut C) {
-        if *self.get_id() == 0 {
-            self.set_id(context.generate_id());
-        }
-
-        if let Some(key) = self.get_key() {
-            context.register_key(key.clone(), self.get_id());
-        }
-
-        self.on_init(context);
-    }
-
-    fn on_init(&mut self, context: &mut C);
-}
-
-pub(crate) trait LayoutContext<T>: LoadExtent<T, WidgetId>
-where
-    T: Default + Copy,
-{
-}
-
-impl<C, T> LayoutContext<T> for C
-where
-    C: LoadExtent<T, WidgetId>,
-    T: Default + Copy,
-{
-}
-
-pub(crate) trait Layout<C, T>
-where
-    C: LayoutContext<T>,
-    T: Default + Copy,
-{
-    fn layout(&mut self, context: &C);
-}
-
-pub(crate) trait InvalidateContext:
-    ManageDirtyFlags<WidgetId>
-    + ManageAnimationRegistry<WidgetId>
-    + AnimationQuery<WidgetId>
-    + GetState
-    + GetStyle
-    + ScopedManageState
-{
-}
-
-impl<C> InvalidateContext for C where
-    C: ManageDirtyFlags<WidgetId>
-        + ManageAnimationRegistry<WidgetId>
-        + AnimationQuery<WidgetId>
-        + GetState
-        + GetStyle
-        + ScopedManageState
-{
-}
-
-pub(crate) trait Invalidate<C>
-where
-    C: InvalidateContext,
-{
-    fn invalidate(&mut self, context: &mut C) -> DirtyFlags;
-}
 
 /// A container enum for all supported widget types.
 ///
@@ -210,21 +116,29 @@ impl WidgetSizingMode for Widget {
     }
 }
 
-impl<C> Invalidate<C> for Widget
-where
-    C: InvalidateContext,
-{
-    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
-        delegate!(self.invalidate(context))
-    }
-}
-
 impl<C> Init<C> for Widget
 where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
         delegate!(self.on_init(context));
+    }
+}
+
+impl<C> Invalidate<C> for Widget
+where
+    C: InvalidateContext,
+{
+    fn on_style_update(&mut self, context: &mut C, style: WidgetStyle) {
+        delegate!(self.on_style_update(context, style));
+    }
+
+    fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
+        delegate!(self.on_rebuild(context))
+    }
+
+    fn invalidate_children(&mut self, visitor: &mut impl InvalidateVisitor<C>) {
+        delegate!(self.invalidate_children(visitor));
     }
 }
 
@@ -236,8 +150,8 @@ impl Measure<f32> for Widget {
         delegate!(self.intrinsic_content(context))
     }
 
-    fn visit_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
-        delegate!(self.visit_children(visitor))
+    fn measure_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
+        delegate!(self.measure_children(visitor))
     }
 
     fn measure_content<C>(
@@ -276,9 +190,24 @@ where
     }
 }
 
+impl<C> EventHitTest<f32, C> for Widget
+where
+    C: EventContext<f32>,
+{
+    fn on_hit_test(
+        &self,
+        context: &C,
+        local_coords: Point<f32>,
+        provided_extent: Extent<f32>,
+        router: &mut events::EventRouter,
+    ) -> events::HitTestResult {
+        delegate!(self.on_hit_test(context, local_coords, provided_extent, router))
+    }
+}
+
 impl<C> DispatchEvent<C, f32> for Widget
 where
-    C: DispatchContext<f32>,
+    C: EventContext<f32>,
 {
     fn dispatch_event(&mut self, context: &mut C, event: events::Event) {
         delegate!(self.dispatch_event(context, event))

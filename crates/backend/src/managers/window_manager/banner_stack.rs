@@ -12,10 +12,9 @@ use widgets::{
     self,
     animations::AnimationKind,
     context::{Context, CreateState, DebugOptions, GetState, SetState, SetStyleClass, Tick},
-    draw::Drawer,
     events::Event,
     make_style, make_widget,
-    measure::Constraints,
+    stage::{draw::Drawer, measure::Constraints},
     state::MutableState,
     types::{Alignment, Border, Direction, Extent, Offset, Point, Position},
     widget::{

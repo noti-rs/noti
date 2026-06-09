@@ -1,7 +1,11 @@
 use crate::{
-    decorator::{DecoratorType, DrawDecorator, MeasureDecorator},
-    draw::{Drawer, UseColor},
-    types::{Border, Extent, Offset, Spacing},
+    decorator::{DecoratorType, DrawDecorator, EventHitTestDecorator, MeasureDecorator},
+    events::{EventRouter, HitTestResult},
+    stage::{
+        draw::{Drawer, UseColor},
+        measure::{Constraints, Intrinsic},
+    },
+    types::{Border, Extent, Offset, Point, Spacing, WidgetId},
 };
 
 pub(crate) struct BorderDecorator<N> {
@@ -65,14 +69,11 @@ where
     N: MeasureDecorator<T>,
     T: DecoratorType,
 {
-    fn intrinsic(&mut self) -> crate::measure::Intrinsic<T> {
+    fn intrinsic(&mut self) -> Intrinsic<T> {
         self.next.intrinsic() + Spacing::all_directional(self.border.size)
     }
 
-    fn measure(
-        &mut self,
-        constraints: crate::measure::Constraints<crate::types::Extent<T>>,
-    ) -> crate::types::Extent<T> {
+    fn measure(&mut self, constraints: Constraints<Extent<T>>) -> Extent<T> {
         let spacing = Spacing::all_directional(self.border.size);
         let new_constraints = constraints.shrink_to_with(&spacing);
 
@@ -113,5 +114,28 @@ where
         self.outline(offset, provided_extent, drawer);
 
         drawer.surface.canvas().restore();
+    }
+}
+
+impl<N, T> EventHitTestDecorator<T> for BorderDecorator<N>
+where
+    N: EventHitTestDecorator<T>,
+    T: DecoratorType,
+{
+    fn on_hit_test(
+        &self,
+        widget_id: WidgetId,
+        local_coords: Point<T>,
+        provided_extent: Extent<T>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        let spacing = Spacing::all_directional(self.border.size);
+
+        self.next.hit_test(
+            widget_id,
+            local_coords - spacing.into(),
+            provided_extent.shrink_to_with(&spacing),
+            router,
+        )
     }
 }

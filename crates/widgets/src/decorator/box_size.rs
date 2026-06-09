@@ -1,9 +1,13 @@
 use std::ops::{Div, Mul};
 
 use crate::{
-    decorator::{DecoratorType, DrawDecorator, MeasureDecorator},
-    measure::{Constraints, Intrinsic},
-    types::Extent,
+    decorator::{DecoratorType, DrawDecorator, EventHitTestDecorator, MeasureDecorator},
+    events::{EventRouter, HitTestResult},
+    stage::{
+        draw::Drawer,
+        measure::{Constraints, Intrinsic},
+    },
+    types::{Extent, Point, WidgetId},
 };
 
 pub(crate) struct BoxSizeDecorator<N, T> {
@@ -11,6 +15,41 @@ pub(crate) struct BoxSizeDecorator<N, T> {
     pub(super) height: Option<T>,
     pub(super) ratio: Option<f32>,
     pub(super) next: N,
+}
+
+impl<N, T> BoxSizeDecorator<N, T>
+where
+    T: DecoratorType + Div<f32, Output = T> + Mul<f32, Output = T>,
+{
+    fn update_extent(&self, extent: Extent<T>) -> Extent<T> {
+        let mut new_extent = extent;
+
+        if let Some(width) = self.width {
+            new_extent.width = width;
+
+            if self.height.is_none() {
+                if let Some(ratio) = self.ratio {
+                    let height = width / ratio;
+
+                    new_extent.height = height;
+                }
+            }
+        }
+
+        if let Some(height) = self.height {
+            new_extent.height = height;
+
+            if self.width.is_none() {
+                if let Some(ratio) = self.ratio {
+                    let width = height * ratio;
+
+                    new_extent.width = width;
+                }
+            }
+        }
+
+        new_extent
+    }
 }
 
 impl<N, T> MeasureDecorator<T> for BoxSizeDecorator<N, T>
@@ -106,33 +145,9 @@ where
         &self,
         offset: &crate::types::Offset<T>,
         provided_extent: Extent<T>,
-        drawer: &mut crate::draw::Drawer,
+        drawer: &mut Drawer,
     ) {
-        let mut new_extent = provided_extent;
-
-        if let Some(width) = self.width {
-            new_extent.width = width;
-
-            if self.height.is_none() {
-                if let Some(ratio) = self.ratio {
-                    let height = width / ratio;
-
-                    new_extent.height = height;
-                }
-            }
-        }
-
-        if let Some(height) = self.height {
-            new_extent.height = height;
-
-            if self.width.is_none() {
-                if let Some(ratio) = self.ratio {
-                    let width = height * ratio;
-
-                    new_extent.width = width;
-                }
-            }
-        }
+        let new_extent = self.update_extent(provided_extent);
 
         if new_extent.is_collapsed() {
             return;
@@ -154,5 +169,24 @@ where
         self.next.draw(offset, new_extent, drawer);
 
         drawer.surface.canvas().restore();
+    }
+}
+
+impl<N, T> EventHitTestDecorator<T> for BoxSizeDecorator<N, T>
+where
+    N: EventHitTestDecorator<T>,
+    T: DecoratorType + Div<f32, Output = T> + Mul<f32, Output = T>,
+{
+    fn on_hit_test(
+        &self,
+        widget_id: WidgetId,
+        local_coords: Point<T>,
+        provided_extent: Extent<T>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        let new_extent = self.update_extent(provided_extent);
+
+        self.next
+            .hit_test(widget_id, local_coords, new_extent, router)
     }
 }

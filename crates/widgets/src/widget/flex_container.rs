@@ -3,16 +3,22 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 use log::warn;
 
 use crate::{
-    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic, StyleSubscription},
-    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
-    draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
-    events::{DispatchContext, DispatchEvent, Event},
-    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic},
+    decorator::{
+        content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, MeasureDecorator,
+    },
+    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    stage::{
+        draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
+        init::{Init, InitContext},
+        invalidate::{Invalidate, InvalidateContext, InvalidateVisitor, RebuildStatus},
+        layout::{Layout, LayoutContext},
+        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+    },
     types::{
         alignment::{Alignment, Position},
         border::Border,
         direction::Direction,
-        dirty_flags::DirtyFlags,
         extent::{Extent, FlexExtent},
         identifiers::{WidgetClass, WidgetId, WidgetKey},
         offset::Offset,
@@ -20,10 +26,7 @@ use crate::{
         style::{Configure, StyleProperty, WidgetStyle},
         Color, Point,
     },
-    widget::{
-        Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext, Widget,
-        WidgetGetType, WidgetInformation, WidgetSizingMode,
-    },
+    widget::{Widget, WidgetGetType, WidgetInformation, WidgetSizingMode},
 };
 
 /// A container widget that arranges its child widgets along a single
@@ -294,6 +297,59 @@ impl FlexContainer {
 
         (start, incrementor)
     }
+
+    fn iterate_over_children<F, C>(
+        &self,
+        context: &C,
+        provided_extent: Extent<f32>,
+        callback: &mut F,
+    ) where
+        C: LoadExtent<f32, WidgetId>,
+        F: FnMut((usize, &Widget), Offset<f32>) -> IteratorProcess,
+    {
+        let mut plane = FCPlane::new(Offset::<f32>::default(), provided_extent, self.direction);
+
+        let main_children_extent = self.main_children_extent(context);
+        plane.main.start = self
+            .main_axis_alignment()
+            .get_start(plane.main.extent, main_children_extent);
+
+        let incrementor = match self.main_axis_alignment() {
+            Position::Start | Position::Center | Position::End => 0.0,
+            Position::SpaceBetween => {
+                if self.children.len() <= 1 {
+                    0.0
+                } else {
+                    (plane.main.extent - main_children_extent)
+                        / self.children.len().saturating_sub(1) as f32
+                }
+            }
+        };
+
+        let cross_axis_start = plane.cross.start;
+        let cross_axis_alignment = self.cross_axis_alignment();
+
+        for (index, child) in self.children.iter().enumerate() {
+            let child_extent = <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
+                .unwrap_or_default()
+                .to_flex(&self.direction);
+
+            plane.cross.start = cross_axis_start
+                + cross_axis_alignment.get_start(plane.cross.extent, child_extent.cross);
+
+            match callback((index, child), plane.as_offset()) {
+                IteratorProcess::Continue => (),
+                IteratorProcess::Break => break,
+            }
+
+            plane.cut_front(child_extent.main + incrementor);
+        }
+    }
+}
+
+enum IteratorProcess {
+    Continue,
+    Break,
 }
 
 impl WidgetInformation for FlexContainer {
@@ -326,51 +382,11 @@ impl WidgetSizingMode for FlexContainer {
     }
 }
 
-impl<C> Invalidate<C> for FlexContainer
-where
-    C: InvalidateContext,
-{
-    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-
-        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
-            if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
-                self.configure(container_style.clone());
-
-                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
-            }
-
-            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
-        }
-
-        for child in &mut self.children {
-            let child_flags = child.invalidate(context);
-
-            if child_flags.contains(DirtyFlags::NEEDS_MEASURE) {
-                dirty_flags |= DirtyFlags::NEEDS_MEASURE | DirtyFlags::CHILD_NEEDS_MEASURE;
-            } else if child_flags.contains(DirtyFlags::CHILD_NEEDS_MEASURE) {
-                dirty_flags |= DirtyFlags::CHILD_NEEDS_MEASURE;
-            }
-        }
-
-        context.set_dirty_flags(self.id, dirty_flags);
-        dirty_flags
-    }
-}
-
 impl<C> Init<C> for FlexContainer
 where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
-        if !self.class.is_empty() {
-            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
-                context,
-                self.id,
-                self.class.clone(),
-            );
-        }
-
         if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
             self.configure(container_style.clone());
         }
@@ -378,6 +394,27 @@ where
         self.children.iter_mut().for_each(|child| {
             child.init(context);
         });
+    }
+}
+
+impl<C> Invalidate<C> for FlexContainer
+where
+    C: InvalidateContext,
+{
+    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
+        if let WidgetStyle::Container(container_style) = style {
+            self.configure(container_style);
+        }
+    }
+
+    fn on_rebuild(&mut self, _context: &mut C) -> RebuildStatus {
+        RebuildStatus::NothingChanged
+    }
+
+    fn invalidate_children(&mut self, visitor: &mut impl InvalidateVisitor<C>) {
+        for child in &mut self.children {
+            visitor.invalidate(child);
+        }
     }
 }
 
@@ -423,9 +460,9 @@ impl Measure<f32> for FlexContainer {
         .intrinsic()
     }
 
-    fn visit_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
+    fn measure_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
         for child in &self.children {
-            visitor.visit(child);
+            visitor.measure(child);
         }
     }
 
@@ -589,42 +626,15 @@ where
     ) {
         Content::draw_fn(
             |offset: &Offset<f32>, provided_extent: Extent<f32>, drawer: &mut Drawer| {
-                let mut plane =
-                    FCPlane::new(Offset::<f32>::default(), provided_extent, self.direction);
+                self.iterate_over_children(
+                    context,
+                    provided_extent,
+                    &mut |(_, child), local_offset| {
+                        child.draw(context, &(local_offset + *offset), drawer);
 
-                let main_children_extent = self.main_children_extent(context);
-                plane.main.start = self
-                    .main_axis_alignment()
-                    .get_start(plane.main.extent, main_children_extent);
-
-                let incrementor = match self.main_axis_alignment() {
-                    Position::Start | Position::Center | Position::End => 0.0,
-                    Position::SpaceBetween => {
-                        if self.children.len() <= 1 {
-                            0.0
-                        } else {
-                            (plane.main.extent - main_children_extent)
-                                / self.children.len().saturating_sub(1) as f32
-                        }
-                    }
-                };
-
-                let cross_axis_start = plane.cross.start;
-                let cross_axis_alignment = self.cross_axis_alignment();
-
-                for child in &self.children {
-                    let child_extent =
-                        <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
-                            .unwrap_or_default()
-                            .to_flex(&self.direction);
-
-                    plane.cross.start = cross_axis_start
-                        + cross_axis_alignment.get_start(plane.cross.extent, child_extent.cross);
-
-                    child.draw(context, &(plane.as_offset() + *offset), drawer);
-
-                    plane.cut_front(child_extent.main + incrementor);
-                }
+                        IteratorProcess::Continue
+                    },
+                );
 
                 if context.get_debug_options().show_layout_bounds {
                     let plane =
@@ -653,9 +663,49 @@ where
     }
 }
 
+impl<C> EventHitTest<f32, C> for FlexContainer
+where
+    C: EventContext<f32>,
+{
+    fn on_hit_test(
+        &self,
+        context: &C,
+        local_coords: Point<f32>,
+        provided_extent: Extent<f32>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        Content::hit_test_fn(
+            |local_coords: Point<f32>, provided_extent: Extent<f32>, router: &mut EventRouter| {
+                let mut result = HitTestResult::Missed;
+                self.iterate_over_children(
+                    context,
+                    provided_extent,
+                    &mut |(index, child), offset| {
+                        result = child.hit_test(context, local_coords - offset.into(), router);
+
+                        match &result {
+                            HitTestResult::Missed => IteratorProcess::Continue,
+                            HitTestResult::Hit => {
+                                router.set_next_index(self.id, index);
+                                IteratorProcess::Break
+                            }
+                            HitTestResult::Failed => IteratorProcess::Break,
+                        }
+                    },
+                );
+
+                result
+            },
+        )
+        .spacing(self.spacing.unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .hit_test(self.id, local_coords, provided_extent, router)
+    }
+}
+
 impl<C> DispatchEvent<C, f32> for FlexContainer
 where
-    C: DispatchContext<f32>,
+    C: EventContext<f32>,
 {
     fn dispatch_event(&mut self, context: &mut C, event: Event) {
         let Some(provided_extent) = context.load(self.id) else {

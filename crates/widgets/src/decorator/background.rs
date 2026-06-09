@@ -1,8 +1,11 @@
 use crate::{
-    decorator::{DecoratorType, DrawDecorator, MeasureDecorator},
-    draw::{Drawer, UseColor},
-    measure::{Constraints, Intrinsic},
-    types::{Color, Extent, Offset},
+    decorator::{DecoratorType, DrawDecorator, EventHitTestDecorator, MeasureDecorator},
+    events::{EventRouter, HitTestResult},
+    stage::{
+        draw::{Drawer, UseColor},
+        measure::{Constraints, Intrinsic},
+    },
+    types::{Color, Extent, Offset, Point, WidgetId},
 };
 
 pub(crate) struct BackgroundDecorator<N> {
@@ -52,5 +55,22 @@ where
         );
 
         self.next.draw(offset, provided_extent, drawer);
+    }
+}
+
+impl<N, T> EventHitTestDecorator<T> for BackgroundDecorator<N>
+where
+    N: EventHitTestDecorator<T>,
+    T: DecoratorType,
+{
+    fn on_hit_test(
+        &self,
+        widget_id: WidgetId,
+        local_coords: Point<T>,
+        provided_extent: Extent<T>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        self.next
+            .hit_test(widget_id, local_coords, provided_extent, router)
     }
 }

@@ -4,17 +4,24 @@ use num_traits::FromPrimitive;
 
 use crate::{
     decorator::{
-        background::BackgroundDecorator, border::BorderDecorator, box_size::BoxSizeDecorator,
+        background::BackgroundDecorator,
+        border::BorderDecorator,
+        box_size::BoxSizeDecorator,
+        callback::{CallbackDecorator, OnClick, OnHover, OnPress},
         spacing::SpacingDecorator,
     },
-    draw::Drawer,
-    measure::{Constraints, Intrinsic},
-    types::{Border, Color, Extent, Offset, Spacing},
+    events::{EventRouter, HitTestResult},
+    stage::{
+        draw::Drawer,
+        measure::{Constraints, Intrinsic},
+    },
+    types::{Border, Color, Extent, Offset, Point, Spacing, WidgetId},
 };
 
 pub(crate) mod background;
 pub(crate) mod border;
 pub(crate) mod box_size;
+pub(crate) mod callback;
 pub(crate) mod content;
 pub(crate) mod spacing;
 
@@ -43,7 +50,35 @@ where
     fn draw(&self, offset: &Offset<T>, provided_extent: Extent<T>, drawer: &mut Drawer);
 }
 
-pub(crate) trait DecoratorExt<T>: MeasureDecorator<T> + DrawDecorator<T> + Sized
+pub(crate) trait EventHitTestDecorator<T>
+where
+    T: DecoratorType,
+{
+    fn on_hit_test(
+        &self,
+        widget_id: WidgetId,
+        local_coords: Point<T>,
+        provided_extent: Extent<T>,
+        router: &mut EventRouter,
+    ) -> HitTestResult;
+
+    fn hit_test(
+        &self,
+        widget_id: WidgetId,
+        local_coords: Point<T>,
+        provided_extent: Extent<T>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        if !local_coords.is_inside_of(provided_extent) {
+            return HitTestResult::Missed;
+        }
+
+        self.on_hit_test(widget_id, local_coords, provided_extent, router)
+    }
+}
+
+pub(crate) trait DecoratorExt<T>:
+    MeasureDecorator<T> + DrawDecorator<T> + EventHitTestDecorator<T> + Sized
 where
     T: DecoratorType,
 {
@@ -87,11 +122,23 @@ where
             next: self,
         }
     }
+
+    fn on_hover<'a, C>(self, callback: &'a mut C) -> CallbackDecorator<'a, C, OnHover, Self> {
+        CallbackDecorator::on_hover(callback, self)
+    }
+
+    fn on_press<'a, C>(self, callback: &'a mut C) -> CallbackDecorator<'a, C, OnPress, Self> {
+        CallbackDecorator::on_press(callback, self)
+    }
+
+    fn on_click<'a, C>(self, callback: &'a mut C) -> CallbackDecorator<'a, C, OnClick, Self> {
+        CallbackDecorator::on_click(callback, self)
+    }
 }
 
 impl<D, T> DecoratorExt<T> for D
 where
-    D: MeasureDecorator<T> + DrawDecorator<T> + Sized,
+    D: MeasureDecorator<T> + DrawDecorator<T> + EventHitTestDecorator<T> + Sized,
     T: DecoratorType,
 {
 }

@@ -2,25 +2,30 @@ use log::warn;
 use macros::widget_style;
 
 use crate::{
-    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic, StyleSubscription},
-    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
-    draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
-    events::{DispatchContext, DispatchEvent, Event},
-    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic},
+    decorator::{
+        content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, MeasureDecorator,
+    },
+    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    stage::{
+        draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
+        init::{Init, InitContext},
+        invalidate::{Invalidate, InvalidateContext, InvalidateVisitor, RebuildStatus},
+        layout::{Layout, LayoutContext},
+        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+    },
     types::{
         alignment::Alignment,
         border::Border,
-        dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
         style::{Configure, StyleProperty, WidgetStyle},
-        Color,
+        Color, Point,
     },
     widget::{
-        flex_container::FlexContainer, Init, InitContext, Invalidate, InvalidateContext, Layout,
-        LayoutContext, Widget, WidgetGetType, WidgetInformation, WidgetSizingMode,
+        flex_container::FlexContainer, Widget, WidgetGetType, WidgetInformation, WidgetSizingMode,
     },
 };
 
@@ -163,58 +168,38 @@ impl WidgetSizingMode for Container {
     }
 }
 
-impl<C> Invalidate<C> for Container
-where
-    C: InvalidateContext,
-{
-    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-
-        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
-            if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
-                self.configure(container_style.clone());
-            }
-
-            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
-        }
-
-        if let Some(child) = &mut self.child {
-            let child_flags = child.invalidate(context);
-
-            if child_flags.intersects(DirtyFlags::NEEDS_MEASURE | DirtyFlags::CHILD_NEEDS_MEASURE) {
-                dirty_flags |= DirtyFlags::CHILD_NEEDS_MEASURE;
-            }
-        }
-
-        context.set_dirty_flags(self.id, dirty_flags);
-
-        if dirty_flags.intersects(DirtyFlags::CHILD_NEEDS_MEASURE) {
-            DirtyFlags::CHILD_NEEDS_MEASURE
-        } else {
-            DirtyFlags::empty()
-        }
-    }
-}
-
 impl<C> Init<C> for Container
 where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
-        if !self.class.is_empty() {
-            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
-                context,
-                self.id,
-                self.class.clone(),
-            );
-        }
-
         if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
             self.configure(container_style.clone());
         }
 
         if let Some(child) = &mut self.child {
             child.init(context);
+        }
+    }
+}
+
+impl<C> Invalidate<C> for Container
+where
+    C: InvalidateContext,
+{
+    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
+        if let WidgetStyle::Container(container_style) = style {
+            self.configure(container_style);
+        }
+    }
+
+    fn on_rebuild(&mut self, _context: &mut C) -> RebuildStatus {
+        RebuildStatus::NothingChanged
+    }
+
+    fn invalidate_children(&mut self, visitor: &mut impl InvalidateVisitor<C>) {
+        if let Some(child) = &mut self.child {
+            visitor.invalidate(child);
         }
     }
 }
@@ -239,9 +224,9 @@ impl Measure<f32> for Container {
         .intrinsic()
     }
 
-    fn visit_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
+    fn measure_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
         if let Some(child) = &self.child {
-            visitor.visit(child);
+            visitor.measure(child);
         }
     }
 
@@ -330,9 +315,46 @@ where
     }
 }
 
+impl<C> EventHitTest<f32, C> for Container
+where
+    C: EventContext<f32>,
+{
+    fn on_hit_test(
+        &self,
+        context: &C,
+        local_coords: Point<f32>,
+        provided_extent: Extent<f32>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        Content::hit_test_fn(
+            |local_coords: Point<f32>, _provided_extent: Extent<f32>, router: &mut EventRouter| {
+                if let Some(child) = &self.child {
+                    let result = child.hit_test(context, local_coords, router);
+
+                    match result {
+                        HitTestResult::Hit => router.set_next_index(self.id, 0),
+                        HitTestResult::Missed | HitTestResult::Failed => (),
+                    }
+
+                    result
+                } else {
+                    HitTestResult::Missed
+                }
+            },
+        )
+        .spacing(self.spacing.unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .box_size(
+            self.width.as_option().map(|&width| width as f32),
+            self.height.as_option().map(|&height| height as f32),
+        )
+        .hit_test(self.id, local_coords, provided_extent, router)
+    }
+}
+
 impl<C> DispatchEvent<C, f32> for Container
 where
-    C: DispatchContext<f32>,
+    C: EventContext<f32>,
 {
     fn dispatch_event(&mut self, _context: &mut C, _event: Event) {
         todo!()

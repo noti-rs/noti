@@ -8,24 +8,22 @@ use shared::{
 };
 
 use crate::{
-    context::{ManageDirtyFlags, ManageIntrinsic, StateSubscription, StyleSubscription},
-    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
-    draw::{draw_debug_bounds, Drawer, UseColor},
-    events::{DispatchContext, DispatchEvent, Event},
-    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+    context::{ManageDirtyFlags, ManageIntrinsic, StateSubscription},
+    decorator::{DecoratorExt, DrawDecorator, MeasureDecorator, content::Content},
+    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    stage::{
+        draw::{Drawer, UseColor, draw_debug_bounds},
+        invalidate::{InvalidateVisitor, RebuildStatus},
+        layout::{Layout, LayoutContext},
+        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+    },
     state::State,
     types::{
-        dirty_flags::DirtyFlags,
-        extent::Extent,
-        identifiers::{WidgetClass, WidgetId, WidgetKey},
-        offset::Offset,
-        spacing::Spacing,
-        style::{Configure, WidgetStyle},
-        Color,
+        Color, Point, extent::Extent, identifiers::{WidgetClass, WidgetId, WidgetKey}, offset::Offset, spacing::Spacing, style::{Configure, WidgetStyle}
     },
     widget::{
-        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext,
-        WidgetGetType, WidgetSizingMode,
+        Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, WidgetGetType,
+        WidgetSizingMode,
     },
 };
 
@@ -268,47 +266,6 @@ impl WidgetSizingMode for Text {
     }
 }
 
-impl<C> Invalidate<C> for Text
-where
-    C: InvalidateContext,
-{
-    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-
-        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
-            if let Some(WidgetStyle::Text(text_style)) = context.get_style(&self.class) {
-                self.configure(text_style.clone());
-
-                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
-            }
-
-            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
-        }
-
-        if dirty_flags.contains(DirtyFlags::NEEDS_REBUILD) {
-            if let Some(text) = self
-                .state
-                .and_then(|state| context.get(state))
-                .take_if(|text| **text != self.value)
-            {
-                self.value = text.clone();
-
-                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
-            }
-
-            dirty_flags -= DirtyFlags::NEEDS_REBUILD;
-        }
-
-        if dirty_flags.is_empty() {
-            context.remove_dirty_flags(self.id);
-        } else {
-            context.set_dirty_flags(self.id, dirty_flags);
-        }
-
-        dirty_flags
-    }
-}
-
 impl<C> Init<C> for Text
 where
     C: InitContext,
@@ -320,14 +277,6 @@ where
             if let Some(text) = context.get(state) {
                 self.value = text.clone();
             }
-        }
-
-        if !self.class.is_empty() {
-            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
-                context,
-                self.id,
-                self.class.clone(),
-            );
         }
 
         if let Some(WidgetStyle::Text(text_style)) = context.get_style(&self.class) {
@@ -352,6 +301,33 @@ where
 
         self.paragraph = Some(RefCell::new(paragraph));
     }
+}
+
+impl<C> Invalidate<C> for Text
+where
+    C: InvalidateContext,
+{
+    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
+        if let WidgetStyle::Text(text_style) = style {
+            self.configure(text_style);
+        }
+    }
+
+    fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
+        if let Some(text) = self
+            .state
+            .and_then(|state| context.get(state))
+            .take_if(|text| **text != self.value)
+        {
+            self.value = text.clone();
+
+            RebuildStatus::NeedsMeasure
+        } else {
+            RebuildStatus::NothingChanged
+        }
+    }
+
+    fn invalidate_children(&mut self, _visitor: &mut impl InvalidateVisitor<C>) {}
 }
 
 impl Measure<f32> for Text {
@@ -391,7 +367,7 @@ impl Measure<f32> for Text {
         .intrinsic()
     }
 
-    fn visit_children(&self, _visitor: &mut impl measure::MeasureVisitor<f32>) {}
+    fn measure_children(&self, _visitor: &mut impl measure::MeasureVisitor<f32>) {}
 
     fn measure_content<C>(
         &self,
@@ -679,9 +655,24 @@ where
     }
 }
 
+impl<C> EventHitTest<f32, C> for Text
+where
+    C: EventContext<f32>,
+{
+    fn on_hit_test(
+        &self,
+        _context: &C,
+        _local_coords: Point<f32>,
+        _provided_extent: Extent<f32>,
+        _router: &mut EventRouter,
+    ) -> HitTestResult {
+        HitTestResult::Missed
+    }
+}
+
 impl<C> DispatchEvent<C, f32> for Text
 where
-    C: DispatchContext<f32>,
+    C: EventContext<f32>,
 {
     fn dispatch_event(&mut self, _context: &mut C, _event: Event) {
         // TODO: implement link click

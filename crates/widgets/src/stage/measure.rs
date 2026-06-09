@@ -42,7 +42,7 @@ pub(crate) trait MeasureVisitor<T>
 where
     T: Default + Copy + PartialEq,
 {
-    fn visit<W: Measure<T>>(&mut self, child: &W);
+    fn measure<W: Measure<T>>(&mut self, child: &W);
 }
 
 pub(crate) trait Measure<T>: WidgetInformation
@@ -53,7 +53,7 @@ where
     where
         C: ManageIntrinsic<T, WidgetId> + ManageDirtyFlags<WidgetId>;
 
-    fn visit_children(&self, visitor: &mut impl MeasureVisitor<T>);
+    fn measure_children(&self, visitor: &mut impl MeasureVisitor<T>);
 
     fn measure_content<C>(&self, context: &mut C, constraints: Constraints<Extent<T>>) -> Extent<T>
     where
@@ -106,7 +106,7 @@ where
                 T: Default + Copy + PartialEq,
                 C: MeasureContext<T, WidgetId> + ManageDirtyFlags<WidgetId>,
             {
-                fn visit<W: Measure<T>>(&mut self, child: &W) {
+                fn measure<W: Measure<T>>(&mut self, child: &W) {
                     let child_constraints =
                         <C as LoadConstraints<T, WidgetId>>::load(self.context, child.get_id())
                             .or_else(|| {
@@ -120,7 +120,7 @@ where
             }
 
             let mut visitor = ChildrenVisitor { context };
-            self.visit_children(&mut visitor);
+            self.measure_children(&mut visitor);
 
             dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
             context.set_dirty_flags(self.get_id(), dirty_flags);

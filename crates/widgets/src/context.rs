@@ -1,5 +1,5 @@
 use crate::{
-    measure::{Constraints, Intrinsic},
+    stage::measure::{Constraints, Intrinsic},
     state::{MutableState, State, StateInfo},
     types::{
         dirty_flags::DirtyFlags, identifiers::WidgetKey, Extent, StyleInfo, WidgetClass, WidgetId,
@@ -421,7 +421,11 @@ where
     }
 
     fn set_dirty_flags(&mut self, id: Id, dirty_flags: DirtyFlags) {
-        self.dirty_registry.insert(id.into(), dirty_flags);
+        if dirty_flags.is_empty() {
+            self.remove_dirty_flags(id);
+        } else {
+            self.dirty_registry.insert(id.into(), dirty_flags);
+        }
     }
 
     fn remove_dirty_flags(&mut self, id: Id) {

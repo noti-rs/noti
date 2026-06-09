@@ -1,8 +1,11 @@
 use crate::{
-    decorator::{DecoratorType, DrawDecorator, MeasureDecorator},
-    draw::Drawer,
-    measure::{Constraints, Intrinsic},
-    types::{Extent, Offset, Spacing},
+    decorator::{DecoratorType, DrawDecorator, EventHitTestDecorator, MeasureDecorator},
+    events::{EventRouter, HitTestResult},
+    stage::{
+        draw::Drawer,
+        measure::{Constraints, Intrinsic},
+    },
+    types::{Extent, Offset, Point, Spacing, WidgetId},
 };
 pub(crate) struct SpacingDecorator<N> {
     pub(super) spacing: Spacing,
@@ -41,6 +44,27 @@ where
             &(*offset + self.spacing.into()),
             provided_extent.shrink_to_with(&self.spacing),
             drawer,
+        )
+    }
+}
+
+impl<N, T> EventHitTestDecorator<T> for SpacingDecorator<N>
+where
+    N: EventHitTestDecorator<T>,
+    T: DecoratorType,
+{
+    fn on_hit_test(
+        &self,
+        widget_id: WidgetId,
+        local_coords: Point<T>,
+        provided_extent: Extent<T>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        self.next.hit_test(
+            widget_id,
+            local_coords - self.spacing.into(),
+            provided_extent.shrink_to_with(&self.spacing),
+            router,
         )
     }
 }

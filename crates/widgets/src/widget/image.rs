@@ -9,25 +9,26 @@ use macros::widget;
 use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::TryFromValue};
 
 use crate::{
-    context::{ManageDirtyFlags, ManageIntrinsic, StateSubscription, StyleSubscription},
+    context::{ManageDirtyFlags, ManageIntrinsic, StateSubscription},
     decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
-    draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
-    events::{DispatchContext, DispatchEvent, Event},
-    measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    stage::{
+        draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
+        init::{Init, InitContext},
+        invalidate::{Invalidate, InvalidateContext, InvalidateVisitor, RebuildStatus},
+        layout::{Layout, LayoutContext},
+        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+    },
     state::State,
     types::{
-        dirty_flags::DirtyFlags,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
         style::{Configure, WidgetStyle},
-        Border,
+        Border, Point,
     },
-    widget::{
-        Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext, WidgetGetType,
-        WidgetSizingMode,
-    },
+    widget::{WidgetGetType, WidgetSizingMode},
 };
 
 const DEFAULT_ICON_THEME: &str = "hicolor";
@@ -146,51 +147,11 @@ impl WidgetSizingMode for Image {
     }
 }
 
-impl<C> Invalidate<C> for Image
-where
-    C: InvalidateContext,
-{
-    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-
-        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
-            if let Some(WidgetStyle::Image(image_style)) = context.get_style(&self.class) {
-                self.configure(image_style.clone());
-
-                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
-            }
-
-            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
-        }
-
-        if dirty_flags.contains(DirtyFlags::NEEDS_REBUILD) {
-            if let Some(image_provider) = self.state.and_then(|state| context.get(state)) {
-                self.load_image(image_provider);
-
-                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
-            }
-
-            dirty_flags -= DirtyFlags::NEEDS_REBUILD;
-        }
-
-        context.set_dirty_flags(self.id, dirty_flags);
-        dirty_flags
-    }
-}
-
 impl<C> Init<C> for Image
 where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
-        if !self.class.is_empty() {
-            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
-                context,
-                self.id,
-                self.class.clone(),
-            );
-        }
-
         if let Some(WidgetStyle::Image(image_config)) = context.get_style(&self.class) {
             self.configure(image_config.clone());
         }
@@ -203,6 +164,28 @@ where
             }
         }
     }
+}
+
+impl<C> Invalidate<C> for Image
+where
+    C: InvalidateContext,
+{
+    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
+        if let WidgetStyle::Image(image_style) = style {
+            self.configure(image_style);
+        }
+    }
+
+    fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
+        if let Some(image_provider) = self.state.and_then(|state| context.get(state)) {
+            self.load_image(image_provider);
+            RebuildStatus::NeedsMeasure
+        } else {
+            RebuildStatus::NothingChanged
+        }
+    }
+
+    fn invalidate_children(&mut self, _visitor: &mut impl InvalidateVisitor<C>) {}
 }
 
 impl Measure<f32> for Image {
@@ -226,7 +209,7 @@ impl Measure<f32> for Image {
         .intrinsic()
     }
 
-    fn visit_children(&self, _visitor: &mut impl measure::MeasureVisitor<f32>) {}
+    fn measure_children(&self, _visitor: &mut impl measure::MeasureVisitor<f32>) {}
 
     fn measure_content<C>(
         &self,
@@ -371,9 +354,24 @@ where
     }
 }
 
+impl<C> EventHitTest<f32, C> for Image
+where
+    C: EventContext<f32>,
+{
+    fn on_hit_test(
+        &self,
+        _context: &C,
+        _local_coords: Point<f32>,
+        _provided_extent: Extent<f32>,
+        _router: &mut EventRouter,
+    ) -> HitTestResult {
+        HitTestResult::Missed
+    }
+}
+
 impl<C> DispatchEvent<C, f32> for Image
 where
-    C: DispatchContext<f32>,
+    C: EventContext<f32>,
 {
     fn dispatch_event(&mut self, _context: &mut C, _event: Event) {}
 }

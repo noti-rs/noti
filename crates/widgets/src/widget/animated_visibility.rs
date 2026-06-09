@@ -6,20 +6,23 @@ use crate::{
     animations::{AnimationFilter, AnimationKind, Easing},
     context::{
         AnimationDirection, AnimationProgress, ManageAnimationRegistry, ManageDirtyFlags,
-        ManageIntrinsic, ScopedContext, StateSubscription, StyleSubscription,
+        ManageIntrinsic, ScopedContext, StateSubscription,
     },
-    draw::{Draw, DrawContext, Drawer},
-    events::{DispatchContext, DispatchEvent, Event},
-    measure::{self, Constraints, Intrinsic, Measure, MeasureContext, SizingMode},
+    decorator::{content::Content, DecoratorExt, EventHitTestDecorator},
+    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    stage::{
+        draw::{Draw, DrawContext, Drawer},
+        init::{Init, InitContext},
+        invalidate::{Invalidate, InvalidateContext, InvalidateVisitor, RebuildStatus},
+        layout::{Layout, LayoutContext},
+        measure::{self, Constraints, Intrinsic, Measure, MeasureContext, SizingMode},
+    },
     state::State,
     types::{
-        dirty_flags::DirtyFlags, identifiers::WidgetKey, style::Configure, Extent, Offset,
+        dirty_flags::DirtyFlags, identifiers::WidgetKey, style::Configure, Extent, Offset, Point,
         WidgetClass, WidgetId, WidgetStyle,
     },
-    widget::{
-        Init, InitContext, Invalidate, InvalidateContext, Layout, LayoutContext, Widget,
-        WidgetGetType, WidgetInformation, WidgetSizingMode,
-    },
+    widget::{Widget, WidgetGetType, WidgetInformation, WidgetSizingMode},
 };
 
 #[widget(kind = minimal)]
@@ -120,14 +123,6 @@ where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
-        if !self.class.is_empty() {
-            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
-                context,
-                self.id,
-                self.class.clone(),
-            );
-        }
-
         if let Some(WidgetStyle::AnimatedVisibility(av_style)) = context.get_style(&self.class) {
             self.configure(av_style.clone());
         }
@@ -160,20 +155,13 @@ impl<C> Invalidate<C> for AnimatedVisibility
 where
     C: InvalidateContext,
 {
-    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
-        let mut dirty_flags = context.get_dirty_flags(self.id);
-
-        if dirty_flags.contains(DirtyFlags::NEEDS_UPDATE_STYLES) {
-            if let Some(WidgetStyle::AnimatedVisibility(av_style)) = context.get_style(&self.class)
-            {
-                self.configure(av_style.clone());
-
-                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
-            }
-
-            dirty_flags -= DirtyFlags::NEEDS_UPDATE_STYLES;
+    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
+        if let WidgetStyle::AnimatedVisibility(av_style) = style {
+            self.configure(av_style);
         }
+    }
 
+    fn on_rebuild(&mut self, context: &mut C) -> crate::stage::invalidate::RebuildStatus {
         if let Some(new_visibility) = self
             .state
             .and_then(|state| context.get(state))
@@ -197,50 +185,41 @@ where
                     context.reverse_animation(self.id);
                 }
             }
-
-            dirty_flags -= DirtyFlags::NEEDS_REBUILD;
         }
 
-        if dirty_flags.contains(DirtyFlags::NEEDS_REBUILD) {
-            if context.is_finished(self.id) {
-                self.next_phase();
+        if context.is_finished(self.id) {
+            self.next_phase();
 
-                if self.is_fully_finished() {
-                    self.animation_state = AnimationState::Nothing;
+            if self.is_fully_finished() {
+                self.animation_state = AnimationState::Nothing;
 
-                    match self.phase {
-                        VisibilityPhase::Hidden if self.on_hidden.is_some() => {
-                            (self.on_hidden.as_mut().unwrap())(ScopedContext::new(context), ())
-                        }
-                        VisibilityPhase::Showing if self.on_visible.is_some() => {
-                            (self.on_visible.as_mut().unwrap())(ScopedContext::new(context), ())
-                        }
-                        _ => (),
+                match self.phase {
+                    VisibilityPhase::Hidden if self.on_hidden.is_some() => {
+                        (self.on_hidden.as_mut().unwrap())(ScopedContext::new(context), ())
                     }
-
-                    context.remove_animation(self.id);
-                } else {
-                    self.register_animation(context);
+                    VisibilityPhase::Showing if self.on_visible.is_some() => {
+                        (self.on_visible.as_mut().unwrap())(ScopedContext::new(context), ())
+                    }
+                    _ => (),
                 }
-            }
 
-            if let VisibilityPhase::SpatialChange = self.phase {
-                dirty_flags |= DirtyFlags::NEEDS_MEASURE;
+                context.remove_animation(self.id);
+            } else {
+                self.register_animation(context);
             }
-
-            dirty_flags -= DirtyFlags::NEEDS_REBUILD;
         }
 
+        if let VisibilityPhase::SpatialChange = self.phase {
+            RebuildStatus::NeedsMeasure
+        } else {
+            RebuildStatus::NothingChanged
+        }
+    }
+
+    fn invalidate_children(&mut self, visitor: &mut impl InvalidateVisitor<C>) {
         if let Some(child) = &mut self.child {
-            let child_flags = child.invalidate(context);
-
-            if child_flags.intersects(DirtyFlags::NEEDS_MEASURE | DirtyFlags::CHILD_NEEDS_MEASURE) {
-                dirty_flags |= DirtyFlags::CHILD_NEEDS_MEASURE;
-            }
+            visitor.invalidate(child);
         }
-
-        context.set_dirty_flags(self.id, dirty_flags);
-        dirty_flags
     }
 }
 
@@ -255,9 +234,9 @@ impl Measure<f32> for AnimatedVisibility {
             .unwrap_or_default()
     }
 
-    fn visit_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
+    fn measure_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
         if let Some(child) = &self.child {
-            visitor.visit(child);
+            visitor.measure(child);
         }
     }
 
@@ -451,9 +430,43 @@ impl AnimatedVisibility {
     }
 }
 
+impl<C> EventHitTest<f32, C> for AnimatedVisibility
+where
+    C: EventContext<f32>,
+{
+    fn on_hit_test(
+        &self,
+        context: &C,
+        local_coords: Point<f32>,
+        provided_extent: Extent<f32>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        Content::hit_test_fn(
+            |local_coords: Point<f32>, _provided_extent: Extent<f32>, router: &mut EventRouter| {
+                if let Some(child) = &self.child {
+                    let result = child.hit_test(context, local_coords, router);
+
+                    match result {
+                        HitTestResult::Hit => {
+                            router.set_next_index(self.id, 0);
+                        }
+                        HitTestResult::Missed | HitTestResult::Failed => (),
+                    }
+
+                    result
+                } else {
+                    HitTestResult::Missed
+                }
+            },
+        )
+        .on_hover(&mut &self.on_hover)
+        .hit_test(self.id, local_coords, provided_extent, router)
+    }
+}
+
 impl<C> DispatchEvent<C, f32> for AnimatedVisibility
 where
-    C: DispatchContext<f32>,
+    C: EventContext<f32>,
 {
     fn dispatch_event(&mut self, context: &mut C, event: Event) {
         if matches!(event.kind, crate::events::EventKind::MouseHover) {
