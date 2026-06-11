@@ -11,7 +11,7 @@ use crate::{
     context::{
         Context, CreateState, DebugOptions, GetState, LoadExtent, SetState, SetStyleClass, Tick,
     },
-    events::{DispatchEvent, Event},
+    events::{EventManager, RawEvent},
     stage::{
         draw::Draw,
         init::Init,
@@ -25,6 +25,7 @@ use crate::{
 
 pub struct UiRoot {
     root_widget: Widget,
+    event_manager: EventManager,
     context: Context,
     cached_constraints: Constraints<Extent<f32>>,
 }
@@ -35,6 +36,7 @@ impl UiRoot {
 
         Self {
             root_widget,
+            event_manager: EventManager::new(),
             context,
             cached_constraints: Constraints::new_tight(Extent::default()),
         }
@@ -76,8 +78,9 @@ impl UiRoot {
         self.root_widget.draw(&self.context, offset, drawer);
     }
 
-    pub fn dispatch_event(&mut self, event: Event) {
-        self.root_widget.dispatch_event(&mut self.context, event);
+    pub fn dispatch_event(&mut self, event: RawEvent) {
+        self.event_manager
+            .dispatch_event(&mut self.context, event, &mut self.root_widget);
     }
 }
 

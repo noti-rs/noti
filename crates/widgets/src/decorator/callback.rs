@@ -10,47 +10,45 @@ use crate::{
     types::{Extent, Offset, Point, WidgetId},
 };
 
-pub(crate) struct CallbackDecorator<'a, C, CallbackType, N> {
-    callback: &'a mut C,
+pub(crate) struct EventDecorator<CallbackType, N> {
     next: N,
     _marker: PhantomData<CallbackType>,
 }
 
-pub(crate) struct OnHover;
-pub(crate) struct OnPress;
-pub(crate) struct OnClick;
+pub(crate) struct Hoverable;
+pub(crate) struct Pressable;
+pub(crate) struct Clickable;
 
-impl<'a, C, N> CallbackDecorator<'a, C, OnHover, N> {
-    pub(crate) fn on_hover(callback: &'a mut C, next: N) -> Self {
+impl<N> EventDecorator<Hoverable, N> {
+    pub(crate) fn hoverable(next: N) -> Self {
         Self {
-            callback,
             next,
             _marker: PhantomData,
         }
     }
 }
 
-impl<'a, C, N> CallbackDecorator<'a, C, OnPress, N> {
-    pub(crate) fn on_press(callback: &'a mut C, next: N) -> Self {
+impl<N> EventDecorator<Pressable, N> {
+    #[allow(unused)]
+    pub(crate) fn pressable(next: N) -> Self {
         Self {
-            callback,
             next,
             _marker: PhantomData,
         }
     }
 }
 
-impl<'a, C, N> CallbackDecorator<'a, C, OnClick, N> {
-    pub(crate) fn on_click(callback: &'a mut C, next: N) -> Self {
+impl<N> EventDecorator<Clickable, N> {
+    #[allow(unused)]
+    pub(crate) fn clickable(next: N) -> Self {
         Self {
-            callback,
             next,
             _marker: PhantomData,
         }
     }
 }
 
-impl<'a, C, CallbackType, N, T> MeasureDecorator<T> for CallbackDecorator<'a, C, CallbackType, N>
+impl<CallbackType, N, T> MeasureDecorator<T> for EventDecorator<CallbackType, N>
 where
     N: MeasureDecorator<T>,
     T: DecoratorType,
@@ -64,7 +62,7 @@ where
     }
 }
 
-impl<'a, C, CallbackType, N, T> DrawDecorator<T> for CallbackDecorator<'a, C, CallbackType, N>
+impl<CallbackType, N, T> DrawDecorator<T> for EventDecorator<CallbackType, N>
 where
     N: DrawDecorator<T>,
     T: DecoratorType,
@@ -74,7 +72,7 @@ where
     }
 }
 
-impl<'a, C, N, T> EventHitTestDecorator<T> for CallbackDecorator<'a, C, OnHover, N>
+impl<N, T> EventHitTestDecorator<T> for EventDecorator<Hoverable, N>
 where
     N: EventHitTestDecorator<T>,
     T: DecoratorType,
@@ -86,7 +84,7 @@ where
         provided_extent: Extent<T>,
         router: &mut EventRouter,
     ) -> HitTestResult {
-        router.add_capability(widget_id, EventNodeCapabilities::HOVERED);
+        router.add_capability(widget_id, EventNodeCapabilities::HOVER);
 
         let mut result = self
             .next
@@ -102,7 +100,7 @@ where
     }
 }
 
-impl<'a, C, N, T> EventHitTestDecorator<T> for CallbackDecorator<'a, C, OnPress, N>
+impl<N, T> EventHitTestDecorator<T> for EventDecorator<Pressable, N>
 where
     N: EventHitTestDecorator<T>,
     T: DecoratorType,
@@ -114,7 +112,7 @@ where
         provided_extent: Extent<T>,
         router: &mut EventRouter,
     ) -> HitTestResult {
-        router.add_capability(widget_id, EventNodeCapabilities::PRESSED);
+        router.add_capability(widget_id, EventNodeCapabilities::PRESS);
 
         let mut result = self
             .next
@@ -130,7 +128,7 @@ where
     }
 }
 
-impl<'a, C, N, T> EventHitTestDecorator<T> for CallbackDecorator<'a, C, OnClick, N>
+impl<N, T> EventHitTestDecorator<T> for EventDecorator<Clickable, N>
 where
     N: EventHitTestDecorator<T>,
     T: DecoratorType,
@@ -142,7 +140,7 @@ where
         provided_extent: Extent<T>,
         router: &mut EventRouter,
     ) -> HitTestResult {
-        router.add_capability(widget_id, EventNodeCapabilities::CLICKED);
+        router.add_capability(widget_id, EventNodeCapabilities::CLICK);
 
         let mut result = self
             .next

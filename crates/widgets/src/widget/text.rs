@@ -9,17 +9,22 @@ use shared::{
 
 use crate::{
     context::{ManageDirtyFlags, ManageIntrinsic, StateSubscription},
-    decorator::{DecoratorExt, DrawDecorator, MeasureDecorator, content::Content},
-    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
+    events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
     stage::{
-        draw::{Drawer, UseColor, draw_debug_bounds},
+        draw::{draw_debug_bounds, Drawer, UseColor},
         invalidate::{InvalidateVisitor, RebuildStatus},
         layout::{Layout, LayoutContext},
         measure::{self, Constraints, Measure, MeasureContext, SizingMode},
     },
     state::State,
     types::{
-        Color, Point, extent::Extent, identifiers::{WidgetClass, WidgetId, WidgetKey}, offset::Offset, spacing::Spacing, style::{Configure, WidgetStyle}
+        extent::Extent,
+        identifiers::{WidgetClass, WidgetId, WidgetKey},
+        offset::Offset,
+        spacing::Spacing,
+        style::{Configure, WidgetStyle},
+        Color, Point,
     },
     widget::{
         Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, WidgetGetType,
@@ -670,11 +675,17 @@ where
     }
 }
 
-impl<C> DispatchEvent<C, f32> for Text
+impl<C> EventHandling<f32, C> for Text
 where
     C: EventContext<f32>,
 {
-    fn dispatch_event(&mut self, _context: &mut C, _event: Event) {
+    fn handle_events(
+        &mut self,
+        _context: &mut C,
+        _pending_events: Vec<PendingEvent>,
+        _next_child: usize,
+        _router: &EventRouter,
+    ) {
         // TODO: implement link click
     }
 }

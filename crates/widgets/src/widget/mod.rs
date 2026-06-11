@@ -6,7 +6,7 @@ pub mod text;
 
 use crate::{
     context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic},
-    events::{self, DispatchEvent, EventContext, EventHitTest},
+    events::{self, EventContext, EventHandling, EventHitTest},
     stage::{
         draw::{Draw, DrawContext, Drawer},
         init::{Init, InitContext},
@@ -205,12 +205,15 @@ where
     }
 }
 
-impl<C> DispatchEvent<C, f32> for Widget
-where
-    C: EventContext<f32>,
-{
-    fn dispatch_event(&mut self, context: &mut C, event: events::Event) {
-        delegate!(self.dispatch_event(context, event))
+impl<C> EventHandling<f32, C> for Widget where C: EventContext<f32> {
+    fn handle_events(
+            &mut self,
+            context: &mut C,
+            pending_events: Vec<events::PendingEvent>,
+            next_child: usize,
+            router: &events::EventRouter,
+        ) {
+        delegate!(self.handle_events(context, pending_events, next_child, router))
     }
 }
 

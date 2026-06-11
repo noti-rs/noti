@@ -9,7 +9,7 @@ use crate::{
         ManageIntrinsic, ScopedContext, StateSubscription,
     },
     decorator::{content::Content, DecoratorExt, EventHitTestDecorator},
-    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
     stage::{
         draw::{Draw, DrawContext, Drawer},
         init::{Init, InitContext},
@@ -29,6 +29,7 @@ use crate::{
 #[callback(on_visible)]
 #[callback(on_hidden)]
 #[callback(on_hover)]
+#[callback(on_leave)]
 #[derive(bon::Builder, Default)]
 pub struct AnimatedVisibility {
     #[builder(default = true)]
@@ -459,24 +460,40 @@ where
                 }
             },
         )
-        .on_hover(&mut &self.on_hover)
+        .hoverable()
         .hit_test(self.id, local_coords, provided_extent, router)
     }
 }
 
-impl<C> DispatchEvent<C, f32> for AnimatedVisibility
+impl<C> EventHandling<f32, C> for AnimatedVisibility
 where
     C: EventContext<f32>,
 {
-    fn dispatch_event(&mut self, context: &mut C, event: Event) {
-        if matches!(event.kind, crate::events::EventKind::MouseHover) {
-            if let Some(on_hover) = self.on_hover.as_mut() {
-                on_hover(ScopedContext::new(context), ())
+    fn handle_events(
+        &mut self,
+        context: &mut C,
+        pending_events: Vec<PendingEvent>,
+        _next_child: usize,
+        router: &EventRouter,
+    ) {
+        for event in pending_events {
+            match event {
+                PendingEvent::HoverIn => {
+                    if let Some(callback) = self.on_hover.as_mut() {
+                        callback(ScopedContext::new(context), ());
+                    }
+                }
+                PendingEvent::HoverOut => {
+                    if let Some(callback) = self.on_leave.as_mut() {
+                        callback(ScopedContext::new(context), ());
+                    }
+                }
+                _ => (),
             }
         }
 
         if let Some(child) = &mut self.child {
-            child.dispatch_event(context, event);
+            child.route_events(context, router);
         }
     }
 }

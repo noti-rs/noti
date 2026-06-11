@@ -10,8 +10,10 @@ use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::Try
 
 use crate::{
     context::{ManageDirtyFlags, ManageIntrinsic, StateSubscription},
-    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
-    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    decorator::{
+        content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, MeasureDecorator,
+    },
+    events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
     stage::{
         draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
         init::{Init, InitContext},
@@ -369,11 +371,18 @@ where
     }
 }
 
-impl<C> DispatchEvent<C, f32> for Image
+impl<C> EventHandling<f32, C> for Image
 where
     C: EventContext<f32>,
 {
-    fn dispatch_event(&mut self, _context: &mut C, _event: Event) {}
+    fn handle_events(
+        &mut self,
+        _context: &mut C,
+        _pending_events: Vec<PendingEvent>,
+        _next_child: usize,
+        _router: &EventRouter,
+    ) {
+    }
 }
 
 #[derive(Debug, Clone)]

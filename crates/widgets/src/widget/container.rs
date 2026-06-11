@@ -6,7 +6,10 @@ use crate::{
     decorator::{
         content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, MeasureDecorator,
     },
-    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    events::{
+        EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult,
+        PendingEvent,
+    },
     stage::{
         draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
         init::{Init, InitContext},
@@ -352,54 +355,19 @@ where
     }
 }
 
-impl<C> DispatchEvent<C, f32> for Container
+impl<C> EventHandling<f32, C> for Container
 where
     C: EventContext<f32>,
 {
-    fn dispatch_event(&mut self, _context: &mut C, _event: Event) {
-        todo!()
-
-        // if !event.kind.is_mouse() {
-        //     return;
-        // }
-        //
-        // let inner_spacing = self.inner_spacing();
-        // let mut inner_extent = Extent::new(self.width as f32, self.height as f32);
-        // inner_extent.shrink_by(&inner_spacing);
-        //
-        // let Some(child) = &mut self.child else {
-        //     return;
-        // };
-        //
-        // if event.local_coord.x > self.width as f32 || event.local_coord.y > self.height as f32 {
-        //     return;
-        // }
-        //
-        // let alignment = self.alignment.clone().unwrap_or_default();
-        // let child_extent = context.load(child.get_id()).unwrap_or_default();
-        // let horizontal_start = alignment
-        //     .horizontal
-        //     .get_start(inner_extent.width, child_extent.width)
-        //     + inner_spacing.left as f32;
-        // let vertical_start = alignment
-        //     .vertical
-        //     .get_start(inner_extent.height, child_extent.height)
-        //     + inner_spacing.top as f32;
-        //
-        // if event.local_coord.x < horizontal_start
-        //     || event.local_coord.y < vertical_start
-        //     || event.local_coord.x > horizontal_start + child_extent.width
-        //     || event.local_coord.y > vertical_start + child_extent.height
-        // {
-        //     return;
-        // }
-        //
-        // let mut modified_event = event.clone();
-        // modified_event.local_coord = Point {
-        //     x: horizontal_start - event.local_coord.x,
-        //     y: vertical_start - event.local_coord.y,
-        // };
-        //
-        // child.dispatch_event(context, modified_event)
+    fn handle_events(
+        &mut self,
+        context: &mut C,
+        _pending_events: Vec<PendingEvent>,
+        _next_child: usize,
+        router: &EventRouter,
+    ) {
+        if let Some(child) = &mut self.child {
+            child.route_events(context, router);
+        }
     }
 }

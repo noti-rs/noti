@@ -12,7 +12,7 @@ use widgets::{
     self,
     animations::AnimationKind,
     context::{Context, CreateState, DebugOptions, GetState, SetState, SetStyleClass, Tick},
-    events::Event,
+    events::RawEvent,
     make_style, make_widget,
     stage::{draw::Drawer, measure::Constraints},
     state::MutableState,
@@ -474,7 +474,7 @@ impl Banner {
         debug!("Banner (id={}): Complete draw", self.notification.id);
     }
 
-    pub(super) fn dispatch_event(&mut self, event: Event) {
+    pub(super) fn dispatch_event(&mut self, event: RawEvent) {
         self.ui_root.dispatch_event(event);
     }
 }

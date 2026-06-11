@@ -7,7 +7,10 @@ use crate::{
     decorator::{
         content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, MeasureDecorator,
     },
-    events::{DispatchEvent, Event, EventContext, EventHitTest, EventRouter, HitTestResult},
+    events::{
+        EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult,
+        PendingEvent,
+    },
     stage::{
         draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
         init::{Init, InitContext},
@@ -183,33 +186,6 @@ impl FlexContainer {
         }
     }
 
-    /// Calculates the total internal offset required to protect the container's
-    /// content from its boundaries.
-    ///
-    /// This method provides a unified [`Spacing`] value by combining the
-    /// widget's defined internal padding with the physical thickness of
-    /// the [`Border`].
-    ///
-    /// **The Calculation:**
-    /// `Total Inner Spacing = Manual Spacing + All-Directional Border Size`
-    ///
-    /// By using this combined value during the compilation and drawing
-    /// stages, the container ensures that its children are correctly
-    /// "inset." This prevents nested widgets from overlapping with the
-    /// border strokes and accurately determines the remaining available
-    /// area for the layout.
-    ///
-    /// # Returns
-    /// A [`Spacing`] struct representing the total margin that must be
-    fn inner_spacing(&self) -> Spacing {
-        self.spacing.unwrap_or_default()
-            + Spacing::all_directional(
-                self.border
-                    .as_ref()
-                    .map(|border| border.size)
-                    .unwrap_or_default(),
-            )
-    }
 
     /// Retrieves the alignment rules specifically for the primary axis.
     ///
@@ -237,65 +213,6 @@ impl FlexContainer {
             Direction::Horizontal => alignment.vertical,
             Direction::Vertical => alignment.horizontal,
         }
-    }
-
-    /// Generates a unified coordinate mapper ([`FCPlane`]) for the current layout.
-    ///
-    /// This is the "logic bridge" that allows the container to arrange children
-    /// without checking the `direction` constantly. It returns an `FCPlane`
-    /// pre-loaded with the current inner spacing and extents, enabling
-    /// the layout engine to map generic "offsets" to actual screen
-    /// coordinates regardless of whether the container is a row or a column.
-    fn get_plane<T>(&self, mut extent: Extent<T>) -> FCPlane<T>
-    where
-        T: Default
-            + Copy
-            + Add<Output = T>
-            + Sub<Output = T>
-            + num_traits::FromPrimitive
-            + std::cmp::PartialOrd,
-    {
-        let inner_spacing = self.inner_spacing();
-        extent.shrink_by(&inner_spacing);
-
-        FCPlane::new(inner_spacing, extent, self.direction)
-    }
-
-    /// Determines the starting coordinate and the gap size for child placement.
-    ///
-    /// Based on the `main_axis_alignment`, this calculates exactly where the
-    /// first child should begin on the main axis and how much space (if any)
-    /// should be added between subsequent children (e.g., for `SpaceBetween`).
-    /// These values are only calculated for the main axis, as cross-axis
-    /// positioning is handled independently.
-    fn get_start_and_incrementor<C>(&self, context: &C, restricted_extent: f32) -> (f32, f32)
-    where
-        C: LoadExtent<f32, WidgetId>,
-    {
-        // INFO: if flex container is not expands, then arrange children consecutively without
-        // gaps.
-        if !self.expand {
-            return (0.0, 0.0);
-        }
-
-        let main_inner_extent = self.main_children_extent(context);
-        let start = self
-            .main_axis_alignment()
-            .get_start(restricted_extent, main_inner_extent);
-
-        let incrementor = match self.main_axis_alignment() {
-            Position::Start | Position::Center | Position::End => 0.0,
-            Position::SpaceBetween => {
-                if self.children.len() <= 1 {
-                    0.0
-                } else {
-                    (restricted_extent - main_inner_extent)
-                        / self.children.len().saturating_sub(1) as f32
-                }
-            }
-        };
-
-        (start, incrementor)
     }
 
     fn iterate_over_children<F, C>(
@@ -703,75 +620,19 @@ where
     }
 }
 
-impl<C> DispatchEvent<C, f32> for FlexContainer
+impl<C> EventHandling<f32, C> for FlexContainer
 where
     C: EventContext<f32>,
 {
-    fn dispatch_event(&mut self, context: &mut C, event: Event) {
-        let Some(provided_extent) = context.load(self.id) else {
-            return;
-        };
-
-        if !event.kind.is_mouse() {
-            return;
-        }
-
-        if event.local_coord.x > provided_extent.width
-            || event.local_coord.y > provided_extent.height
-        {
-            return;
-        }
-
-        let (mouse_main, mouse_cross) = if let Direction::Horizontal = self.direction {
-            (event.local_coord.x, event.local_coord.y)
-        } else {
-            (event.local_coord.y, event.local_coord.x)
-        };
-
-        let mut plane = self.get_plane(provided_extent);
-        let (start, incrementor) = self.get_start_and_incrementor(context, plane.main.extent);
-        plane.main.start += start;
-
-        if mouse_main < plane.main.start || mouse_cross < plane.cross.start {
-            return;
-        }
-
-        let cross_axis_alignment = self.cross_axis_alignment();
-
-        for child in &mut self.children {
-            let child_extent = context
-                .load(child.get_id())
-                .unwrap_or_default()
-                .to_flex(&self.direction);
-
-            if mouse_main <= plane.main.start + child_extent.main {
-                let widget_start =
-                    cross_axis_alignment.get_start(plane.cross.extent, child_extent.cross);
-
-                if mouse_cross >= plane.cross.start + widget_start
-                    && mouse_cross <= plane.cross.start + widget_start + child_extent.cross
-                {
-                    let local_mouse_main = mouse_main - plane.main.start;
-                    let local_mouse_cross = mouse_cross - (plane.cross.start + widget_start);
-                    let (local_mouse_x, local_mouse_y) =
-                        if let Direction::Horizontal = self.direction {
-                            (local_mouse_main, local_mouse_cross)
-                        } else {
-                            (local_mouse_cross, local_mouse_main)
-                        };
-
-                    let mut modified_event = event.clone();
-                    modified_event.local_coord = Point {
-                        x: local_mouse_x,
-                        y: local_mouse_y,
-                    };
-                    return child.dispatch_event(context, modified_event);
-                }
-
-                return;
-            }
-
-            plane.cut_front(child_extent.main + incrementor);
+    fn handle_events(
+        &mut self,
+        context: &mut C,
+        _pending_events: Vec<PendingEvent>,
+        next_child: usize,
+        router: &EventRouter,
+    ) {
+        if let Some(child) = self.children.get_mut(next_child) {
+            child.route_events(context, router);
         }
     }
 }

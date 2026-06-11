@@ -7,7 +7,7 @@ use crate::{
         background::BackgroundDecorator,
         border::BorderDecorator,
         box_size::BoxSizeDecorator,
-        callback::{CallbackDecorator, OnClick, OnHover, OnPress},
+        callback::{EventDecorator, Clickable, Hoverable, Pressable},
         spacing::SpacingDecorator,
     },
     events::{EventRouter, HitTestResult},
@@ -123,16 +123,16 @@ where
         }
     }
 
-    fn on_hover<'a, C>(self, callback: &'a mut C) -> CallbackDecorator<'a, C, OnHover, Self> {
-        CallbackDecorator::on_hover(callback, self)
+    fn hoverable(self) -> EventDecorator<Hoverable, Self> {
+        EventDecorator::hoverable(self)
     }
 
-    fn on_press<'a, C>(self, callback: &'a mut C) -> CallbackDecorator<'a, C, OnPress, Self> {
-        CallbackDecorator::on_press(callback, self)
+    fn pressable(self) -> EventDecorator<Pressable, Self> {
+        EventDecorator::pressable(self)
     }
 
-    fn on_click<'a, C>(self, callback: &'a mut C) -> CallbackDecorator<'a, C, OnClick, Self> {
-        CallbackDecorator::on_click(callback, self)
+    fn clickable(self) -> EventDecorator<Clickable, Self> {
+        EventDecorator::clickable(self)
     }
 }
 

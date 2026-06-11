@@ -46,7 +46,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 use widgets::{
     context::Tick,
-    events::{Event, EventKind, MouseButton},
+    events::{MouseButton, RawEvent, RawEventKind},
     types::{extent::Extent, offset::Offset, Point},
 };
 
@@ -416,7 +416,7 @@ impl WindowState {
                         break;
                     }
 
-                    let event = Event {
+                    let event = RawEvent {
                         kind: event.kind.clone().into(),
                         local_coord: Point {
                             x: (event.x - offset.x) as f32,
@@ -674,12 +674,12 @@ enum PointerEventKind {
     MouseUp { button: MouseButton },
 }
 
-impl From<PointerEventKind> for EventKind {
+impl From<PointerEventKind> for RawEventKind {
     fn from(value: PointerEventKind) -> Self {
         match value {
-            PointerEventKind::Hover => EventKind::MouseHover,
-            PointerEventKind::MouseDown { button } => EventKind::MouseDown(button),
-            PointerEventKind::MouseUp { button } => EventKind::MouseUp(button),
+            PointerEventKind::Hover => RawEventKind::MouseMove,
+            PointerEventKind::MouseDown { button } => RawEventKind::MouseDown(button),
+            PointerEventKind::MouseUp { button } => RawEventKind::MouseUp(button),
         }
     }
 }
@@ -722,6 +722,8 @@ impl PointerState {
         self.x = x;
         self.y = y;
 
+        // TODO: it's not good code at all, better to move RootUi and its event manager logic when
+        // the banners is in an single window which is an widget too
         if let Some(event) = self
             .events
             .back_mut()
