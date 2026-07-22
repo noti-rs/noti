@@ -120,13 +120,28 @@ impl WImage {
                 \nAvailable space: width={}, height={}.",
                 self.width, self.height, rect_size.width, rect_size.height
             );
-            return CompileState::Failure;
+            return CompileState::Failure {
+                reason: format!(
+                    "image does not fit available space (image: {image_width}x{image_height}, available: {available_width}x{available_height})",
+                    image_width = self.width,
+                    image_height = self.height,
+                    available_width = rect_size.width,
+                    available_height = rect_size.height,
+                ),
+            };
         }
 
         if self.content.is_exists() {
             CompileState::Success
         } else {
-            CompileState::Failure
+            CompileState::Failure {
+                reason: format!(
+                    "image content unavailable (app_icon='{}', image_path_present={}, image_data_present={})",
+                    notification.app_icon,
+                    notification.hints.image_path.is_some(),
+                    notification.hints.image_data.is_some(),
+                ),
+            }
         }
     }
 

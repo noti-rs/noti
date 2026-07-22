@@ -65,10 +65,12 @@ impl Widget {
             Widget::Unknown => CompileState::Success,
         };
 
-        if let CompileState::Failure = state {
+        if let CompileState::Failure { reason } = state {
             warn!(
-                "A {wtype} widget is not compiled due errors!",
-                wtype = self.get_type()
+                "A {wtype} widget failed to compile: {reason}. notification_id={id}, app_name='{app_name}'",
+                wtype = self.get_type(),
+                id = configuration.notification.id,
+                app_name = configuration.notification.app_name
             );
             *self = Widget::Unknown;
         }
@@ -120,7 +122,7 @@ impl Draw for Widget {
 
 pub enum CompileState {
     Success,
-    Failure,
+    Failure { reason: String },
 }
 
 pub struct WidgetConfiguration<'a> {
