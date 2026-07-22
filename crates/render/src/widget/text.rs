@@ -131,7 +131,9 @@ impl WText {
         let (text, attributes) = notification_content.as_str_with_attributes();
         if text.trim().is_empty() {
             warn!("The text with kind {} is blank", self.kind);
-            return CompileState::Failure;
+            return CompileState::Failure {
+                reason: format!("{kind} text content is blank", kind = self.kind),
+            };
         }
 
         layout.set_text(text);
@@ -145,7 +147,14 @@ impl WText {
                 Available space: width={}, height={}.",
                 self.kind, rect_size.width, rect_size.height
             );
-            CompileState::Failure
+            CompileState::Failure {
+                reason: format!(
+                    "{kind} text does not fit available space (computed: {computed_width}x{computed_height}, available: {available_width}x{available_height})",
+                    kind = self.kind,
+                    available_width = rect_size.width,
+                    available_height = rect_size.height,
+                ),
+            }
         } else {
             self.inner_size = rect_size;
             self.layout = Some(layout);
