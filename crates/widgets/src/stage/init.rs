@@ -4,15 +4,17 @@ use crate::{
         StateSubscription, StyleSubscription,
     },
     types::{identifiers::WidgetKey, WidgetClass, WidgetId},
-    widget::WidgetBase,
+    widget::{WidgetBase, WidgetInformationContext},
 };
 
-pub(crate) trait InitContext:
+// TODO: add dirty flag management
+pub trait InitContext:
     GenerateId
     + RegisterKey<WidgetKey, WidgetId>
     + GetState
     + StateSubscription<WidgetId>
     + StyleSubscription<WidgetClass, WidgetId>
+    + WidgetInformationContext
     + ManageAnimationRegistry<WidgetId>
     + GetStyle
     + GetFont
@@ -25,13 +27,14 @@ impl<C> InitContext for C where
         + GetState
         + StateSubscription<WidgetId>
         + StyleSubscription<WidgetClass, WidgetId>
+        + WidgetInformationContext
         + ManageAnimationRegistry<WidgetId>
         + GetStyle
         + GetFont
 {
 }
 
-pub(crate) trait Init<C>: WidgetBase
+pub trait Init<C>: WidgetBase<C>
 where
     C: InitContext,
 {

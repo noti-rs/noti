@@ -6,20 +6,21 @@ use std::{
 use linicon::IconPath;
 use log::{debug, error, warn};
 use macros::widget;
-use shared::{error::ConversionError, file_descriptor::FileDescriptor, value::TryFromValue};
+use shared::{
+    error::ConversionError, file_descriptor::FileDescriptor, unique::Unique, value::TryFromValue,
+};
 
 use crate::{
-    context::{ManageDirtyFlags, ManageIntrinsic, StateSubscription},
-    decorator::{
-        content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, MeasureDecorator,
-    },
+    context::{widget_data, widget_data_mut, ManageIntrinsic, StateSubscription},
+    decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
     events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
     stage::{
+        deinit::{Deinit, DeinitContext},
         draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
         init::{Init, InitContext},
-        invalidate::{Invalidate, InvalidateContext, InvalidateVisitor, RebuildStatus},
+        invalidate::{Invalidate, InvalidateContext, RebuildStatus},
         layout::{Layout, LayoutContext},
-        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+        measure::{self, Constraints, ManageMeasures, Measure, MeasureContext, SizingMode},
     },
     state::State,
     types::{
@@ -30,7 +31,7 @@ use crate::{
         style::{Configure, WidgetStyle},
         Border, Point,
     },
-    widget::{WidgetGetType, WidgetSizingMode},
+    widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
 };
 
 const DEFAULT_ICON_THEME: &str = "hicolor";
@@ -54,21 +55,16 @@ const DEFAULT_ICON_THEME: &str = "hicolor";
 #[make_widget_style(ImageStyle, derive(bon::Builder, Debug, Clone))]
 #[derive(bon::Builder, Default)]
 pub struct Image {
-    /// The source data for the image being rendered.
-    ///
-    /// Unlike other widgets, this field is strictly populated via
-    /// `WidgetData::Image` during the compilation phase. It holds the
-    /// processed pixel data or file path information required to
-    /// draw the image to the screen.
-    value: Option<ImageData>,
-
     #[builder(into)]
+    #[dirty(NEEDS_REBUILD)]
     state: Option<State<ImageProvider>>,
 
     #[style]
+    #[dirty(NEEDS_MEASURE)]
     width: usize,
 
     #[style]
+    #[dirty(NEEDS_MEASURE)]
     height: usize,
 
     /// The corner radius applied to the image's edges.
@@ -104,7 +100,18 @@ pub struct Image {
     mipmap_mode: MipmapMode,
 }
 
-impl Image {
+/// The runtime information of [Image].
+struct ImageRuntimeInformation {
+    /// The source data for the image being rendered.
+    ///
+    /// Unlike other widgets, this field is strictly populated via
+    /// `WidgetData::Image` during the compilation phase. It holds the
+    /// processed pixel data or file path information required to
+    /// draw the image to the screen.
+    image_data: Option<ImageData>,
+}
+
+impl ImageRuntimeInformation {
     fn load_image(&mut self, provider: &ImageProvider) {
         /// Look's up nearest freedesktop icons.
         fn lookup_freedesktop_icon(icon_name: &str, theme: &str, size: u16) -> Option<IconPath> {
@@ -115,15 +122,13 @@ impl Image {
                 .and_then(|icon| icon.ok())
         }
 
-        match provider {
-            ImageProvider::ImageInfo(image_data) => {
-                self.value = ImageData::from_image_data(image_data)
-            }
-            ImageProvider::ImagePath(image_path) => self.value = ImageData::from_path(image_path),
+        self.image_data = match provider {
+            ImageProvider::ImageInfo(image_data) => ImageData::from_image_data(image_data),
+            ImageProvider::ImagePath(image_path) => ImageData::from_path(image_path),
             ImageProvider::Icon { name, theme, sizes } => {
                 let mut sizes = sizes.clone();
                 sizes.sort();
-                self.value = sizes
+                sizes
                     .into_iter()
                     .rev()
                     .find_map(|size| {
@@ -132,7 +137,7 @@ impl Image {
                     })
                     .and_then(|icon_path| ImageData::from_path(&icon_path.path))
             }
-            ImageProvider::Unknown => self.value = None,
+            ImageProvider::Unknown => None,
         };
     }
 }
@@ -143,8 +148,11 @@ impl WidgetGetType for Image {
     }
 }
 
-impl WidgetSizingMode for Image {
-    fn sizing_mode(&self) -> SizingMode {
+impl<C> WidgetSizingMode<C> for Image
+where
+    C: WidgetInformationContext,
+{
+    fn sizing_mode(&self, _context: &C) -> SizingMode {
         SizingMode::Dynamic
     }
 }
@@ -161,9 +169,24 @@ where
         if let Some(state) = self.state {
             <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
 
+            let mut runtime_information = ImageRuntimeInformation { image_data: None };
+
             if let Some(image_provider) = context.get(state) {
-                self.load_image(image_provider);
+                runtime_information.load_image(image_provider);
             }
+
+            context.set_widget_data(self.id, Box::new(runtime_information));
+        }
+    }
+}
+
+impl<C> Deinit<C> for Image
+where
+    C: DeinitContext,
+{
+    fn on_deinit(&mut self, context: &mut C) {
+        if let Some(state) = self.state {
+            <C as StateSubscription<WidgetId>>::unsubscribe(context, self.id, state);
         }
     }
 }
@@ -179,24 +202,32 @@ where
     }
 
     fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
+        let mut runtime_information: Unique<ImageRuntimeInformation> =
+            widget_data_mut(context, self.id)
+                .expect("An associated runtime information must exists for Image.");
+
         if let Some(image_provider) = self.state.and_then(|state| context.get(state)) {
-            self.load_image(image_provider);
+            runtime_information.load_image(image_provider);
             RebuildStatus::NeedsMeasure
         } else {
             RebuildStatus::NothingChanged
         }
     }
-
-    fn invalidate_children(&mut self, _visitor: &mut impl InvalidateVisitor<C>) {}
 }
 
-impl Measure<f32> for Image {
-    fn intrinsic_content<C>(&self, _context: &mut C) -> measure::Intrinsic<f32>
+impl<C> Measure<C, f32> for Image
+where
+    C: MeasureContext<f32>,
+{
+    fn intrinsic_content(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
-        C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
+        C: ManageIntrinsic<f32, WidgetId>,
     {
+        let runtime_information: &ImageRuntimeInformation = widget_data(context, self.id)
+            .expect("An associated runtime information must exists for Image.");
+
         Content::intrinsic_fn(|| {
-            if let Some(content) = &self.value {
+            if let Some(content) = &runtime_information.image_data {
                 measure::Intrinsic::new(Extent::default(), content.extent)
             } else {
                 measure::Intrinsic::default()
@@ -205,27 +236,30 @@ impl Measure<f32> for Image {
         .box_size_with_ratio(
             self.width.as_option().map(|width| *width as f32),
             self.height.as_option().map(|height| *height as f32),
-            self.value.as_ref().map(|val| val.aspect_ratio),
+            runtime_information
+                .image_data
+                .as_ref()
+                .map(|val| val.aspect_ratio),
         )
         .spacing(self.margin.unwrap_or_default())
         .intrinsic()
     }
 
-    fn measure_children(&self, _visitor: &mut impl measure::MeasureVisitor<f32>) {}
-
-    fn measure_content<C>(
-        &self,
-        _context: &mut C,
-        constraints: Constraints<Extent<f32>>,
-    ) -> Extent<f32>
+    fn measure_content(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
     where
-        C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
+        C: ManageMeasures<f32, WidgetId>,
     {
+        let runtime_information: &ImageRuntimeInformation = widget_data(context, self.id)
+            .expect("An associated runtime information must exists for Image.");
+
         Content::measure_fn(|child_constraints| child_constraints.max)
             .box_size_with_ratio(
                 self.width.as_option().map(|width| *width as f32),
                 self.height.as_option().map(|height| *height as f32),
-                self.value.as_ref().map(|val| val.aspect_ratio),
+                runtime_information
+                    .image_data
+                    .as_ref()
+                    .map(|val| val.aspect_ratio),
             )
             .spacing(self.margin.unwrap_or_default())
             .measure(constraints)
@@ -236,14 +270,7 @@ impl<C> Layout<C, f32> for Image
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, context: &C) {
-        if context.load(self.id).is_none() && self.value.is_some() {
-            warn!(
-                "Image widget with id {} didn't measured! The widget may be incorrectly drawn.",
-                *self.id
-            );
-        }
-    }
+    fn layout(&mut self, _context: &mut C) {}
 }
 
 impl<C> Draw<C, f32> for Image
@@ -257,12 +284,15 @@ where
         provided_extent: Extent<f32>,
         drawer: &mut Drawer,
     ) {
+        let runtime_information: &ImageRuntimeInformation = widget_data(context, self.id)
+            .expect("An associated runtime information must exist for Image.");
+
         let Some(ImageData {
             image_file_descriptor,
             extent: image_extent,
             aspect_ratio,
             ..
-        }) = &self.value
+        }) = &runtime_information.image_data
         else {
             return;
         };
@@ -356,7 +386,7 @@ where
     }
 }
 
-impl<C> EventHitTest<f32, C> for Image
+impl<C> EventHitTest<C, f32> for Image
 where
     C: EventContext<f32>,
 {
@@ -371,7 +401,7 @@ where
     }
 }
 
-impl<C> EventHandling<f32, C> for Image
+impl<C> EventHandling<C, f32> for Image
 where
     C: EventContext<f32>,
 {
@@ -644,7 +674,7 @@ pub struct ImageInfo {
     pub image_file_descriptor: FileDescriptor,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum FitMode {
     /// Fit all, leave empty spaces
     #[default]
@@ -679,7 +709,7 @@ impl TryFromValue for FitMode {
 ///
 /// This determines the visual quality of the image when it is made
 /// larger or smaller than its original size.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum ResizingMethod {
     /// Faster but "blocky" scaling. Picks the closest pixel color
     /// without blending. Best for pixel art.
@@ -709,7 +739,7 @@ impl TryFromValue for ResizingMethod {
 /// Mipmapping helps prevent "shimmering" or visual noise when an
 /// image is shrunk significantly. It tells Skia how to sample
 /// from pre-calculated lower-resolution versions of the image.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum MipmapMode {
     /// No pre-scaled versions are used; the image is scaled directly
     /// from the original.

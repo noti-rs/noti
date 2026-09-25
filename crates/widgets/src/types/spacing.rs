@@ -14,7 +14,7 @@ use crate::types::Extent;
 /// the content is allowed to live gets smaller based on these four
 /// measurements. This ensures that text, images, or nested widgets
 /// don't touch the very edge of their container.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Spacing {
     /// The gap pushed down from the top edge.
     pub top: usize,

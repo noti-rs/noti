@@ -3,24 +3,18 @@ use log::warn;
 use crate::{
     context::{AnimationQuery, GetDebugOptions, LoadExtent},
     types::{extent::Extent, offset::Offset, Bgra, Color, WidgetId},
-    widget::{Widget, WidgetBase},
+    widget::{WidgetBase, WidgetInformationContext},
 };
 
-pub(crate) trait DrawContext<T>:
-    LoadExtent<T, WidgetId> + AnimationQuery<WidgetId> + GetDebugOptions
+pub trait DrawContext<T>:
+    WidgetInformationContext + LoadExtent<T, WidgetId> + AnimationQuery<WidgetId> + GetDebugOptions
 where
     T: Default + Copy,
 {
+    fn draw_widget(&self, widget_id: &WidgetId, offset: &Offset<f32>, drawer: &mut Drawer);
 }
 
-impl<C, T> DrawContext<T> for C
-where
-    C: LoadExtent<T, WidgetId> + AnimationQuery<WidgetId> + GetDebugOptions,
-    T: Default + Copy,
-{
-}
-
-pub(crate) trait Draw<C, T>: WidgetBase
+pub trait Draw<C, T>: WidgetBase<C>
 where
     C: DrawContext<T>,
     T: Default + Copy + Into<f32>,
@@ -92,7 +86,7 @@ impl Drawer {
         &mut self,
         context: &C,
         offset: &Offset<f32>,
-        widget: &Widget,
+        widget_id: &WidgetId,
     ) -> skia_safe::Image
     where
         C: DrawContext<f32>,
@@ -102,7 +96,7 @@ impl Drawer {
         offscreen.canvas().clear(skia_safe::Color::TRANSPARENT);
 
         let mut offscreen_drawer = Drawer::use_surface(offscreen);
-        widget.draw(context, offset, &mut offscreen_drawer);
+        context.draw_widget(widget_id, offset, &mut offscreen_drawer);
         offscreen_drawer.surface.image_snapshot()
     }
 }

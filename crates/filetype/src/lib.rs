@@ -1,11 +1,11 @@
 use std::path::Path;
 
-use widgets::widget::Widget;
+use widgets::widget::WidgetEnum;
 
 mod converter;
 mod parser;
 
-pub fn parse_layout(path: &Path) -> anyhow::Result<Widget> {
+pub fn parse_layout(path: &Path) -> anyhow::Result<WidgetEnum> {
     let data = std::fs::read_to_string(path)?;
     let pairs = parser::parse(&data)?;
     converter::convert_into_widgets(pairs)

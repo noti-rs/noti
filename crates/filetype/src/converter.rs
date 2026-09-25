@@ -1,9 +1,9 @@
 use pest::iterators::Pairs;
-use widgets::widget::Widget;
+use widgets::widget::WidgetEnum;
 
 use crate::parser::Rule;
 
-pub(super) fn convert_into_widgets(mut _pairs: Pairs<Rule>) -> anyhow::Result<Widget> {
+pub(super) fn convert_into_widgets(mut _pairs: Pairs<Rule>) -> anyhow::Result<WidgetEnum> {
     anyhow::bail!("Under maintenance");
     // let pair = pairs
     //     .next()

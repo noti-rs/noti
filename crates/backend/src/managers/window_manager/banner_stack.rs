@@ -11,7 +11,10 @@ use std::{cmp::Ordering, collections::VecDeque, hash::Hash, time};
 use widgets::{
     self,
     animations::AnimationKind,
-    context::{Context, CreateState, DebugOptions, GetState, SetState, SetStyleClass, Tick},
+    context::{
+        Context, CreateState, DebugOptions, GetState, SetState, SetStyleClass, Tick,
+        WidgetTreeCreation,
+    },
     events::RawEvent,
     make_style, make_widget,
     stage::{draw::Drawer, measure::Constraints},
@@ -22,7 +25,7 @@ use widgets::{
         image::ImageProvider,
         ContainerStyle, FlexContainer, Image, Text, TextStyle,
     },
-    UiRoot,
+    WidgetSystem,
 };
 
 /// The container of banners which allows manage them easily.
@@ -240,7 +243,7 @@ where
 /// Represents a notification banner.
 pub(super) struct Banner {
     notification: Notification,
-    ui_root: UiRoot,
+    widget_system: WidgetSystem,
     close_status: CloseStatus,
 
     banner_state: BannerState,
@@ -293,26 +296,26 @@ impl Banner {
 
         let summary_state = context.create_state_mut(notification.summary.clone());
         let summary_widget = make_widget! {
-            Text {
+            context <== Text (
                 class: Banner::NOTIFICATION_SUMMARY,
                 state: summary_state,
-            }
+            )
         };
 
         let body_state = context.create_state_mut(notification.body.clone());
         let body_widget = make_widget! {
-            Text {
+            context <== Text (
                 class: Banner::NOTIFICATION_BODY,
                 state: body_state
-            }
+            )
         };
 
         let image_state = context.create_state_mut(make_image_provider(&notification, display));
         let image_widget = make_widget! {
-            Image {
+            context <== Image (
                 class: Banner::NOTIFICATION_IMAGE,
                 state: image_state,
-            }
+            )
         };
 
         let visible_state = context.create_state_mut(true);
@@ -320,8 +323,8 @@ impl Banner {
         let banner_phase = context.create_state_mut(BannerPhase::NotShown);
 
         let layout = make_widget! {
-            AnimatedVisibility {
-                state: visible_state,
+            context <== AnimatedVisibility(
+                visibility_state: visible_state,
                 class: Banner::NOTIFICATION_ANIMATED_VISIBILITY,
 
                 primary_animation: correct_animation(config, display.animation.primary.clone().into()),
@@ -340,32 +343,34 @@ impl Banner {
                 on_hover: move |mut context, _| {
                     context.set(visible_state, true);
                 },
-
-                child: make_widget! {
-                    FlexContainer {
+            ) {
+                make_widget! {
+                    context <== FlexContainer(
                         class: Banner::NOTIFICATION_FRAME,
                         direction: Direction::Horizontal,
                         alignment: Alignment::new(Position::Start, Position::Center),
-                        children: vec![
-                            image_widget.into(),
-                            make_widget!{
-                                FlexContainer {
-                                    direction: Direction::Vertical,
-                                    alignment: Alignment::new(Position::Center, Position::Center),
-                                    children: vec![summary_widget.into(), body_widget.into()],
-                                }
-                            }.into()
-                        ]
+                    ) {
+                        image_widget,
+                        make_widget!{
+                            context <== FlexContainer (
+                                direction: Direction::Vertical,
+                                alignment: Alignment::new(Position::Center, Position::Center),
+                            ) {
+                                summary_widget,
+                                body_widget
+                            }
+                        }
                     }
                 }
             }
-        }
-        .into();
+        };
 
         set_styles(&mut context, &notification, config);
+        context.set_pending_root(layout);
 
-        let mut ui_root = UiRoot::new(layout, context);
-        ui_root.layout(Constraints::new_tight(extent).into());
+        let mut widget_system = WidgetSystem::new(context);
+        widget_system.set_constraints(Constraints::new_tight(extent));
+        widget_system.update();
 
         let banner_state = BannerState {
             timeout,
@@ -380,7 +385,7 @@ impl Banner {
 
         Self {
             notification,
-            ui_root,
+            widget_system,
             close_status: CloseStatus::NotClosed,
             banner_state,
         }
@@ -396,13 +401,15 @@ impl Banner {
 
     fn is_finished(&self) -> bool {
         matches!(
-            self.ui_root.get(self.banner_state.banner_phase).unwrap(),
+            self.widget_system
+                .get(self.banner_state.banner_phase)
+                .unwrap(),
             BannerPhase::Closed
         )
     }
 
     pub(super) fn reset_timeout(&mut self) {
-        self.ui_root
+        self.widget_system
             .set(self.banner_state.shown_at, time::Instant::now());
 
         trace!("Banner (id={}): Timeout reset", self.notification.id);
@@ -411,13 +418,13 @@ impl Banner {
     pub(super) fn update_data(&mut self, notification: Notification, config: &Config) {
         self.notification = notification;
 
-        self.ui_root.set(
+        self.widget_system.set(
             self.banner_state.summary_state,
             self.notification.summary.clone(),
         );
-        self.ui_root
+        self.widget_system
             .set(self.banner_state.body_state, self.notification.body.clone());
-        self.ui_root.set(
+        self.widget_system.set(
             self.banner_state.image_state,
             make_image_provider(
                 &self.notification,
@@ -438,7 +445,8 @@ impl Banner {
             config.general().height as f32,
         );
 
-        self.ui_root.update_debug_options(to_debug_options(config));
+        self.widget_system
+            .update_debug_options(to_debug_options(config));
 
         let display_config = config.display_by_app(&self.notification.app_name);
         self.banner_state.timeout = display_config
@@ -446,22 +454,24 @@ impl Banner {
             .by_urgency(&self.notification.hints.urgency)
             as u128;
 
-        self.ui_root.set(
+        self.widget_system.set(
             self.banner_state.image_state,
             make_image_provider(&self.notification, display_config),
         );
 
-        set_styles(&mut self.ui_root, &self.notification, config);
-        self.ui_root.layout(Constraints::new_tight(extent).into());
+        set_styles(&mut self.widget_system, &self.notification, config);
+        self.widget_system
+            .set_constraints(Constraints::new_tight(extent));
+        self.widget_system.update();
     }
 
     // TODO: use it for resize
     pub(super) fn width(&self) -> usize {
-        self.ui_root.width() as usize
+        self.widget_system.width() as usize
     }
 
     pub(super) fn height(&self) -> usize {
-        self.ui_root.height() as usize
+        self.widget_system.height() as usize
     }
 
     /// Draws the notification banner frame into provided surface with offset.
@@ -469,13 +479,13 @@ impl Banner {
         debug!("Banner (id={}): Beginning of draw", self.notification.id);
 
         let mut drawer = Drawer::use_surface(sk_surface.clone());
-        self.ui_root.draw(offset, &mut drawer);
+        self.widget_system.draw(offset, &mut drawer);
 
         debug!("Banner (id={}): Complete draw", self.notification.id);
     }
 
     pub(super) fn dispatch_event(&mut self, event: RawEvent) {
-        self.ui_root.dispatch_event(event);
+        self.widget_system.dispatch_event(event);
     }
 }
 
@@ -585,29 +595,32 @@ fn make_image_provider(
 
 impl Tick for Banner {
     fn tick(&mut self, delta_ns: u128) {
-        self.ui_root.tick(delta_ns);
+        self.widget_system.tick(delta_ns);
 
-        self.ui_root.invalidate();
-        self.ui_root.layout(None);
+        self.widget_system.update();
 
         match self
-            .ui_root
+            .widget_system
             .get(self.banner_state.banner_phase)
             .expect("Banner State must be created!")
         {
             BannerPhase::NotShown | BannerPhase::Closing => (),
             BannerPhase::Shown => {
                 let shown_at = self
-                    .ui_root
+                    .widget_system
                     .get(self.banner_state.shown_at)
                     .expect("Time snapshot must be created!");
 
                 if self.banner_state.timeout != 0
                     && shown_at.elapsed().as_millis() >= self.banner_state.timeout
-                    && *self.ui_root.get(self.banner_state.visible_state).unwrap()
+                    && *self
+                        .widget_system
+                        .get(self.banner_state.visible_state)
+                        .unwrap()
                 {
-                    self.ui_root.set(self.banner_state.visible_state, false);
-                    self.ui_root
+                    self.widget_system
+                        .set(self.banner_state.visible_state, false);
+                    self.widget_system
                         .set(self.banner_state.banner_phase, BannerPhase::Closing);
                 }
             }

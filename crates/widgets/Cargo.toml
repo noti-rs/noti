@@ -20,3 +20,4 @@ resvg = "0.45.1"
 image = { version = "0.25.2"}
 linicon = "2.3.0"
 bitflags = "2.11.0"
+indextree = "4.9.1"

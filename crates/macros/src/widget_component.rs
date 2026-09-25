@@ -2,7 +2,12 @@ use std::collections::HashMap;
 
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{parse::Parse, parse_macro_input, spanned::Spanned, Token};
+use syn::{
+    parse::{Parse, Parser},
+    parse_macro_input,
+    spanned::Spanned,
+    Token,
+};
 
 use crate::{
     general::{DeriveInfo, Structure},
@@ -24,6 +29,7 @@ pub(super) fn make_widget(item: TokenStream, attributes: TokenStream) -> TokenSt
         .to_tokens(&mut result);
     impl_widget_information(&structure, &macro_attributes).to_tokens(&mut result);
     impl_widget(&structure, &macro_attributes).to_tokens(&mut result);
+    impl_widget_diff(&structure, &macro_attributes, &field_attributes).to_tokens(&mut result);
 
     if let Some(make_style_widget_info) = widget_style_name {
         let (style_attributes, structure) = convert_to_widget_style(
@@ -77,12 +83,15 @@ fn widget_structure(
     let mut body = proc_macro2::TokenStream::new();
     braces.surround(&mut body, |body| {
         for field in fields {
-            let Some(field_attr) = field_attributes.get(field.ident.as_ref().expect("Field must be named")) else {
-                quote! {
-                    #field,
-                }.to_tokens(body);
+            let field_attr = match field_attributes.get(field.ident.as_ref().expect("Field must be named")) {
+                Some(field_attr) if field_attr.is_style => field_attr,
+                _ => {
+                    quote! {
+                        #field,
+                    }.to_tokens(body);
 
-                continue;
+                    continue;
+                }
             };
 
             let syn::Field {
@@ -247,6 +256,84 @@ fn impl_widget(
                 }
             }
         },
+    }
+}
+
+fn impl_widget_diff(
+    structure: &Structure,
+    widget_attributes: &WidgetAttributes,
+    field_attributes: &HashMap<syn::Ident, FieldAttributes>,
+) -> proc_macro2::TokenStream {
+    let Structure { ref name, .. } = structure;
+
+    let mut checks = proc_macro2::TokenStream::new();
+    field_attributes
+        .iter()
+        .filter_map(|(ident, attributes)| attributes.dirty.as_ref().map(|expr| (ident, expr)))
+        .for_each(|(ident, punctuated)| {
+            let dirty_flags_with_full_path = punctuated
+                .iter()
+                .map(|ident| quote! { crate::types::dirty_flags::DirtyFlags::#ident })
+                .collect::<syn::punctuated::Punctuated<proc_macro2::TokenStream, Token![|]>>();
+
+            quote! {
+                if self.#ident != other_widget.#ident {
+                    dirty_flags |= #dirty_flags_with_full_path;
+                }
+            }
+            .to_tokens(&mut checks);
+        });
+
+    let minimal_checks = quote! {
+        if self.class != other_widget.class {
+            dirty_flags |= crate::types::dirty_flags::DirtyFlags::NEEDS_REBUILD;
+        }
+    };
+
+    let standard_checks = quote! {
+        #minimal_checks
+
+        if self.margin != other_widget.margin {
+            dirty_flags |= crate::types::dirty_flags::DirtyFlags::NEEDS_MEASURE;
+        }
+    };
+
+    let container_checks = quote! {
+        #standard_checks
+
+        if self.padding != other_widget.padding || self.border != other_widget.border {
+            dirty_flags |= crate::types::dirty_flags::DirtyFlags::NEEDS_MEASURE;
+        }
+
+        // TODO: maybe for future flags
+        // - background_color
+        // - alignment
+    };
+
+    let base_checks = match widget_attributes.widget_kind {
+        WidgetKind::Minimal => minimal_checks,
+        WidgetKind::Standard => standard_checks,
+        WidgetKind::Container => container_checks,
+    };
+
+    let body = quote! {
+        let other_widget = other.downcast_ref::<Self>()
+            .expect("The other widget have different type from Self! Something went wrong during rebuild phase.");
+        let mut dirty_flags = crate::types::dirty_flags::DirtyFlags::empty();
+
+        #base_checks
+
+        #checks
+
+        dirty_flags
+    };
+
+    quote! {
+        impl crate::stage::rebuild::WidgetDiff for #name {
+            fn diff(&self, other: &dyn std::any::Any) -> crate::types::dirty_flags::DirtyFlags {
+                #body
+            }
+        }
     }
 }
 
@@ -449,6 +536,7 @@ fn take_callbacks(structure: &mut Structure) -> syn::Result<Vec<Callback>> {
 struct FieldAttributes {
     is_style: bool,
     is_required: bool,
+    dirty: Option<syn::punctuated::Punctuated<syn::Ident, Token![|]>>,
 }
 
 fn take_field_attrs(
@@ -464,6 +552,7 @@ fn take_field_attrs(
         let mut attributes = FieldAttributes {
             is_style: false,
             is_required: false,
+            dirty: None,
         };
 
         for index in (0..field.attrs.len()).rev() {
@@ -489,6 +578,12 @@ fn take_field_attrs(
                         }
 
                         field.attrs.remove(index);
+                    } else if list.path.to_token_stream().to_string() == "dirty" {
+                        attributes.dirty = Some(
+                            syn::punctuated::Punctuated::parse_separated_nonempty
+                                .parse2(list.tokens.clone())?,
+                        );
+                        field.attrs.remove(index);
                     }
                 }
                 _ => continue,
@@ -496,7 +591,7 @@ fn take_field_attrs(
         }
 
         // INFO: if attributes are not empty then insert
-        if attributes.is_style {
+        if attributes.is_style || attributes.dirty.is_some() {
             field_attributes.insert(field_ident, attributes);
         }
     }

@@ -1,28 +1,30 @@
 use std::time::Duration;
 
-use macros::{widget, widget_style};
+use macros::widget;
+use shared::unique::Unique;
 
 use crate::{
     animations::{AnimationFilter, AnimationKind, Easing},
     context::{
-        AnimationDirection, AnimationProgress, ManageAnimationRegistry, ManageDirtyFlags,
-        ManageIntrinsic, ScopedContext, StateSubscription,
+        widget_data, widget_data_mut, AnimationDirection, AnimationProgress,
+        ManageAnimationRegistry, ManageIntrinsic, ScopedContext, StateSubscription,
     },
     decorator::{content::Content, DecoratorExt, EventHitTestDecorator},
     events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
     stage::{
+        deinit::{Deinit, DeinitContext},
         draw::{Draw, DrawContext, Drawer},
         init::{Init, InitContext},
-        invalidate::{Invalidate, InvalidateContext, InvalidateVisitor, RebuildStatus},
+        invalidate::{Invalidate, InvalidateContext, RebuildStatus},
         layout::{Layout, LayoutContext},
-        measure::{self, Constraints, Intrinsic, Measure, MeasureContext, SizingMode},
+        measure::{Constraints, Intrinsic, ManageMeasures, Measure, MeasureContext, SizingMode},
     },
     state::State,
     types::{
         dirty_flags::DirtyFlags, identifiers::WidgetKey, style::Configure, Extent, Offset, Point,
         WidgetClass, WidgetId, WidgetStyle,
     },
-    widget::{Widget, WidgetGetType, WidgetInformation, WidgetSizingMode},
+    widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
 };
 
 #[widget(kind = minimal)]
@@ -30,19 +32,12 @@ use crate::{
 #[callback(on_hidden)]
 #[callback(on_hover)]
 #[callback(on_leave)]
+#[make_widget_style(AnimatedVisibilityStyle, derive(bon::Builder, Debug, Default, Clone))]
 #[derive(bon::Builder, Default)]
 pub struct AnimatedVisibility {
-    #[builder(default = true)]
-    visible: bool,
-
     #[builder(into)]
-    state: Option<State<bool>>,
-
-    #[builder(default)]
-    phase: VisibilityPhase,
-
-    #[builder(skip)]
-    animation_state: AnimationState,
+    #[dirty(NEEDS_REBUILD)]
+    visibility_state: Option<State<bool>>,
 
     #[style(required)]
     primary_animation: AnimationDefinition,
@@ -55,18 +50,124 @@ pub struct AnimatedVisibility {
 
     #[style]
     secondary_spatial_change: SpatialChangeDefinition,
-
-    #[builder(into)]
-    child: Option<Widget>,
 }
 
-#[widget_style(kind = minimal,targets(AnimatedVisibility))]
-#[derive(bon::Builder, Debug, Default, Clone)]
-pub struct AnimatedVisibilityStyle {
-    primary_animation: AnimationDefinition,
-    secondary_animation: AnimationDefinition,
-    primary_spatial_change: SpatialChangeDefinition,
-    secondary_spatial_change: SpatialChangeDefinition,
+struct AnimationProperties<'a> {
+    enter_animation: &'a AnimationDefinition,
+    exit_animation: &'a AnimationDefinition,
+
+    enter_spatial_change: &'a SpatialChangeDefinition,
+    exit_spatial_change: &'a SpatialChangeDefinition,
+}
+
+impl<'a> AnimationProperties<'a> {
+    fn resolve_spatical_change(
+        &self,
+        animation_appearance: AnimationAppearance,
+    ) -> &'a SpatialChangeDefinition {
+        match animation_appearance {
+            AnimationAppearance::Enter => self.enter_spatial_change,
+            AnimationAppearance::Exit => self.exit_spatial_change,
+        }
+    }
+
+    fn resolve_animation(
+        &self,
+        animation_appearance: AnimationAppearance,
+    ) -> &'a AnimationDefinition {
+        match animation_appearance {
+            AnimationAppearance::Enter => self.enter_animation,
+            AnimationAppearance::Exit => self.exit_animation,
+        }
+    }
+}
+
+/// The runtime information of [AnimatedVisibility].
+#[derive(Clone)]
+struct AVRuntimeInformation {
+    visible: bool,
+    phase: VisibilityPhase,
+    animation_state: AnimationState,
+}
+
+impl AVRuntimeInformation {
+    fn visibility_as_target_phase(&self) -> VisibilityPhase {
+        if self.visible {
+            VisibilityPhase::Showing
+        } else {
+            VisibilityPhase::Hidden
+        }
+    }
+
+    fn next_phase(&mut self) {
+        self.phase.next_phase(self.visible);
+    }
+
+    fn is_fully_finished(&self) -> bool {
+        self.phase.is_fully_finished(self.visible)
+    }
+
+    fn register_animation<C: ManageAnimationRegistry<WidgetId>>(
+        &self,
+        context: &mut C,
+        id: WidgetId,
+        animation_properties: AnimationProperties<'_>,
+    ) {
+        let direction = if self.visible {
+            AnimationDirection::Forward
+        } else {
+            AnimationDirection::Backward
+        };
+
+        let animation_appearance = self.resolve_animation_appearance();
+
+        match &self.phase {
+            VisibilityPhase::SpatialChange => {
+                let spatial_change_definition =
+                    animation_properties.resolve_spatical_change(animation_appearance);
+
+                context.register_animation(
+                    id,
+                    AnimationProgress::new(
+                        spatial_change_definition.duration,
+                        DirtyFlags::NEEDS_REBUILD | DirtyFlags::NEEDS_MEASURE,
+                        direction,
+                    ),
+                );
+            }
+            VisibilityPhase::Transition => {
+                let animation_definition =
+                    animation_properties.resolve_animation(animation_appearance);
+
+                context.register_animation(
+                    id,
+                    AnimationProgress::new(
+                        animation_definition.duration,
+                        DirtyFlags::NEEDS_REBUILD,
+                        direction,
+                    ),
+                );
+            }
+            _ => (),
+        }
+    }
+
+    fn resolve_animation_appearance(&self) -> AnimationAppearance {
+        use AnimationAppearance::*;
+        match (self.visible, &self.animation_state) {
+            (true, AnimationState::Nothing) => Enter,
+            (true, AnimationState::Play) => Enter,
+            (true, AnimationState::Unwind) => Exit,
+            (false, AnimationState::Nothing) => Exit,
+            (false, AnimationState::Play) => Exit,
+            (false, AnimationState::Unwind) => Enter,
+        }
+    }
+}
+
+enum AnimationAppearance {
+    Enter,
+    Exit,
 }
 
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -78,6 +179,38 @@ pub enum VisibilityPhase {
     Showing,
 }
 
+impl VisibilityPhase {
+    fn fix_with_visibility(&mut self, visibility: bool) {
+        *self = match (visibility, &self) {
+            (true, VisibilityPhase::SpatialChange) => VisibilityPhase::Hidden,
+            (true, VisibilityPhase::Transition) => VisibilityPhase::Hidden,
+            (false, VisibilityPhase::SpatialChange) => VisibilityPhase::Showing,
+            (false, VisibilityPhase::Transition) => VisibilityPhase::Showing,
+            (_, VisibilityPhase::Hidden) | (_, VisibilityPhase::Showing) => return,
+        }
+    }
+
+    fn next_phase(&mut self, visibility: bool) {
+        *self = match (visibility, &self) {
+            (true, VisibilityPhase::Hidden) => VisibilityPhase::SpatialChange,
+            (true, VisibilityPhase::SpatialChange) => VisibilityPhase::Transition,
+            (true, VisibilityPhase::Transition) => VisibilityPhase::Showing,
+            (true, VisibilityPhase::Showing) => VisibilityPhase::Showing,
+            (false, VisibilityPhase::Hidden) => VisibilityPhase::Hidden,
+            (false, VisibilityPhase::SpatialChange) => VisibilityPhase::Hidden,
+            (false, VisibilityPhase::Transition) => VisibilityPhase::SpatialChange,
+            (false, VisibilityPhase::Showing) => VisibilityPhase::Transition,
+        }
+    }
+
+    fn is_fully_finished(&self, visibility: bool) -> bool {
+        matches!(
+            (visibility, &self),
+            (true, VisibilityPhase::Showing) | (false, VisibilityPhase::Hidden)
+        )
+    }
+}
+
 #[derive(Default, Clone)]
 enum AnimationState {
     #[default]
@@ -86,14 +219,14 @@ enum AnimationState {
     Unwind,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct AnimationDefinition {
     pub easing: Easing,
     pub duration: Duration,
     pub kind: AnimationKind,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct SpatialChangeDefinition {
     pub easing: Easing,
     pub duration: Duration,
@@ -105,14 +238,21 @@ impl WidgetGetType for AnimatedVisibility {
     }
 }
 
-impl WidgetSizingMode for AnimatedVisibility {
-    fn sizing_mode(&self) -> SizingMode {
-        match self.phase {
+impl<C> WidgetSizingMode<C> for AnimatedVisibility
+where
+    C: WidgetInformationContext,
+{
+    fn sizing_mode(&self, context: &C) -> SizingMode {
+        let runtime_information: &AVRuntimeInformation = widget_data(context, self.id)
+            .expect("An associated runtime information must exists for AnimatedVisibility.");
+
+        match runtime_information.phase {
             VisibilityPhase::SpatialChange => SizingMode::Dynamic,
             VisibilityPhase::Transition | VisibilityPhase::Showing | VisibilityPhase::Hidden => {
-                self.child
-                    .as_ref()
-                    .map(|child| child.sizing_mode())
+                context
+                    .childrens_identifiers_of(self.id)
+                    .first()
+                    .and_then(|child_widget_id| context.widget_sizing_mode(child_widget_id))
                     .unwrap_or(SizingMode::Fixed)
             }
         }
@@ -128,26 +268,42 @@ where
             self.configure(av_style.clone());
         }
 
-        if let Some(state) = self.state {
+        let mut visible = true;
+        if let Some(state) = self.visibility_state {
             <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
 
-            if let Some(visible) = context.get(state) {
-                self.visible = *visible;
+            if let Some(actual_visibility) = context.get(state) {
+                visible = *actual_visibility;
             }
         }
 
-        let target_phase = self.visibility_as_target_phase();
-        self.fix_phase();
+        let mut runtime_information = AVRuntimeInformation {
+            visible,
+            phase: VisibilityPhase::default(),
+            animation_state: AnimationState::default(),
+        };
 
-        if target_phase != self.phase {
-            self.animation_state = AnimationState::Play;
-            self.next_phase();
+        let target_phase = runtime_information.visibility_as_target_phase();
+        runtime_information.phase.fix_with_visibility(visible);
 
-            self.register_animation(context);
+        if target_phase != runtime_information.phase {
+            runtime_information.animation_state = AnimationState::Play;
+            runtime_information.next_phase();
+
+            runtime_information.register_animation(context, self.id, self.animation_properties());
         }
 
-        if let Some(child) = &mut self.child {
-            child.init(context);
+        context.set_widget_data(self.id, Box::new(runtime_information));
+    }
+}
+
+impl<C> Deinit<C> for AnimatedVisibility
+where
+    C: DeinitContext,
+{
+    fn on_deinit(&mut self, context: &mut C) {
+        if let Some(state) = self.visibility_state {
+            <C as StateSubscription<WidgetId>>::unsubscribe(context, self.id, state);
         }
     }
 }
@@ -163,38 +319,46 @@ where
     }
 
     fn on_rebuild(&mut self, context: &mut C) -> crate::stage::invalidate::RebuildStatus {
+        let mut runtime_information: Unique<AVRuntimeInformation> =
+            widget_data_mut(context, self.id)
+                .expect("There's must be an initialized runtime information of AnimatedVisibility");
+
         if let Some(new_visibility) = self
-            .state
+            .visibility_state
             .and_then(|state| context.get(state))
-            .take_if(|new_visibility| **new_visibility != self.visible)
+            .take_if(|new_visibility| **new_visibility != runtime_information.visible)
         {
-            self.visible = *new_visibility;
+            runtime_information.visible = *new_visibility;
 
-            match self.animation_state {
+            match runtime_information.animation_state {
                 AnimationState::Nothing => {
-                    self.animation_state = AnimationState::Play;
-                    self.next_phase();
+                    runtime_information.animation_state = AnimationState::Play;
+                    runtime_information.next_phase();
 
-                    self.register_animation(context);
+                    runtime_information.register_animation(
+                        context,
+                        self.id,
+                        self.animation_properties(),
+                    );
                 }
                 AnimationState::Play => {
-                    self.animation_state = AnimationState::Unwind;
+                    runtime_information.animation_state = AnimationState::Unwind;
                     context.reverse_animation(self.id);
                 }
                 AnimationState::Unwind => {
-                    self.animation_state = AnimationState::Play;
+                    runtime_information.animation_state = AnimationState::Play;
                     context.reverse_animation(self.id);
                 }
             }
         }
 
         if context.is_finished(self.id) {
-            self.next_phase();
+            runtime_information.next_phase();
 
-            if self.is_fully_finished() {
-                self.animation_state = AnimationState::Nothing;
+            if runtime_information.is_fully_finished() {
+                runtime_information.animation_state = AnimationState::Nothing;
 
-                match self.phase {
+                match runtime_information.phase {
                     VisibilityPhase::Hidden if self.on_hidden.is_some() => {
                         (self.on_hidden.as_mut().unwrap())(ScopedContext::new(context), ())
                     }
@@ -206,62 +370,61 @@ where
 
                 context.remove_animation(self.id);
             } else {
-                self.register_animation(context);
+                runtime_information.register_animation(
+                    context,
+                    self.id,
+                    self.animation_properties(),
+                );
             }
         }
 
-        if let VisibilityPhase::SpatialChange = self.phase {
+        if let VisibilityPhase::SpatialChange = runtime_information.phase {
             RebuildStatus::NeedsMeasure
         } else {
             RebuildStatus::NothingChanged
         }
     }
-
-    fn invalidate_children(&mut self, visitor: &mut impl InvalidateVisitor<C>) {
-        if let Some(child) = &mut self.child {
-            visitor.invalidate(child);
-        }
-    }
 }
 
-impl Measure<f32> for AnimatedVisibility {
-    fn intrinsic_content<C>(&self, context: &mut C) -> Intrinsic<f32>
+impl<C> Measure<C, f32> for AnimatedVisibility
+where
+    C: MeasureContext<f32>,
+{
+    fn intrinsic_content(&self, context: &mut C) -> Intrinsic<f32>
     where
-        C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
+        C: ManageIntrinsic<f32, WidgetId>,
     {
-        self.child
-            .as_ref()
-            .map(|child| child.intrinsic(context))
+        context
+            .childrens_identifiers_of(self.id)
+            .first()
+            .and_then(|child_widget_id| context.widget_intrinsic(child_widget_id))
             .unwrap_or_default()
     }
 
-    fn measure_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
-        if let Some(child) = &self.child {
-            visitor.measure(child);
-        }
-    }
-
-    fn measure_content<C>(
-        &self,
-        context: &mut C,
-        constraints: Constraints<Extent<f32>>,
-    ) -> Extent<f32>
+    fn measure_content(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
     where
-        C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
+        C: ManageMeasures<f32, WidgetId>,
     {
-        let mut used_extent = self
-            .child
-            .as_ref()
-            .map(|child| child.measure(context, constraints))
+        let mut used_extent = context
+            .childrens_identifiers_of(self.id)
+            .first()
+            .and_then(|child_widget_id| context.measure_widget(child_widget_id, constraints))
             .unwrap_or_default();
 
-        if let VisibilityPhase::SpatialChange = self.phase {
-            let spatial_change_easing = &self.resolve_spatial_change_definition().easing;
+        let runtime_information: &AVRuntimeInformation = widget_data(context, self.id)
+            .expect("There must be an associated widget data for AnimatedVisibility.");
+
+        if let VisibilityPhase::SpatialChange = runtime_information.phase {
+            let spatial_change_easing = &self
+                .animation_properties()
+                .resolve_spatical_change(runtime_information.resolve_animation_appearance())
+                .easing;
+
             used_extent *=
                 spatial_change_easing.ease(context.animation_progress(self.id).unwrap_or(1.0));
         }
 
-        if let VisibilityPhase::Hidden = self.phase {
+        if let VisibilityPhase::Hidden = runtime_information.phase {
             used_extent *= 0.0;
         }
 
@@ -273,11 +436,7 @@ impl<C> Layout<C, f32> for AnimatedVisibility
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, context: &C) {
-        if let Some(child) = &mut self.child {
-            child.layout(context);
-        }
-    }
+    fn layout(&mut self, _context: &mut C) {}
 }
 
 impl<C> Draw<C, f32> for AnimatedVisibility
@@ -291,14 +450,19 @@ where
         _provided_extent: Extent<f32>,
         drawer: &mut Drawer,
     ) {
-        match self.phase {
+        let runtime_information: &AVRuntimeInformation = widget_data(context, self.id)
+            .expect("There must be an associated runtime information for AnimatedVisibility.");
+
+        match runtime_information.phase {
             VisibilityPhase::Hidden | VisibilityPhase::SpatialChange => (),
             VisibilityPhase::Transition => {
-                if let Some(child) = &self.child {
-                    let animation_definition = self.resolve_animation_definition();
-                    let widget_image = drawer.draw_into_offscreen(context, offset, child);
+                if let Some(child_widget_id) = context.childrens_identifiers_of(self.id).first() {
+                    let animation_definition = self
+                        .animation_properties()
+                        .resolve_animation(runtime_information.resolve_animation_appearance());
+                    let widget_image = drawer.draw_into_offscreen(context, offset, child_widget_id);
 
-                    let child_extent = context.load(child.get_id()).unwrap_or_default();
+                    let child_extent = context.load(*child_widget_id).unwrap_or_default();
                     let progress = context.animation_progress(self.id).unwrap_or_default();
                     let paint = animation_definition.kind.filter(
                         widget_image,
@@ -311,8 +475,8 @@ where
                 }
             }
             VisibilityPhase::Showing => {
-                if let Some(child) = &self.child {
-                    child.draw(context, offset, drawer);
+                if let Some(child_widget_id) = context.childrens_identifiers_of(self.id).first() {
+                    context.draw_widget(child_widget_id, offset, drawer)
                 }
             }
         }
@@ -320,25 +484,13 @@ where
 }
 
 impl AnimatedVisibility {
-    fn fix_phase(&mut self) {
-        self.phase = match (self.visible, &self.phase) {
-            (true, VisibilityPhase::SpatialChange) => VisibilityPhase::Hidden,
-            (true, VisibilityPhase::Transition) => VisibilityPhase::Hidden,
-            (false, VisibilityPhase::SpatialChange) => VisibilityPhase::Showing,
-            (false, VisibilityPhase::Transition) => VisibilityPhase::Showing,
-            (_, VisibilityPhase::Hidden) | (_, VisibilityPhase::Showing) => return,
-        }
-    }
+    fn animation_properties(&self) -> AnimationProperties<'_> {
+        let enter_animation = self
+            .primary_animation
+            .as_ref()
+            .expect("Primary animation must be set!");
+        let exit_animation = self.secondary_animation.as_ref().unwrap_or(enter_animation);
 
-    fn visibility_as_target_phase(&self) -> VisibilityPhase {
-        if self.visible {
-            VisibilityPhase::Showing
-        } else {
-            VisibilityPhase::Hidden
-        }
-    }
-
-    fn resolve_spatial_change_definition(&self) -> &SpatialChangeDefinition {
         let enter_spatial_change = self
             .primary_spatial_change
             .as_ref()
@@ -348,90 +500,16 @@ impl AnimatedVisibility {
             .as_ref()
             .unwrap_or(enter_spatial_change);
 
-        match (self.visible, &self.animation_state) {
-            (true, AnimationState::Nothing) => enter_spatial_change,
-            (true, AnimationState::Play) => enter_spatial_change,
-            (true, AnimationState::Unwind) => exit_spatial_change,
-            (false, AnimationState::Nothing) => exit_spatial_change,
-            (false, AnimationState::Play) => exit_spatial_change,
-            (false, AnimationState::Unwind) => enter_spatial_change,
-        }
-    }
-
-    fn resolve_animation_definition(&self) -> &AnimationDefinition {
-        let enter_animation = self
-            .primary_animation
-            .as_ref()
-            .expect("Primary animation must be set!");
-        let exit_animation = self.secondary_animation.as_ref().unwrap_or(enter_animation);
-
-        match (self.visible, &self.animation_state) {
-            (true, AnimationState::Nothing) => enter_animation,
-            (true, AnimationState::Play) => enter_animation,
-            (true, AnimationState::Unwind) => exit_animation,
-            (false, AnimationState::Nothing) => exit_animation,
-            (false, AnimationState::Play) => exit_animation,
-            (false, AnimationState::Unwind) => enter_animation,
-        }
-    }
-
-    fn next_phase(&mut self) {
-        self.phase = match (self.visible, &self.phase) {
-            (true, VisibilityPhase::Hidden) => VisibilityPhase::SpatialChange,
-            (true, VisibilityPhase::SpatialChange) => VisibilityPhase::Transition,
-            (true, VisibilityPhase::Transition) => VisibilityPhase::Showing,
-            (true, VisibilityPhase::Showing) => VisibilityPhase::Showing,
-            (false, VisibilityPhase::Hidden) => VisibilityPhase::Hidden,
-            (false, VisibilityPhase::SpatialChange) => VisibilityPhase::Hidden,
-            (false, VisibilityPhase::Transition) => VisibilityPhase::SpatialChange,
-            (false, VisibilityPhase::Showing) => VisibilityPhase::Transition,
-        }
-    }
-
-    fn is_fully_finished(&self) -> bool {
-        matches!(
-            (self.visible, &self.phase),
-            (true, VisibilityPhase::Showing) | (false, VisibilityPhase::Hidden)
-        )
-    }
-
-    fn register_animation<C: ManageAnimationRegistry<WidgetId>>(&self, context: &mut C) {
-        let direction = if self.visible {
-            AnimationDirection::Forward
-        } else {
-            AnimationDirection::Backward
-        };
-
-        match &self.phase {
-            VisibilityPhase::SpatialChange => {
-                let spatial_change_definition = self.resolve_spatial_change_definition();
-                context.register_animation(
-                    self.id,
-                    AnimationProgress::new(
-                        spatial_change_definition.duration,
-                        DirtyFlags::NEEDS_REBUILD | DirtyFlags::NEEDS_MEASURE,
-                        direction,
-                    ),
-                );
-            }
-            VisibilityPhase::Transition => {
-                let animation_definition = self.resolve_animation_definition();
-
-                context.register_animation(
-                    self.id,
-                    AnimationProgress::new(
-                        animation_definition.duration,
-                        DirtyFlags::NEEDS_REBUILD,
-                        direction,
-                    ),
-                );
-            }
-            _ => (),
+        AnimationProperties {
+            enter_animation,
+            exit_animation,
+            enter_spatial_change,
+            exit_spatial_change,
         }
     }
 }
 
-impl<C> EventHitTest<f32, C> for AnimatedVisibility
+impl<C> EventHitTest<C, f32> for AnimatedVisibility
 where
     C: EventContext<f32>,
 {
@@ -444,17 +522,21 @@ where
     ) -> HitTestResult {
         Content::hit_test_fn(
             |local_coords: Point<f32>, _provided_extent: Extent<f32>, router: &mut EventRouter| {
-                if let Some(child) = &self.child {
-                    let result = child.hit_test(context, local_coords, router);
-
-                    match result {
+                if let Some(hit_result) = context
+                    .childrens_identifiers_of(self.id)
+                    .first()
+                    .and_then(|child_widget_id| {
+                        context.hit_test_widget(child_widget_id, local_coords, router)
+                    })
+                {
+                    match hit_result {
                         HitTestResult::Hit => {
                             router.set_next_index(self.id, 0);
                         }
                         HitTestResult::Missed | HitTestResult::Failed => (),
                     }
 
-                    result
+                    hit_result
                 } else {
                     HitTestResult::Missed
                 }
@@ -465,7 +547,7 @@ where
     }
 }
 
-impl<C> EventHandling<f32, C> for AnimatedVisibility
+impl<C> EventHandling<C, f32> for AnimatedVisibility
 where
     C: EventContext<f32>,
 {
@@ -492,8 +574,8 @@ where
             }
         }
 
-        if let Some(child) = &mut self.child {
-            child.route_events(context, router);
+        if let Some(child_widget_id) = context.childrens_identifiers_of(self.id).first() {
+            context.route_events_to_widget(child_widget_id, router);
         }
     }
 }

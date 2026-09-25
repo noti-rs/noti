@@ -5,7 +5,7 @@ use log::warn;
 use crate::{
     context::{LoadExtent, ScopedContext, ScopedManageState},
     types::{Extent, Point, WidgetId},
-    widget::{Widget, WidgetGetType, WidgetInformation},
+    widget::{WidgetGetType, WidgetInformation, WidgetInformationContext},
 };
 
 #[derive(Debug, Clone)]
@@ -28,17 +28,19 @@ pub enum MouseButton {
     Right,
 }
 
-pub(crate) trait EventContext<T>: LoadExtent<T, WidgetId> + ScopedManageState
+pub trait EventContext<T>:
+    WidgetInformationContext + LoadExtent<T, WidgetId> + ScopedManageState
 where
     T: Default + Copy,
 {
-}
+    fn hit_test_widget(
+        &self,
+        widget_id: &WidgetId,
+        local_coords: Point<f32>,
+        router: &mut EventRouter,
+    ) -> Option<HitTestResult>;
 
-impl<C, T> EventContext<T> for C
-where
-    C: LoadExtent<T, WidgetId> + ScopedManageState,
-    T: Default + Copy,
-{
+    fn route_events_to_widget(&mut self, widget_id: &WidgetId, router: &EventRouter);
 }
 
 pub(crate) struct EventManager {
@@ -59,7 +61,7 @@ impl EventManager {
         &mut self,
         context: &mut C,
         event: RawEvent,
-        widget_tree: &mut Widget,
+        widget_tree: &WidgetId,
     ) where
         C: EventContext<f32>,
     {
@@ -76,12 +78,12 @@ impl EventManager {
         }
     }
 
-    fn dispatch_mouse_move<C>(&mut self, context: &mut C, event: RawEvent, widget_tree: &mut Widget)
+    fn dispatch_mouse_move<C>(&mut self, context: &mut C, event: RawEvent, widget_id: &WidgetId)
     where
         C: EventContext<f32>,
     {
         let mut router = EventRouter::default();
-        widget_tree.hit_test(context, event.local_coord, &mut router);
+        context.hit_test_widget(widget_id, event.local_coord, &mut router);
 
         if let DiffResult::Changed { position } = self.current_router.diff(&router) {
             self.current_router
@@ -89,7 +91,7 @@ impl EventManager {
                 .skip(position)
                 .for_each(|metadata| Self::make_cancel_event(metadata, &event.kind));
 
-            widget_tree.route_events(context, &self.current_router);
+            context.route_events_to_widget(widget_id, &self.current_router);
             self.current_router.clear_pending_events();
 
             router.copy_states_from(&self.current_router);
@@ -97,7 +99,7 @@ impl EventManager {
                 .iter_node_metadata_mut()
                 .for_each(|metadata| Self::make_pending_event(metadata, &event.kind));
 
-            widget_tree.route_events(context, &router);
+            context.route_events_to_widget(widget_id, &router);
 
             router.clear_pending_events();
             self.current_router = router;
@@ -109,7 +111,7 @@ impl EventManager {
         context: &mut C,
         event: RawEvent,
         mouse_button: MouseButton,
-        widget_tree: &mut Widget,
+        widget_id: &WidgetId,
     ) where
         C: EventContext<f32>,
     {
@@ -123,14 +125,14 @@ impl EventManager {
                 .skip(position)
                 .for_each(|metadata| Self::make_cancel_event(metadata, &event.kind));
 
-            widget_tree.route_events(context, tracking);
+            context.route_events_to_widget(widget_id, tracking);
         }
 
         self.current_router
             .iter_node_metadata_mut()
             .for_each(|metadata| Self::make_pending_event(metadata, &event.kind));
 
-        widget_tree.route_events(context, &self.current_router);
+        context.route_events_to_widget(widget_id, &self.current_router);
 
         self.current_router.clear_pending_events();
         self.tracking_routers.insert(
@@ -144,7 +146,7 @@ impl EventManager {
         context: &mut C,
         event: RawEvent,
         mouse_button: MouseButton,
-        widget_tree: &mut Widget,
+        widget_id: &WidgetId,
     ) where
         C: EventContext<f32>,
     {
@@ -158,14 +160,14 @@ impl EventManager {
                 .skip(position)
                 .for_each(|metadata| Self::make_cancel_event(metadata, &event.kind));
 
-            widget_tree.route_events(context, tracking)
+            context.route_events_to_widget(widget_id, tracking);
         }
 
         self.current_router
             .iter_node_metadata_mut()
             .for_each(|metadata| Self::make_pending_event(metadata, &event.kind));
 
-        widget_tree.route_events(context, &self.current_router);
+        context.route_events_to_widget(widget_id, &self.current_router);
 
         self.current_router.clear_pending_events();
         self.tracking_routers
@@ -288,7 +290,7 @@ enum EventNodeStates {
 
 #[allow(unused)]
 #[derive(Debug, Clone)]
-pub(crate) enum PendingEvent {
+pub enum PendingEvent {
     HoverIn,
     HoverOut,
     PressIn(MouseButton),
@@ -297,7 +299,7 @@ pub(crate) enum PendingEvent {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct EventRouter {
+pub struct EventRouter {
     path: Vec<EventNodeMetadata>,
     map: HashMap<WidgetId, usize>,
 }
@@ -403,7 +405,7 @@ enum DiffResult {
     Changed { position: usize },
 }
 
-pub(crate) trait EventHitTest<T, C>: WidgetInformation + WidgetGetType
+pub trait EventHitTest<C, T>: WidgetInformation + WidgetGetType
 where
     T: Default + Copy,
     C: EventContext<T>,
@@ -446,13 +448,13 @@ where
     }
 }
 
-pub(crate) enum HitTestResult {
+pub enum HitTestResult {
     Hit,
     Missed,
     Failed,
 }
 
-pub(crate) trait EventHandling<T, C>: WidgetInformation
+pub trait EventHandling<C, T>: WidgetInformation
 where
     C: EventContext<T>,
     T: Default + Copy,

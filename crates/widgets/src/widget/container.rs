@@ -1,21 +1,18 @@
-use log::warn;
-use macros::widget_style;
+use macros::{widget, widget_style};
 
 use crate::{
-    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic},
+    context::{LoadExtent, ManageIntrinsic},
     decorator::{
         content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, MeasureDecorator,
     },
-    events::{
-        EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult,
-        PendingEvent,
-    },
+    events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
     stage::{
+        deinit::{Deinit, DeinitContext},
         draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
         init::{Init, InitContext},
-        invalidate::{Invalidate, InvalidateContext, InvalidateVisitor, RebuildStatus},
+        invalidate::{Invalidate, InvalidateContext, RebuildStatus},
         layout::{Layout, LayoutContext},
-        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+        measure::{self, Constraints, ManageMeasures, Measure, MeasureContext, SizingMode},
     },
     types::{
         alignment::Alignment,
@@ -24,11 +21,11 @@ use crate::{
         identifiers::{WidgetClass, WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
-        style::{Configure, StyleProperty, WidgetStyle},
+        style::{Configure, WidgetStyle},
         Color, Point,
     },
     widget::{
-        flex_container::FlexContainer, Widget, WidgetGetType, WidgetInformation, WidgetSizingMode,
+        flex_container::FlexContainer, WidgetGetType, WidgetInformationContext, WidgetSizingMode,
     },
 };
 
@@ -44,59 +41,18 @@ use crate::{
 ///
 /// Use this when you need a UI element to stay exactly the same,
 /// like a fixed icon or a status light that should never grow or shrink.
-#[derive(bon::Builder)]
+// TODO: Need to move from a single `spacing` field to both `margin` and `padding` fields
+#[widget(kind = container)]
+#[derive(bon::Builder, Default)]
 pub struct Container {
-    /// An optional identifier for this widget.
-    ///
-    /// If left empty, an ID will be automatically generated during
-    /// compilation. Setting this manually allows the widget to be
-    /// targeted by external configurations and makes the widget tree
-    /// significantly easier to navigate during debugging.
-    #[builder(skip)]
-    id: WidgetId,
-
-    #[builder(into)]
-    key: Option<WidgetKey>,
-
-    #[builder(into, default)]
-    class: WidgetClass,
-
-    /// The fill color or gradient applied to the entire area of the container.
-    ///
-    /// This defines the visual surface that sits behind any nested child
-    /// widgets. It covers the full rectangular area of the container,
-    /// providing a solid or decorative base. If not set, the container
-    /// is typically transparent, allowing the parent's background to
-    /// show through.
-    #[builder(with = |v: Color| StyleProperty::Explicit(v), default)]
-    background_color: StyleProperty<Color>,
-
-    /// The visual frame and corner shaping applied to the container's edges.
-    ///
-    /// This field defines the stroke thickness, color, and curvature of
-    /// the widget's boundary. It provides a clear visual distinction
-    /// between the container's internal content and the rest of the
-    /// layout.
-    #[builder(with = |v: Border| StyleProperty::Explicit(v), default)]
-    border: StyleProperty<Border>,
-
     /// The internal spacing between the widget's boundary box and its actual content.
     ///
     /// This field defines a buffer zone (Top, Right, Bottom, Left) that
     /// effectively shrinks the available area for the widget's content
     /// without changing the widget's outer dimensions. It ensures
     /// content does not touch the edges of its container.
-    #[builder(with = |v: Spacing| StyleProperty::Explicit(v), default)]
-    spacing: StyleProperty<Spacing>,
-
-    /// The rules for positioning content within the available internal space.
-    ///
-    /// This determines how the content (like text or nested widgets)
-    /// anchors itself when the container is larger than the content
-    /// it holds. It manages the distribution of "extra" space along
-    /// the horizontal and vertical axes.
-    #[builder(with = |v: Alignment| StyleProperty::Explicit(v), default)]
-    alignment: StyleProperty<Alignment>,
+    #[style]
+    spacing: Spacing,
 
     /// A hard-coded, fixed dimension for this axis.
     ///
@@ -104,8 +60,9 @@ pub struct Container {
     /// of its content's size or the parent's constraints. This effectively
     /// "locks" the widget's size, preventing it from expanding or
     /// shrinking during the layout pass.
-    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
-    width: StyleProperty<usize>,
+    #[style]
+    #[dirty(NEEDS_MEASURE)]
+    width: usize,
 
     /// A hard-coded, fixed dimension for this axis.
     ///
@@ -113,15 +70,9 @@ pub struct Container {
     /// of its content's size or the parent's constraints. This effectively
     /// "locks" the widget's size, preventing it from expanding or
     /// shrinking during the layout pass.
-    #[builder(with = |v: usize| StyleProperty::Explicit(v), default)]
-    height: StyleProperty<usize>,
-
-    /// The single nested widget managed by this container.
-    ///
-    /// As a single-child provider, the container acts as a wrapper,
-    /// applying its own alignment, background, and border rules to
-    /// this inner element.
-    child: Option<Widget>,
+    #[style]
+    #[dirty(NEEDS_MEASURE)]
+    height: usize,
 }
 
 /// A targeted configuration set used to override or provide specific
@@ -141,32 +92,17 @@ pub struct ContainerStyle {
     pub alignment: Alignment,
 }
 
-impl WidgetInformation for Container {
-    fn get_id(&self) -> WidgetId {
-        self.id
-    }
-
-    fn set_id(&mut self, id: WidgetId) {
-        self.id = id;
-    }
-
-    fn get_key(&self) -> Option<&WidgetKey> {
-        self.key.as_ref()
-    }
-
-    fn get_class(&self) -> WidgetClass {
-        self.class.clone()
-    }
-}
-
 impl WidgetGetType for Container {
     fn get_type(&self) -> &'static str {
         "container"
     }
 }
 
-impl WidgetSizingMode for Container {
-    fn sizing_mode(&self) -> SizingMode {
+impl<C> WidgetSizingMode<C> for Container
+where
+    C: WidgetInformationContext,
+{
+    fn sizing_mode(&self, _context: &C) -> SizingMode {
         SizingMode::Fixed
     }
 }
@@ -179,12 +115,10 @@ where
         if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
             self.configure(container_style.clone());
         }
-
-        if let Some(child) = &mut self.child {
-            child.init(context);
-        }
     }
 }
+
+impl<C> Deinit<C> for Container where C: DeinitContext {}
 
 impl<C> Invalidate<C> for Container
 where
@@ -199,25 +133,22 @@ where
     fn on_rebuild(&mut self, _context: &mut C) -> RebuildStatus {
         RebuildStatus::NothingChanged
     }
-
-    fn invalidate_children(&mut self, visitor: &mut impl InvalidateVisitor<C>) {
-        if let Some(child) = &mut self.child {
-            visitor.invalidate(child);
-        }
-    }
 }
 
-impl Measure<f32> for Container {
-    fn intrinsic_content<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
+impl<C> Measure<C, f32> for Container
+where
+    C: MeasureContext<f32>,
+{
+    fn intrinsic_content(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
-        C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
+        C: ManageIntrinsic<f32, WidgetId>,
     {
         Content::intrinsic_fn(|| {
-            if let Some(child) = &self.child {
-                child.intrinsic(context)
-            } else {
-                measure::Intrinsic::default()
-            }
+            context
+                .childrens_identifiers_of(self.id)
+                .first()
+                .and_then(|child_widget_id| context.widget_intrinsic(child_widget_id))
+                .unwrap_or_default()
         })
         .spacing(self.spacing.unwrap_or_default())
         .box_size(
@@ -227,26 +158,18 @@ impl Measure<f32> for Container {
         .intrinsic()
     }
 
-    fn measure_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
-        if let Some(child) = &self.child {
-            visitor.measure(child);
-        }
-    }
-
-    fn measure_content<C>(
-        &self,
-        context: &mut C,
-        constraints: Constraints<Extent<f32>>,
-    ) -> Extent<f32>
+    fn measure_content(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
     where
-        C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
+        C: ManageMeasures<f32, WidgetId>,
     {
         Content::measure_fn(|container_constraints| {
-            if let Some(child) = &self.child {
-                child.measure(context, container_constraints)
-            } else {
-                Extent::default()
-            }
+            context
+                .childrens_identifiers_of(self.id)
+                .first()
+                .and_then(|child_widget_id| {
+                    context.measure_widget(child_widget_id, container_constraints)
+                })
+                .unwrap_or_default()
         })
         .spacing(self.spacing.unwrap_or_default())
         .box_size(
@@ -261,15 +184,7 @@ impl<C> Layout<C, f32> for Container
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, context: &C) {
-        if context.load(self.id).is_none() {
-            warn!("Container widget with id {} didn't measured!", *self.id);
-        }
-
-        if let Some(child) = &mut self.child {
-            child.layout(context);
-        }
-    }
+    fn layout(&mut self, _context: &mut C) {}
 }
 
 impl<C> Draw<C, f32> for Container
@@ -285,10 +200,10 @@ where
     ) {
         Content::draw_fn(
             |offset: &Offset<f32>, provided_extent: Extent<f32>, drawer: &mut Drawer| {
-                if let Some(child) = &self.child {
+                if let Some(child_widget_id) = context.childrens_identifiers_of(self.id).first() {
                     let alignment = self.alignment.clone().unwrap_or_default();
                     let child_extent =
-                        <C as LoadExtent<f32, WidgetId>>::load(context, child.get_id())
+                        <C as LoadExtent<f32, WidgetId>>::load(context, *child_widget_id)
                             .unwrap_or_default();
 
                     let horizontal_start = alignment
@@ -299,7 +214,7 @@ where
                         .get_start(provided_extent.height, child_extent.height);
 
                     let offset_for_child = *offset + Offset::new(horizontal_start, vertical_start);
-                    child.draw(context, &offset_for_child, drawer);
+                    context.draw_widget(child_widget_id, &offset_for_child, drawer);
 
                     if context.get_debug_options().show_layout_bounds {
                         draw_debug_bounds(drawer.surface.canvas(), *offset, provided_extent);
@@ -318,7 +233,7 @@ where
     }
 }
 
-impl<C> EventHitTest<f32, C> for Container
+impl<C> EventHitTest<C, f32> for Container
 where
     C: EventContext<f32>,
 {
@@ -331,15 +246,20 @@ where
     ) -> HitTestResult {
         Content::hit_test_fn(
             |local_coords: Point<f32>, _provided_extent: Extent<f32>, router: &mut EventRouter| {
-                if let Some(child) = &self.child {
-                    let result = child.hit_test(context, local_coords, router);
-
-                    match result {
+                if let Some(hit_result) =
+                    context
+                        .childrens_identifiers_of(self.id)
+                        .first()
+                        .and_then(|child_widget_id| {
+                            context.hit_test_widget(child_widget_id, local_coords, router)
+                        })
+                {
+                    match hit_result {
                         HitTestResult::Hit => router.set_next_index(self.id, 0),
                         HitTestResult::Missed | HitTestResult::Failed => (),
                     }
 
-                    result
+                    hit_result
                 } else {
                     HitTestResult::Missed
                 }
@@ -355,7 +275,7 @@ where
     }
 }
 
-impl<C> EventHandling<f32, C> for Container
+impl<C> EventHandling<C, f32> for Container
 where
     C: EventContext<f32>,
 {
@@ -366,8 +286,8 @@ where
         _next_child: usize,
         router: &EventRouter,
     ) {
-        if let Some(child) = &mut self.child {
-            child.route_events(context, router);
+        if let Some(child_widget_id) = context.childrens_identifiers_of(self.id).first() {
+            context.route_events_to_widget(child_widget_id, router);
         }
     }
 }

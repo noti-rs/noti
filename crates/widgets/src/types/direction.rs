@@ -2,7 +2,7 @@ use shared::{error::ConversionError, value::TryFromValue};
 
 /// Determines whether an arbirtrary container arranges its children
 /// horizontally or vertically.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Direction {
     Horizontal,
     Vertical,

@@ -9,14 +9,20 @@ use crate::{
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum StyleProperty<T> {
+pub enum StyleProperty<T>
+where
+    T: PartialEq,
+{
     Explicit(T),
     FromClass(T),
     #[default]
     Default,
 }
 
-impl<T> StyleProperty<T> {
+impl<T> StyleProperty<T>
+where
+    T: PartialEq,
+{
     pub(crate) fn as_ref(&self) -> StyleProperty<&T> {
         match self {
             StyleProperty::Explicit(val) => StyleProperty::Explicit(val),
@@ -25,7 +31,11 @@ impl<T> StyleProperty<T> {
         }
     }
 
-    pub(crate) fn map<F: FnOnce(&T) -> V, V>(&self, mapper: F) -> StyleProperty<V> {
+    #[allow(unused)]
+    pub(crate) fn map<F: FnOnce(&T) -> V, V>(&self, mapper: F) -> StyleProperty<V>
+    where
+        V: PartialEq,
+    {
         match self {
             StyleProperty::Explicit(val) => StyleProperty::Explicit(mapper(val)),
             StyleProperty::FromClass(val) => StyleProperty::FromClass(mapper(val)),
@@ -109,6 +119,13 @@ impl StyleInfo {
         Id: Into<WidgetId>,
     {
         self.subscribers.insert(subscriber.into());
+    }
+
+    pub(crate) fn remove_subscriber<Id>(&mut self, subscriber: Id)
+    where
+        Id: Into<WidgetId>,
+    {
+        self.subscribers.remove(&subscriber.into());
     }
 
     pub(crate) fn subscribers(&self) -> impl Iterator<Item = &WidgetId> {

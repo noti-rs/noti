@@ -12,7 +12,7 @@ use shared::value::TryFromValue;
 /// Unlike a simple RGBA value, `Color` can represent complex paint
 /// types such as linear gradients. This allows flexible and visually
 /// rich rendering while keeping a single generic type for all widgets.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Color {
     /// A linear gradient with angle, vector, and computed color stops.
     LinearGradient(LinearGradient),
@@ -63,7 +63,7 @@ impl TryFromValue for Color {}
 /// This is a fully resolved gradient — all additional parameters
 /// needed for drawing (like gradient vector and per-color segment
 /// size) are already precomputed from user configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LinearGradient {
     /// The gradient’s angle in degrees, used to determine orientation.
     pub angle: f32,
@@ -130,10 +130,10 @@ impl LinearGradient {
 /// Cairo’s `ARgb32` format) and GPU pipelines store colors in this
 /// channel order on little-endian systems, allowing direct memory
 /// mapping without conversion overhead.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Bgra<T>
 where
-    T: Copy + Default,
+    T: Copy + Default + PartialEq,
 {
     pub blue: T,
     pub green: T,

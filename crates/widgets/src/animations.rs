@@ -41,6 +41,16 @@ pub enum AnimationKind {
     Translate(Translate),
 }
 
+impl PartialEq for AnimationKind {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            AnimationKind::Fade(_) => matches!(other, AnimationKind::Fade(_)),
+            AnimationKind::Pop(_) => matches!(other, AnimationKind::Pop(_)),
+            AnimationKind::Translate(_) => matches!(other, AnimationKind::Translate(_)),
+        }
+    }
+}
+
 impl Default for AnimationKind {
     fn default() -> Self {
         AnimationKind::Fade(Default::default())
@@ -66,7 +76,7 @@ impl AnimationFilter for AnimationKind {
 }
 
 /// Describes the pacing curve of an animation.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum Easing {
     /// Progresses at a constant speed.
     Linear,

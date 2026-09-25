@@ -6,7 +6,7 @@ use shared::{error::ConversionError, value::TryFromValue};
 /// [`Self::vertical`] along the y-axis. These values affect the
 /// final placement of child widgets when there is extra free space
 /// remaining after compilation.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Alignment {
     pub horizontal: Position,
     pub vertical: Position,
@@ -24,7 +24,7 @@ impl Alignment {
 impl TryFromValue for Alignment {}
 
 /// The position strategy used by [`Alignment`] to place children.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum Position {
     /// Aligns children at the start of the axis.
     Start,

@@ -5,7 +5,7 @@ use crate::types::Color;
 /// This struct groups the properties required to draw a frame around a
 /// container. It manages how thick the frame is, how rounded the
 /// corners appear, and the specific color of the stroke.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Border {
     /// The thickness of the border line.
     ///

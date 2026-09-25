@@ -1,6 +1,9 @@
-use crate::{context::LoadExtent, types::WidgetId};
+use crate::{
+    context::{LoadExtent, ManageWidgetData},
+    types::WidgetId,
+};
 
-pub(crate) trait LayoutContext<T>: LoadExtent<T, WidgetId>
+pub trait LayoutContext<T>: LoadExtent<T, WidgetId> + ManageWidgetData<WidgetId>
 where
     T: Default + Copy,
 {
@@ -8,15 +11,15 @@ where
 
 impl<C, T> LayoutContext<T> for C
 where
-    C: LoadExtent<T, WidgetId>,
+    C: LoadExtent<T, WidgetId> + ManageWidgetData<WidgetId>,
     T: Default + Copy,
 {
 }
 
-pub(crate) trait Layout<C, T>
+pub trait Layout<C, T>
 where
     C: LayoutContext<T>,
     T: Default + Copy,
 {
-    fn layout(&mut self, context: &C);
+    fn layout(&mut self, context: &mut C);
 }

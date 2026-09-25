@@ -5,17 +5,23 @@ pub mod image;
 pub mod text;
 
 use crate::{
-    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic},
+    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic, ManageWidgetData, WidgetTreeAccess},
     events::{self, EventContext, EventHandling, EventHitTest},
+    forest::{Get, GetCarefully},
     stage::{
+        deinit::{Deinit, DeinitContext},
         draw::{Draw, DrawContext, Drawer},
         init::{Init, InitContext},
-        invalidate::{Invalidate, InvalidateContext, InvalidateVisitor, RebuildStatus},
-        layout::Layout,
-        measure::{self, Constraints, Measure, MeasureContext, SizingMode},
+        invalidate::{Invalidate, InvalidateContext, RebuildStatus},
+        layout::{Layout, LayoutContext},
+        measure::{self, Constraints, ManageMeasures, Measure, MeasureContext, SizingMode},
+        rebuild::WidgetDiff,
     },
     types::{
-        Point, WidgetId, WidgetStyle, extent::Extent, identifiers::{WidgetClass, WidgetKey}, offset::Offset
+        extent::Extent,
+        identifiers::{WidgetClass, WidgetKey},
+        offset::Offset,
+        Point, WidgetId, WidgetStyle,
     },
     widget::animated_visibility::AnimatedVisibility,
 };
@@ -37,15 +43,67 @@ pub trait WidgetInformation {
     fn get_class(&self) -> WidgetClass;
 }
 
+impl<T: WidgetInformation + ?Sized> Get<WidgetId> for &T {
+    fn get(&self) -> WidgetId {
+        self.get_id()
+    }
+}
+
+impl<C> Get<WidgetId> for Box<dyn Widget<C>>
+where
+    C: WidgetContext,
+{
+    fn get(&self) -> WidgetId {
+        self.get_id()
+    }
+}
+
+impl<T: WidgetInformation> GetCarefully<WidgetKey> for T {
+    fn get_carefully(&self) -> Option<&WidgetKey> {
+        self.get_key()
+    }
+}
+
+impl<C> GetCarefully<WidgetKey> for Box<dyn Widget<C>>
+where
+    C: WidgetContext,
+{
+    fn get_carefully(&self) -> Option<&WidgetKey> {
+        self.get_key()
+    }
+}
+
 pub trait WidgetGetType {
+    /// Returns the type of this widget as a human-readable string.
+    ///
+    /// This is primarily intended for logging and debugging, allowing developers
+    /// to inspect which kind of widget is being processed at runtime.
     fn get_type(&self) -> &'static str;
 }
 
-pub trait WidgetSizingMode {
+impl<C> WidgetGetType for Box<dyn Widget<C>>
+where
+    C: WidgetContext,
+{
+    fn get_type(&self) -> &'static str {
+        (**self).get_type()
+    }
+}
+
+pub trait WidgetInformationContext:
+    WidgetTreeAccess<WidgetId> + ManageWidgetData<WidgetId>
+{
+    fn widget_sizing_mode(&self, widget_id: &WidgetId) -> Option<SizingMode>;
+}
+
+pub trait WidgetSizingMode<C>
+where
+    C: WidgetInformationContext,
+{
     /// Returns the sizing policy of the widget.
     ///
     /// This method is used to distinguish between widgets with pre-defined (fixed) dimensions and those that adapt their size dynamically based on the layout context.
-    fn sizing_mode(&self) -> SizingMode;
+    fn sizing_mode(&self, context: &C) -> SizingMode;
 }
 
 /// A metadata interface for inspecting a widget's identity and dimensions.
@@ -54,15 +112,80 @@ pub trait WidgetSizingMode {
 /// layout engine or debugging tools to query essential information
 /// from any widget variant without needing to understand that
 /// widget's specific internal logic.
-pub trait WidgetBase: WidgetInformation + WidgetGetType + WidgetSizingMode {}
+pub trait WidgetBase<C>: WidgetInformation + WidgetGetType + WidgetSizingMode<C>
+where
+    C: WidgetInformationContext,
+{
+}
 
-impl<W> WidgetBase for W where W: WidgetInformation + WidgetGetType + WidgetSizingMode {}
+impl<W, C> WidgetBase<C> for W
+where
+    W: WidgetInformation + WidgetGetType + WidgetSizingMode<C>,
+    C: WidgetInformationContext,
+{
+}
+
+pub trait WidgetContext:
+    WidgetInformationContext
+    + InitContext
+    + DeinitContext
+    + InvalidateContext
+    + MeasureContext<f32>
+    + LoadExtent<f32, WidgetId>
+    + DrawContext<f32>
+    + EventContext<f32>
+{
+}
+
+impl<C> WidgetContext for C where
+    C: WidgetInformationContext
+        + InitContext
+        + DeinitContext
+        + InvalidateContext
+        + MeasureContext<f32>
+        + LoadExtent<f32, WidgetId>
+        + DrawContext<f32>
+        + EventContext<f32>
+{
+}
+
+pub trait Widget<C>:
+    WidgetBase<C>
+    + WidgetDiff
+    + Init<C>
+    + Deinit<C>
+    + Invalidate<C>
+    + Measure<C, f32>
+    + Layout<C, f32>
+    + Draw<C, f32>
+    + EventHitTest<C, f32>
+    + EventHandling<C, f32>
+where
+    C: WidgetContext,
+{
+}
+
+impl<W, C> Widget<C> for W
+where
+    W: WidgetBase<C>
+        + WidgetDiff
+        + Init<C>
+        + Deinit<C>
+        + Invalidate<C>
+        + Measure<C, f32>
+        + Layout<C, f32>
+        + Draw<C, f32>
+        + EventHitTest<C, f32>
+        + EventHandling<C, f32>,
+    C: WidgetContext,
+{
+}
 
 /// A container enum for all supported widget types.
 ///
 /// This allows dynamic storage and composition of widgets, including complex
 /// layouts such as a [`FlexContainer`] holding multiple widgets.
-pub enum Widget {
+pub enum WidgetEnum {
     Image(Box<Image>),
     Text(Box<Text>),
     Container(Box<Container>),
@@ -73,16 +196,16 @@ pub enum Widget {
 macro_rules! delegate {
     ($self:ident.$method_name:ident($($tokens:tt),*)) => {
         match $self {
-            Widget::Image(image) => image.$method_name($($tokens),*),
-            Widget::Text(text) => text.$method_name($($tokens),*),
-            Widget::Container(container) => container.$method_name($($tokens),*),
-            Widget::FlexContainer(flex_container) => flex_container.$method_name($($tokens),*),
-            Widget::AnimatedVisibility(animated_visibility) => animated_visibility.$method_name($($tokens),*),
+            WidgetEnum::Image(image) => image.$method_name($($tokens),*),
+            WidgetEnum::Text(text) => text.$method_name($($tokens),*),
+            WidgetEnum::Container(container) => container.$method_name($($tokens),*),
+            WidgetEnum::FlexContainer(flex_container) => flex_container.$method_name($($tokens),*),
+            WidgetEnum::AnimatedVisibility(animated_visibility) => animated_visibility.$method_name($($tokens),*),
         }
     };
 }
 
-impl WidgetInformation for Widget {
+impl WidgetInformation for WidgetEnum {
     fn get_id(&self) -> WidgetId {
         delegate!(self.get_id())
     }
@@ -100,7 +223,7 @@ impl WidgetInformation for Widget {
     }
 }
 
-impl WidgetGetType for Widget {
+impl WidgetGetType for WidgetEnum {
     /// Returns the type of this widget as a human-readable string.
     ///
     /// This is primarily intended for logging and debugging, allowing developers
@@ -110,13 +233,16 @@ impl WidgetGetType for Widget {
     }
 }
 
-impl WidgetSizingMode for Widget {
-    fn sizing_mode(&self) -> SizingMode {
-        delegate!(self.sizing_mode())
+impl<C> WidgetSizingMode<C> for WidgetEnum
+where
+    C: WidgetInformationContext,
+{
+    fn sizing_mode(&self, context: &C) -> SizingMode {
+        delegate!(self.sizing_mode(context))
     }
 }
 
-impl<C> Init<C> for Widget
+impl<C> Init<C> for WidgetEnum
 where
     C: InitContext,
 {
@@ -125,7 +251,7 @@ where
     }
 }
 
-impl<C> Invalidate<C> for Widget
+impl<C> Invalidate<C> for WidgetEnum
 where
     C: InvalidateContext,
 {
@@ -136,46 +262,37 @@ where
     fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
         delegate!(self.on_rebuild(context))
     }
-
-    fn invalidate_children(&mut self, visitor: &mut impl InvalidateVisitor<C>) {
-        delegate!(self.invalidate_children(visitor));
-    }
 }
 
-impl Measure<f32> for Widget {
-    fn intrinsic_content<C>(&self, context: &mut C) -> measure::Intrinsic<f32>
+impl<C> Measure<C, f32> for WidgetEnum
+where
+    C: MeasureContext<f32>,
+{
+    fn intrinsic_content(&self, context: &mut C) -> measure::Intrinsic<f32>
     where
         C: ManageIntrinsic<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
         delegate!(self.intrinsic_content(context))
     }
 
-    fn measure_children(&self, visitor: &mut impl measure::MeasureVisitor<f32>) {
-        delegate!(self.measure_children(visitor))
-    }
-
-    fn measure_content<C>(
-        &self,
-        context: &mut C,
-        constraints: Constraints<Extent<f32>>,
-    ) -> Extent<f32>
+    fn measure_content(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
     where
-        C: MeasureContext<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
+        C: ManageMeasures<f32, WidgetId> + ManageDirtyFlags<WidgetId>,
     {
         delegate!(self.measure_content(context, constraints))
     }
 }
 
-impl<C> Layout<C, f32> for Widget
+impl<C> Layout<C, f32> for WidgetEnum
 where
-    C: LoadExtent<f32, WidgetId>,
+    C: LayoutContext<f32>,
 {
-    fn layout(&mut self, context: &C) {
+    fn layout(&mut self, context: &mut C) {
         delegate!(self.layout(context))
     }
 }
 
-impl<C> Draw<C, f32> for Widget
+impl<C> Draw<C, f32> for WidgetEnum
 where
     C: DrawContext<f32>,
 {
@@ -190,7 +307,7 @@ where
     }
 }
 
-impl<C> EventHitTest<f32, C> for Widget
+impl<C> EventHitTest<C, f32> for WidgetEnum
 where
     C: EventContext<f32>,
 {
@@ -205,53 +322,71 @@ where
     }
 }
 
-impl<C> EventHandling<f32, C> for Widget where C: EventContext<f32> {
+impl<C> EventHandling<C, f32> for WidgetEnum
+where
+    C: EventContext<f32>,
+{
     fn handle_events(
-            &mut self,
-            context: &mut C,
-            pending_events: Vec<events::PendingEvent>,
-            next_child: usize,
-            router: &events::EventRouter,
-        ) {
+        &mut self,
+        context: &mut C,
+        pending_events: Vec<events::PendingEvent>,
+        next_child: usize,
+        router: &events::EventRouter,
+    ) {
         delegate!(self.handle_events(context, pending_events, next_child, router))
     }
 }
 
-impl From<Image> for Widget {
+impl From<Image> for WidgetEnum {
     fn from(value: Image) -> Self {
-        Widget::Image(value.into())
+        WidgetEnum::Image(value.into())
     }
 }
 
-impl From<Text> for Widget {
+impl From<Text> for WidgetEnum {
     fn from(value: Text) -> Self {
-        Widget::Text(value.into())
+        WidgetEnum::Text(value.into())
     }
 }
 
-impl From<Container> for Widget {
+impl From<Container> for WidgetEnum {
     fn from(value: Container) -> Self {
-        Widget::Container(value.into())
+        WidgetEnum::Container(value.into())
     }
 }
 
-impl From<FlexContainer> for Widget {
+impl From<FlexContainer> for WidgetEnum {
     fn from(value: FlexContainer) -> Self {
-        Widget::FlexContainer(value.into())
+        WidgetEnum::FlexContainer(value.into())
     }
 }
 
-impl From<AnimatedVisibility> for Widget {
+impl From<AnimatedVisibility> for WidgetEnum {
     fn from(value: AnimatedVisibility) -> Self {
-        Widget::AnimatedVisibility(value.into())
+        WidgetEnum::AnimatedVisibility(value.into())
     }
 }
 
 #[macro_export]
 macro_rules! make_widget {
-    ($name:ident { $($field_name:ident: $val:expr),* $(,)? }) => {
-            $name::builder()
+    ($context:ident <== $name:ident ( $($field_name:ident: $val:expr),* $(,)? ) { $($child_node_id:expr),*$(,)? }) => {{
+            let node_id = $context.create_widget(Box::new($name::builder()
                 $(.$field_name($val))*
-                .build()
+                .build()));
+
+            $(
+                {
+                    let child_node_id = $child_node_id;
+                    $context.append_child(node_id, child_node_id);
+                }
+            )*
+
+            node_id
+    }};
+
+    ($context:ident <== $name:ident ( $($field_name:ident: $val:expr),* $(,)? )) => {
+            $context.create_widget(Box::new($name::builder()
+                $(.$field_name($val))*
+                .build()))
     };
 }

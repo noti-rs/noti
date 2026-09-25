@@ -8,11 +8,14 @@ use crate::{
         ManageExtent, ManageIntrinsic, SaveConstraints, SaveExtent,
     },
     types::{dirty_flags::DirtyFlags, Extent, Spacing, WidgetId},
-    widget::WidgetInformation,
+    widget::{WidgetInformation, WidgetInformationContext},
 };
 
 pub enum SizingMode {
+    /// Widget size does not depend on content, parent constraints, or children sizes.
     Fixed,
+
+    /// Widget size may depend on content, parent constraints, or children sizes.
     Dynamic,
 }
 
@@ -22,7 +25,19 @@ impl SizingMode {
     }
 }
 
-pub(crate) trait MeasureContext<T, Id>:
+pub trait MeasureContext<T>: WidgetInformationContext + ManageDirtyFlags<WidgetId>
+where
+    T: Default + Copy,
+{
+    fn widget_intrinsic(&mut self, widget_id: &WidgetId) -> Option<Intrinsic<T>>;
+    fn measure_widget(
+        &mut self,
+        widget_id: &WidgetId,
+        constraints: Constraints<Extent<T>>,
+    ) -> Option<Extent<f32>>;
+}
+
+pub trait ManageMeasures<T, Id>:
     ManageIntrinsic<T, Id> + ManageExtent<T, Id> + ManageConstraints<T, Id> + AnimationQuery<Id>
 where
     T: Default + Copy,
@@ -30,7 +45,7 @@ where
 {
 }
 
-impl<C, T, Id> MeasureContext<T, Id> for C
+impl<C, T, Id> ManageMeasures<T, Id> for C
 where
     T: Default + Copy,
     Id: Into<WidgetId>,
@@ -38,30 +53,22 @@ where
 {
 }
 
-pub(crate) trait MeasureVisitor<T>
+pub trait Measure<C, T>: WidgetInformation
 where
     T: Default + Copy + PartialEq,
+    C: MeasureContext<T>,
 {
-    fn measure<W: Measure<T>>(&mut self, child: &W);
-}
-
-pub(crate) trait Measure<T>: WidgetInformation
-where
-    T: Default + Copy + PartialEq,
-{
-    fn intrinsic_content<C>(&self, context: &mut C) -> Intrinsic<T>
+    fn intrinsic_content(&self, context: &mut C) -> Intrinsic<T>
     where
-        C: ManageIntrinsic<T, WidgetId> + ManageDirtyFlags<WidgetId>;
+        C: ManageIntrinsic<T, WidgetId>;
 
-    fn measure_children(&self, visitor: &mut impl MeasureVisitor<T>);
-
-    fn measure_content<C>(&self, context: &mut C, constraints: Constraints<Extent<T>>) -> Extent<T>
+    fn measure_content(&self, context: &mut C, constraints: Constraints<Extent<T>>) -> Extent<T>
     where
-        C: MeasureContext<T, WidgetId> + ManageDirtyFlags<WidgetId>;
+        C: ManageMeasures<T, WidgetId>;
 
-    fn intrinsic<C>(&self, context: &mut C) -> Intrinsic<T>
+    fn intrinsic(&self, context: &mut C) -> Intrinsic<T>
     where
-        C: ManageIntrinsic<T, WidgetId> + ManageDirtyFlags<WidgetId>,
+        C: ManageIntrinsic<T, WidgetId>,
     {
         let dirty_flags = context.get_dirty_flags(self.get_id());
         let cached_intrinsic = context.load(self.get_id());
@@ -76,9 +83,9 @@ where
         intrinsic
     }
 
-    fn measure<C>(&self, context: &mut C, constraints: Constraints<Extent<T>>) -> Extent<T>
+    fn measure(&self, context: &mut C, constraints: Constraints<Extent<T>>) -> Extent<T>
     where
-        C: MeasureContext<T, WidgetId> + ManageDirtyFlags<WidgetId>,
+        C: ManageMeasures<T, WidgetId>,
     {
         let mut dirty_flags = context.get_dirty_flags(self.get_id());
         let constraints_changed =
@@ -97,30 +104,17 @@ where
             && !constraints_changed
             && cached_extent.is_some()
         {
-            struct ChildrenVisitor<'a, C> {
-                context: &'a mut C,
+            for widget_id in context.childrens_identifiers_of(self.get_id()) {
+                let child_constraints =
+                    <C as LoadConstraints<T, WidgetId>>::load(context, widget_id)
+                        .or_else(|| {
+                            <C as LoadExtent<T, WidgetId>>::load(context, widget_id)
+                                .map(Constraints::new_tight)
+                        })
+                        .unwrap();
+
+                context.measure_widget(&widget_id, child_constraints);
             }
-
-            impl<'a, T, C> MeasureVisitor<T> for ChildrenVisitor<'a, C>
-            where
-                T: Default + Copy + PartialEq,
-                C: MeasureContext<T, WidgetId> + ManageDirtyFlags<WidgetId>,
-            {
-                fn measure<W: Measure<T>>(&mut self, child: &W) {
-                    let child_constraints =
-                        <C as LoadConstraints<T, WidgetId>>::load(self.context, child.get_id())
-                            .or_else(|| {
-                                <C as LoadExtent<T, WidgetId>>::load(self.context, child.get_id())
-                                    .map(Constraints::new_tight)
-                            })
-                            .unwrap();
-
-                    child.measure(self.context, child_constraints);
-                }
-            }
-
-            let mut visitor = ChildrenVisitor { context };
-            self.measure_children(&mut visitor);
 
             dirty_flags -= DirtyFlags::CHILD_NEEDS_MEASURE;
             context.set_dirty_flags(self.get_id(), dirty_flags);

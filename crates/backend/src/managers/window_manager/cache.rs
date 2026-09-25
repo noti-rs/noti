@@ -5,13 +5,13 @@ use shared::{
     cached_data::{CacheUpdate, CachedValueError},
     file_watcher::{FileState, FilesWatcher},
 };
-use widgets::widget::Widget;
+use widgets::widget::WidgetEnum;
 
 /// Represents a custom widget layout loaded into memory. This wrapper allows detecting
 /// changes to the layout file and reloading it on demand.
 pub(super) struct CachedLayout {
     watcher: FilesWatcher,
-    layout: Option<Widget>,
+    layout: Option<WidgetEnum>,
 }
 
 impl CachedLayout {
@@ -20,14 +20,14 @@ impl CachedLayout {
     /// The layout may not exist if the file path is invalid, the file is missing, or any other
     /// error occurs while loading.
     #[allow(unused)]
-    pub(super) fn layout(&self) -> Option<&Widget> {
+    pub(super) fn layout(&self) -> Option<&WidgetEnum> {
         self.layout.as_ref()
     }
 
     /// Attempts to load a custom widget layout from the specified path.
     ///
     /// Returns `None` if the layout is invalid or the file is missing.
-    fn load_layout(path: &Path) -> Option<Widget> {
+    fn load_layout(path: &Path) -> Option<WidgetEnum> {
         match filetype::parse_layout(path) {
             Ok(widget) => Some(widget),
             Err(err) => {

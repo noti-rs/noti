@@ -28,6 +28,12 @@ impl<T: 'static> Clone for State<T> {
 
 impl<T: 'static> Copy for State<T> {}
 
+impl<T: 'static> PartialEq for State<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.descriptor == other.descriptor
+    }
+}
+
 pub struct MutableState<T: 'static> {
     pub(crate) descriptor: usize,
     pub(crate) _marker: PhantomData<T>,
@@ -106,6 +112,10 @@ impl StateInfo {
 
     pub(crate) fn add_subscriber<Id: Into<WidgetId>>(&mut self, subscriber: Id) {
         self.subscribers.insert(subscriber.into());
+    }
+
+    pub(crate) fn remove_subscriber<Id: Into<WidgetId>>(&mut self, subscriber: Id) {
+        self.subscribers.remove(&subscriber.into());
     }
 
     pub(crate) fn subscribers(&self) -> impl Iterator<Item = &WidgetId> {
