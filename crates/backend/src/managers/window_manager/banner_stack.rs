@@ -22,8 +22,9 @@ use widgets::{
     types::{Alignment, Border, Direction, Extent, Offset, Point, Position},
     widget::{
         animated_visibility::{AnimatedVisibility, AnimatedVisibilityStyle, AnimationDefinition},
+        flexbox::FlexBoxStyle,
         image::ImageProvider,
-        ContainerStyle, FlexContainer, Image, Text, TextStyle,
+        FlexBox, Image, Text, TextStyle,
     },
     WidgetSystem,
 };
@@ -345,14 +346,14 @@ impl Banner {
                 },
             ) {
                 make_widget! {
-                    context <== FlexContainer(
+                    context <== FlexBox(
                         class: Banner::NOTIFICATION_FRAME,
                         direction: Direction::Horizontal,
                         alignment: Alignment::new(Position::Start, Position::Center),
                     ) {
                         image_widget,
                         make_widget!{
-                            context <== FlexContainer (
+                            context <== FlexBox(
                                 direction: Direction::Vertical,
                                 alignment: Alignment::new(Position::Center, Position::Center),
                             ) {
@@ -531,15 +532,15 @@ fn set_styles<C: SetStyleClass>(context: &mut C, notification: &Notification, co
 
     context.set_style_class(
         Banner::NOTIFICATION_FRAME,
-        widgets::types::WidgetStyle::Container(make_style! {
-            ContainerStyle {
+        widgets::types::WidgetStyle::FlexBox(make_style! {
+            FlexBoxStyle {
                 background_color: colors.background.clone().into(),
                 border: Border {
                     size: display_config.border.size as usize,
                     radius: display_config.border.radius as usize,
                     color: colors.border.clone().into(),
                 },
-                spacing: display_config.padding.into(),
+                padding: display_config.padding.into(),
                 alignment: Alignment::new(Position::Start, Position::Center),
             }
         }),

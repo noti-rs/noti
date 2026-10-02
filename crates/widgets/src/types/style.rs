@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use crate::{
     types::WidgetId,
     widget::{
-        animated_visibility::AnimatedVisibilityStyle, container::ContainerStyle, image::ImageStyle,
-        text::TextStyle,
+        animated_visibility::AnimatedVisibilityStyle, flexbox::FlexBoxStyle, image::ImageStyle,
+        r#box::BoxStyle, text::TextStyle,
     },
 };
 
@@ -142,7 +142,8 @@ impl StyleInfo {
 pub enum WidgetStyle {
     Text(TextStyle),
     Image(ImageStyle),
-    Container(ContainerStyle),
+    Box(BoxStyle),
+    FlexBox(FlexBoxStyle),
     AnimatedVisibility(AnimatedVisibilityStyle),
     Unknown,
 }

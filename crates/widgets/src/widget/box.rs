@@ -1,4 +1,4 @@
-use macros::{widget, widget_style};
+use macros::widget;
 
 use crate::{
     context::{LoadExtent, ManageIntrinsic},
@@ -15,45 +15,32 @@ use crate::{
         measure::{self, Constraints, ManageMeasures, Measure, MeasureContext, SizingMode},
     },
     types::{
-        alignment::Alignment,
-        border::Border,
         extent::Extent,
         identifiers::{WidgetClass, WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
         style::{Configure, WidgetStyle},
-        Color, Point,
+        Point,
     },
-    widget::{
-        flex_container::FlexContainer, WidgetGetType, WidgetInformationContext, WidgetSizingMode,
-    },
+    widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
 };
 
 /// A simple box that stays the same size.
 ///
-/// Unlike the [`FlexContainer`], which stretches and moves to fit many things,
-/// the `Container` is a rigid frame for just **one** child widget.
+/// Unlike the [`FlexBox`], which stretches and moves to fit many things,
+/// the `Box` is a rigid frame for just **one** child widget.
 ///
-/// The Container does three main things:
+/// The Box does three main things:
 /// * It sets a fixed width and height that never change.
 /// * It holds exactly one child widget inside itself.
 /// * It acts as a wall, so the child inside cannot push the box to make it bigger.
 ///
 /// Use this when you need a UI element to stay exactly the same,
 /// like a fixed icon or a status light that should never grow or shrink.
-// TODO: Need to move from a single `spacing` field to both `margin` and `padding` fields
 #[widget(kind = container)]
+#[make_widget_style(BoxStyle, derive(bon::Builder, Debug, Clone))]
 #[derive(bon::Builder, Default)]
-pub struct Container {
-    /// The internal spacing between the widget's boundary box and its actual content.
-    ///
-    /// This field defines a buffer zone (Top, Right, Bottom, Left) that
-    /// effectively shrinks the available area for the widget's content
-    /// without changing the widget's outer dimensions. It ensures
-    /// content does not touch the edges of its container.
-    #[style]
-    spacing: Spacing,
-
+pub struct Box {
     /// A hard-coded, fixed dimension for this axis.
     ///
     /// When set, the container will occupy exactly this many units regardless
@@ -75,30 +62,13 @@ pub struct Container {
     height: usize,
 }
 
-/// A targeted configuration set used to override or provide specific
-/// parameters for a Container widget based on its unique identifier.
-///
-/// Instead of traversing the widget tree to modify an existing Container,
-/// this struct allows external systems to inject layout and styling
-/// data—such as alignment and borders—directly into the widget's
-/// compilation phase. If no configuration is associated with a
-/// widget's ID, it continues to use its own internal state.
-#[widget_style(kind = minimal, targets(Container, FlexContainer))]
-#[derive(bon::Builder, Debug, Clone)]
-pub struct ContainerStyle {
-    pub background_color: Color,
-    pub border: Border,
-    pub spacing: Spacing,
-    pub alignment: Alignment,
-}
-
-impl WidgetGetType for Container {
+impl WidgetGetType for Box {
     fn get_type(&self) -> &'static str {
         "container"
     }
 }
 
-impl<C> WidgetSizingMode<C> for Container
+impl<C> WidgetSizingMode<C> for Box
 where
     C: WidgetInformationContext,
 {
@@ -107,25 +77,25 @@ where
     }
 }
 
-impl<C> Init<C> for Container
+impl<C> Init<C> for Box
 where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
-        if let Some(WidgetStyle::Container(container_style)) = context.get_style(&self.class) {
+        if let Some(WidgetStyle::Box(container_style)) = context.get_style(&self.class) {
             self.configure(container_style.clone());
         }
     }
 }
 
-impl<C> Deinit<C> for Container where C: DeinitContext {}
+impl<C> Deinit<C> for Box where C: DeinitContext {}
 
-impl<C> Invalidate<C> for Container
+impl<C> Invalidate<C> for Box
 where
     C: InvalidateContext,
 {
     fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
-        if let WidgetStyle::Container(container_style) = style {
+        if let WidgetStyle::Box(container_style) = style {
             self.configure(container_style);
         }
     }
@@ -135,7 +105,7 @@ where
     }
 }
 
-impl<C> Measure<C, f32> for Container
+impl<C> Measure<C, f32> for Box
 where
     C: MeasureContext<f32>,
 {
@@ -150,11 +120,12 @@ where
                 .and_then(|child_widget_id| context.widget_intrinsic(child_widget_id))
                 .unwrap_or_default()
         })
-        .spacing(self.spacing.unwrap_or_default())
+        .spacing(self.padding.unwrap_or_default())
         .box_size(
             self.width.as_option().map(|&width| width as f32),
             self.height.as_option().map(|&height| height as f32),
         )
+        .spacing(self.margin.unwrap_or_default())
         .intrinsic()
     }
 
@@ -171,23 +142,24 @@ where
                 })
                 .unwrap_or_default()
         })
-        .spacing(self.spacing.unwrap_or_default())
+        .spacing(self.padding.unwrap_or_default())
         .box_size(
             self.width.as_option().map(|&width| width as f32),
             self.height.as_option().map(|&height| height as f32),
         )
+        .spacing(self.margin.unwrap_or_default())
         .measure(constraints)
     }
 }
 
-impl<C> Layout<C, f32> for Container
+impl<C> Layout<C, f32> for Box
 where
     C: LayoutContext<f32>,
 {
     fn layout(&mut self, _context: &mut C) {}
 }
 
-impl<C> Draw<C, f32> for Container
+impl<C> Draw<C, f32> for Box
 where
     C: DrawContext<f32>,
 {
@@ -222,18 +194,19 @@ where
                 }
             },
         )
-        .spacing(self.spacing.unwrap_or_default())
+        .spacing(self.padding.unwrap_or_default())
         .background(self.background_color.clone().unwrap_or_default())
         .border(self.border.clone().unwrap_or_default())
         .box_size(
             self.width.as_option().map(|&width| width as f32),
             self.height.as_option().map(|&height| height as f32),
         )
+        .spacing(self.margin.unwrap_or_default())
         .draw(offset, provided_extent, drawer);
     }
 }
 
-impl<C> EventHitTest<C, f32> for Container
+impl<C> EventHitTest<C, f32> for Box
 where
     C: EventContext<f32>,
 {
@@ -246,13 +219,12 @@ where
     ) -> HitTestResult {
         Content::hit_test_fn(
             |local_coords: Point<f32>, _provided_extent: Extent<f32>, router: &mut EventRouter| {
-                if let Some(hit_result) =
-                    context
-                        .childrens_identifiers_of(self.id)
-                        .first()
-                        .and_then(|child_widget_id| {
-                            context.hit_test_widget(child_widget_id, local_coords, router)
-                        })
+                if let Some(hit_result) = context
+                    .childrens_identifiers_of(self.id)
+                    .first()
+                    .and_then(|child_widget_id| {
+                        context.hit_test_widget(child_widget_id, local_coords, router)
+                    })
                 {
                     match hit_result {
                         HitTestResult::Hit => router.set_next_index(self.id, 0),
@@ -265,17 +237,18 @@ where
                 }
             },
         )
-        .spacing(self.spacing.unwrap_or_default())
+        .spacing(self.padding.unwrap_or_default())
         .border(self.border.clone().unwrap_or_default())
         .box_size(
             self.width.as_option().map(|&width| width as f32),
             self.height.as_option().map(|&height| height as f32),
         )
+        .spacing(self.margin.unwrap_or_default())
         .hit_test(self.id, local_coords, provided_extent, router)
     }
 }
 
-impl<C> EventHandling<C, f32> for Container
+impl<C> EventHandling<C, f32> for Box
 where
     C: EventContext<f32>,
 {

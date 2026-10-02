@@ -1,6 +1,6 @@
 pub mod animated_visibility;
-pub mod container;
-pub mod flex_container;
+pub mod r#box;
+pub mod flexbox;
 pub mod image;
 pub mod text;
 
@@ -27,9 +27,9 @@ use crate::{
 };
 
 pub use {
-    container::{Container, ContainerBuilder, ContainerStyle},
-    flex_container::{FlexContainer, FlexContainerBuilder},
+    flexbox::{FlexBox, FlexBoxBuilder},
     image::{FitMode, Image, ImageBuilder, ImageInfo, ImageStyle, MipmapMode, ResizingMethod},
+    r#box::{Box, BoxBuilder},
     text::{Font, FontStyle, Text, TextAlignment, TextBuilder, TextStyle},
 };
 
@@ -49,7 +49,7 @@ impl<T: WidgetInformation + ?Sized> Get<WidgetId> for &T {
     }
 }
 
-impl<C> Get<WidgetId> for Box<dyn Widget<C>>
+impl<C> Get<WidgetId> for std::boxed::Box<dyn Widget<C>>
 where
     C: WidgetContext,
 {
@@ -64,7 +64,7 @@ impl<T: WidgetInformation> GetCarefully<WidgetKey> for T {
     }
 }
 
-impl<C> GetCarefully<WidgetKey> for Box<dyn Widget<C>>
+impl<C> GetCarefully<WidgetKey> for std::boxed::Box<dyn Widget<C>>
 where
     C: WidgetContext,
 {
@@ -81,7 +81,7 @@ pub trait WidgetGetType {
     fn get_type(&self) -> &'static str;
 }
 
-impl<C> WidgetGetType for Box<dyn Widget<C>>
+impl<C> WidgetGetType for std::boxed::Box<dyn Widget<C>>
 where
     C: WidgetContext,
 {
@@ -186,11 +186,11 @@ where
 /// This allows dynamic storage and composition of widgets, including complex
 /// layouts such as a [`FlexContainer`] holding multiple widgets.
 pub enum WidgetEnum {
-    Image(Box<Image>),
-    Text(Box<Text>),
-    Container(Box<Container>),
-    FlexContainer(Box<FlexContainer>),
-    AnimatedVisibility(Box<AnimatedVisibility>),
+    Image(std::boxed::Box<Image>),
+    Text(std::boxed::Box<Text>),
+    Container(std::boxed::Box<Box>),
+    FlexContainer(std::boxed::Box<FlexBox>),
+    AnimatedVisibility(std::boxed::Box<AnimatedVisibility>),
 }
 
 macro_rules! delegate {
@@ -349,14 +349,14 @@ impl From<Text> for WidgetEnum {
     }
 }
 
-impl From<Container> for WidgetEnum {
-    fn from(value: Container) -> Self {
+impl From<Box> for WidgetEnum {
+    fn from(value: Box) -> Self {
         WidgetEnum::Container(value.into())
     }
 }
 
-impl From<FlexContainer> for WidgetEnum {
-    fn from(value: FlexContainer) -> Self {
+impl From<FlexBox> for WidgetEnum {
+    fn from(value: FlexBox) -> Self {
         WidgetEnum::FlexContainer(value.into())
     }
 }

@@ -242,7 +242,7 @@ fn impl_widget(
                 #fn_outer_spacing
 
                 fn inner_spacing(&self) -> Spacing {
-                    self.spacing.unwrap_or_default()
+                    self.padding.unwrap_or_default()
                         + Spacing::all_directional(
                             self.border
                                 .as_ref()
@@ -810,7 +810,7 @@ fn impls_configure(
 
     let container_fields = quote! {
         #standard_fields
-        self.paddin.override_if_higher(config.padding);
+        self.padding.override_if_higher(config.padding);
         self.background_color.override_if_higher(config.background_color);
         self.border.override_if_higher(config.border);
         self.alignment.override_if_higher(config.alignment);
