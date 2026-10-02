@@ -3,6 +3,7 @@ pub mod r#box;
 pub mod flexbox;
 pub mod image;
 pub mod text;
+pub mod button;
 
 use crate::{
     context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic, ManageWidgetData, WidgetTreeAccess},

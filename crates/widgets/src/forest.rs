@@ -67,6 +67,7 @@ where
     }
 
     pub(crate) fn append_node(&mut self, parent: NodeId, child: NodeId) {
+        // TODO: get cardinality of current node to check whether is possible to add child or not
         parent.append(child, &mut self.arena);
     }
 
