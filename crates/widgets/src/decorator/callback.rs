@@ -1,7 +1,9 @@
 use std::marker::PhantomData;
 
 use crate::{
-    decorator::{DecoratorType, DrawDecorator, EventHitTestDecorator, MeasureDecorator},
+    decorator::{
+        DecoratorType, DrawDecorator, EventHitTestDecorator, LayoutDecorator, MeasureDecorator,
+    },
     events::{EventNodeCapabilities, EventRouter, HitTestResult},
     stage::{
         draw::Drawer,
@@ -59,6 +61,16 @@ where
 
     fn measure(&mut self, constraints: Constraints<Extent<T>>) -> Extent<T> {
         self.next.measure(constraints)
+    }
+}
+
+impl<CallbackType, N, T> LayoutDecorator<T> for EventDecorator<CallbackType, N>
+where
+    N: LayoutDecorator<T>,
+    T: DecoratorType,
+{
+    fn layout(&mut self, local_coord: Point<T>, provided_extent: Extent<T>) {
+        self.next.layout(local_coord, provided_extent);
     }
 }
 

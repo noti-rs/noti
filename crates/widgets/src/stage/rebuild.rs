@@ -15,7 +15,7 @@ pub trait WidgetDiff {
     fn diff(&self, other: &dyn std::any::Any) -> DirtyFlags;
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct RebuildContext {
     matched_keyed_nodes: MatchedKeyedNodes,
     operation_set: Vec<RebuildOperation>,
@@ -29,13 +29,13 @@ impl RebuildContext {
 
 /// It assumes that both of widget trees (main and pending) have unique [WidgetKey]s. In this case,
 /// there must only both unique [NodeId] for each [WidgetKey].
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct MatchedKeyedNodes {
     keyed_nodes: HashMap<WidgetKey, MatchedNodes>,
     matched_nodes: HashSet<NodeId>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct MatchedNodes {
     node_in_main_tree: NodeId,
     node_in_pending_tree: NodeId,
@@ -57,6 +57,7 @@ impl MatchedKeyedNodes {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum RebuildOperation {
     Initialize {
         node_id: NodeId,

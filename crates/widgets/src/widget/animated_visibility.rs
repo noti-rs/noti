@@ -20,10 +20,7 @@ use crate::{
         measure::{Constraints, Intrinsic, ManageMeasures, Measure, MeasureContext, SizingMode},
     },
     state::State,
-    types::{
-        dirty_flags::DirtyFlags, identifiers::WidgetKey, style::Configure, Extent, Offset, Point,
-        WidgetClass, WidgetId, WidgetStyle,
-    },
+    types::{dirty_flags::DirtyFlags, identifiers::WidgetKey, Extent, Offset, Point, WidgetId},
     widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
 };
 
@@ -32,7 +29,6 @@ use crate::{
 #[callback(on_hidden)]
 #[callback(on_hover)]
 #[callback(on_leave)]
-#[make_widget_style(AnimatedVisibilityStyle, derive(bon::Builder, Debug, Default, Clone))]
 #[derive(bon::Builder, Default)]
 pub struct AnimatedVisibility {
     #[builder(into)]
@@ -264,10 +260,6 @@ where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
-        if let Some(WidgetStyle::AnimatedVisibility(av_style)) = context.get_style(&self.class) {
-            self.configure(av_style.clone());
-        }
-
         let mut visible = true;
         if let Some(state) = self.visibility_state {
             <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
@@ -312,12 +304,6 @@ impl<C> Invalidate<C> for AnimatedVisibility
 where
     C: InvalidateContext,
 {
-    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
-        if let WidgetStyle::AnimatedVisibility(av_style) = style {
-            self.configure(av_style);
-        }
-    }
-
     fn on_rebuild(&mut self, context: &mut C) -> crate::stage::invalidate::RebuildStatus {
         let mut runtime_information: Unique<AVRuntimeInformation> =
             widget_data_mut(context, self.id)
@@ -436,7 +422,16 @@ impl<C> Layout<C, f32> for AnimatedVisibility
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, _context: &mut C) {}
+    fn on_layout(
+        &mut self,
+        context: &mut C,
+        local_coord: Point<f32>,
+        _provided_extent: Extent<f32>,
+    ) {
+        if let Some(child_widget_id) = context.childrens_identifiers_of(self.id).first() {
+            context.layout_widget(child_widget_id, local_coord);
+        }
+    }
 }
 
 impl<C> Draw<C, f32> for AnimatedVisibility

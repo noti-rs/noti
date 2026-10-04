@@ -7,7 +7,7 @@ use crate::{
         background::BackgroundDecorator,
         border::BorderDecorator,
         box_size::BoxSizeDecorator,
-        callback::{EventDecorator, Clickable, Hoverable, Pressable},
+        callback::{Clickable, EventDecorator, Hoverable, Pressable},
         spacing::SpacingDecorator,
     },
     events::{EventRouter, HitTestResult},
@@ -41,6 +41,13 @@ where
 {
     fn intrinsic(&mut self) -> Intrinsic<T>;
     fn measure(&mut self, constraints: Constraints<Extent<T>>) -> Extent<T>;
+}
+
+pub(crate) trait LayoutDecorator<T>
+where
+    T: DecoratorType,
+{
+    fn layout(&mut self, local_coord: Point<T>, provided_extent: Extent<T>);
 }
 
 pub(crate) trait DrawDecorator<T>
@@ -78,7 +85,7 @@ where
 }
 
 pub(crate) trait DecoratorExt<T>:
-    MeasureDecorator<T> + DrawDecorator<T> + EventHitTestDecorator<T> + Sized
+    MeasureDecorator<T> + DrawDecorator<T> + LayoutDecorator<T> + EventHitTestDecorator<T> + Sized
 where
     T: DecoratorType,
 {
@@ -138,7 +145,11 @@ where
 
 impl<D, T> DecoratorExt<T> for D
 where
-    D: MeasureDecorator<T> + DrawDecorator<T> + EventHitTestDecorator<T> + Sized,
+    D: MeasureDecorator<T>
+        + LayoutDecorator<T>
+        + DrawDecorator<T>
+        + EventHitTestDecorator<T>
+        + Sized,
     T: DecoratorType,
 {
 }

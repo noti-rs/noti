@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use indextree::{Arena, NodeId};
+use indextree::Arena;
 use shared::unique::Unique;
+
+pub use indextree::NodeId;
 
 /// A contract requires to retrieve some `T` from a type.
 pub trait Get<T> {

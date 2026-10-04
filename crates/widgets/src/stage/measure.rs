@@ -128,7 +128,7 @@ where
         <C as SaveExtent<T, WidgetId>>::save(context, self.get_id(), used_extent);
 
         dirty_flags -= DirtyFlags::NEEDS_MEASURE | DirtyFlags::CHILD_NEEDS_MEASURE;
-        context.set_dirty_flags(self.get_id(), dirty_flags);
+        context.set_dirty_flags(self.get_id(), dirty_flags | DirtyFlags::NEEDS_LAYOUT);
 
         used_extent
     }

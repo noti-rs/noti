@@ -11,7 +11,7 @@ use crate::{
         measure::{Measure, MeasureContext},
     },
     types::{Extent, Point},
-    widget::{WidgetClass, WidgetGetType, WidgetInformationContext, WidgetKey, WidgetSizingMode},
+    widget::{WidgetGetType, WidgetInformationContext, WidgetKey, WidgetSizingMode},
     WidgetId,
 };
 use macros::widget;
@@ -20,7 +20,7 @@ use macros::widget;
 #[callback(on_click)]
 #[callback(on_press)]
 #[derive(bon::Builder)]
-struct Button {}
+pub struct Button {}
 
 impl WidgetGetType for Button {
     fn get_type(&self) -> &'static str {
@@ -59,8 +59,6 @@ impl<C> Invalidate<C> for Button
 where
     C: InvalidateContext,
 {
-    fn on_style_update(&mut self, _context: &mut C, _style: crate::types::WidgetStyle) {}
-
     fn on_rebuild(&mut self, _context: &mut C) -> crate::stage::invalidate::RebuildStatus {
         crate::stage::invalidate::RebuildStatus::NothingChanged
     }
@@ -101,7 +99,16 @@ impl<C> Layout<C, f32> for Button
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, _context: &mut C) {}
+    fn on_layout(
+        &mut self,
+        context: &mut C,
+        local_coord: Point<f32>,
+        _provided_extent: Extent<f32>,
+    ) {
+        if let Some(child_widget_id) = context.childrens_identifiers_of(self.id).first() {
+            context.layout_widget(child_widget_id, local_coord);
+        }
+    }
 }
 
 impl<C> Draw<C, f32> for Button

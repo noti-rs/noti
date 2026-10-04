@@ -1,12 +1,13 @@
 pub mod animated_visibility;
 pub mod r#box;
+pub mod button;
+pub mod constraint_box;
 pub mod flexbox;
 pub mod image;
 pub mod text;
-pub mod button;
 
 use crate::{
-    context::{LoadExtent, ManageDirtyFlags, ManageIntrinsic, ManageWidgetData, WidgetTreeAccess},
+    context::{ManageDirtyFlags, ManageIntrinsic, ManageWidgetData, WidgetTreeAccess},
     events::{self, EventContext, EventHandling, EventHitTest},
     forest::{Get, GetCarefully},
     stage::{
@@ -19,19 +20,18 @@ use crate::{
         rebuild::WidgetDiff,
     },
     types::{
-        extent::Extent,
-        identifiers::{WidgetClass, WidgetKey},
-        offset::Offset,
-        Point, WidgetId, WidgetStyle,
+        extent::Extent, identifiers::WidgetKey, offset::Offset, InputBehavior, Point, WidgetId,
     },
     widget::animated_visibility::AnimatedVisibility,
 };
 
 pub use {
+    button::{Button, ButtonBuilder},
+    constraint_box::{ConstrainedBox, ConstrainedBoxBuilder},
     flexbox::{FlexBox, FlexBoxBuilder},
-    image::{FitMode, Image, ImageBuilder, ImageInfo, ImageStyle, MipmapMode, ResizingMethod},
+    image::{FitMode, Image, ImageBuilder, ImageInfo, MipmapMode, ResizingMethod},
     r#box::{Box, BoxBuilder},
-    text::{Font, FontStyle, Text, TextAlignment, TextBuilder, TextStyle},
+    text::{Font, FontStyle, Text, TextAlignment, TextBuilder},
 };
 
 pub trait WidgetInformation {
@@ -41,7 +41,7 @@ pub trait WidgetInformation {
 
     fn get_key(&self) -> Option<&WidgetKey>;
 
-    fn get_class(&self) -> WidgetClass;
+    fn input_behavior(&self) -> &InputBehavior;
 }
 
 impl<T: WidgetInformation + ?Sized> Get<WidgetId> for &T {
@@ -132,7 +132,7 @@ pub trait WidgetContext:
     + DeinitContext
     + InvalidateContext
     + MeasureContext<f32>
-    + LoadExtent<f32, WidgetId>
+    + LayoutContext<f32>
     + DrawContext<f32>
     + EventContext<f32>
 {
@@ -144,7 +144,7 @@ impl<C> WidgetContext for C where
         + DeinitContext
         + InvalidateContext
         + MeasureContext<f32>
-        + LoadExtent<f32, WidgetId>
+        + LayoutContext<f32>
         + DrawContext<f32>
         + EventContext<f32>
 {
@@ -161,6 +161,7 @@ pub trait Widget<C>:
     + Draw<C, f32>
     + EventHitTest<C, f32>
     + EventHandling<C, f32>
+    + std::any::Any
 where
     C: WidgetContext,
 {
@@ -177,7 +178,8 @@ where
         + Layout<C, f32>
         + Draw<C, f32>
         + EventHitTest<C, f32>
-        + EventHandling<C, f32>,
+        + EventHandling<C, f32>
+        + std::any::Any,
     C: WidgetContext,
 {
 }
@@ -219,8 +221,8 @@ impl WidgetInformation for WidgetEnum {
         delegate!(self.get_key())
     }
 
-    fn get_class(&self) -> WidgetClass {
-        delegate!(self.get_class())
+    fn input_behavior(&self) -> &InputBehavior {
+        delegate!(self.input_behavior())
     }
 }
 
@@ -256,10 +258,6 @@ impl<C> Invalidate<C> for WidgetEnum
 where
     C: InvalidateContext,
 {
-    fn on_style_update(&mut self, context: &mut C, style: WidgetStyle) {
-        delegate!(self.on_style_update(context, style));
-    }
-
     fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
         delegate!(self.on_rebuild(context))
     }
@@ -288,8 +286,17 @@ impl<C> Layout<C, f32> for WidgetEnum
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, context: &mut C) {
-        delegate!(self.layout(context))
+    fn on_layout(
+        &mut self,
+        context: &mut C,
+        local_coord: Point<f32>,
+        provided_extent: Extent<f32>,
+    ) {
+        delegate!(self.on_layout(context, local_coord, provided_extent));
+    }
+
+    fn layout(&mut self, context: &mut C, local_coord: Point<f32>) {
+        delegate!(self.layout(context, local_coord));
     }
 }
 
@@ -371,9 +378,10 @@ impl From<AnimatedVisibility> for WidgetEnum {
 #[macro_export]
 macro_rules! make_widget {
     ($context:ident <== $name:ident ( $($field_name:ident: $val:expr),* $(,)? ) { $($child_node_id:expr),*$(,)? }) => {{
-            let node_id = $context.create_widget(Box::new($name::builder()
+            let widget = Box::new($name::builder()
                 $(.$field_name($val))*
-                .build()));
+                .build());
+            let node_id = $context.create_widget(widget);
 
             $(
                 {
@@ -385,9 +393,10 @@ macro_rules! make_widget {
             node_id
     }};
 
-    ($context:ident <== $name:ident ( $($field_name:ident: $val:expr),* $(,)? )) => {
-            $context.create_widget(Box::new($name::builder()
+    ($context:ident <== $name:ident ( $($field_name:ident: $val:expr),* $(,)? )) => {{
+            let widget = Box::new($name::builder()
                 $(.$field_name($val))*
-                .build()))
-    };
+                .build());
+            $context.create_widget(widget)
+    }};
 }

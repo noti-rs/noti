@@ -24,24 +24,24 @@ pub mod direction;
 pub mod dirty_flags;
 pub mod extent;
 pub mod identifiers;
+pub mod input_behavior;
 pub mod offset;
 pub mod point;
 pub mod shader_builder;
 pub mod spacing;
 pub mod style;
 
-pub(crate) use style::StyleInfo;
-
 pub use {
     alignment::{Alignment, Position},
     border::Border,
     color::{Bgra, Color, LinearGradient},
     direction::Direction,
+    dirty_flags::DirtyFlags,
     extent::Extent,
-    identifiers::{WidgetClass, WidgetId},
+    identifiers::{WidgetId, WidgetKey},
+    input_behavior::InputBehavior,
     offset::Offset,
     point::Point,
     shader_builder::{ShaderBuilder, ShaderBuilderError, UniformValue},
     spacing::Spacing,
-    style::WidgetStyle,
 };

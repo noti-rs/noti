@@ -1,5 +1,7 @@
 use crate::{
-    decorator::{DecoratorType, DrawDecorator, EventHitTestDecorator, MeasureDecorator},
+    decorator::{
+        DecoratorType, DrawDecorator, EventHitTestDecorator, LayoutDecorator, MeasureDecorator,
+    },
     events::{EventRouter, HitTestResult},
     stage::{
         draw::{Drawer, UseColor},
@@ -80,6 +82,21 @@ where
         let used_extent = self.next.measure(new_constraints) + spacing.into();
 
         used_extent.clamp_with(constraints.min, constraints.max)
+    }
+}
+
+impl<N, T> LayoutDecorator<T> for BorderDecorator<N>
+where
+    N: LayoutDecorator<T>,
+    T: DecoratorType,
+{
+    fn layout(&mut self, local_coord: Point<T>, provided_extent: Extent<T>) {
+        let border_spacing = Spacing::all_directional(self.border.size);
+
+        self.next.layout(
+            local_coord + border_spacing.into(),
+            provided_extent.shrink_to_with(&border_spacing),
+        );
     }
 }
 

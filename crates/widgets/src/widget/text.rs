@@ -19,12 +19,10 @@ use crate::{
     },
     state::State,
     types::{
-        dirty_flags::DirtyFlags,
         extent::Extent,
-        identifiers::{WidgetClass, WidgetId, WidgetKey},
+        identifiers::{WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
-        style::{Configure, WidgetStyle},
         Color, Point,
     },
     widget::{
@@ -39,7 +37,6 @@ use crate::{
 /// `Text` aims to be simple but flexible, providing a consistent API
 /// for compilation and querying its dimensions after layout.
 #[widget]
-#[make_widget_style(TextStyle, derive(bon::Builder, Debug, Clone))]
 #[derive(bon::Builder, Default)]
 pub struct Text {
     /// The specific typeface and sizing rules used to render this text.
@@ -296,10 +293,6 @@ where
             }
         }
 
-        if let Some(WidgetStyle::Text(text_style)) = context.get_style(&self.class) {
-            self.configure(text_style.clone());
-        }
-
         runtime_information.font_collection = context.get_font().into();
 
         let mut paragraph = self.build_paragraph(
@@ -331,12 +324,6 @@ impl<C> Invalidate<C> for Text
 where
     C: InvalidateContext,
 {
-    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
-        if let WidgetStyle::Text(text_style) = style {
-            self.configure(text_style);
-        }
-    }
-
     fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
         let mut runtime_information: Unique<TextRuntimeInformation> =
             widget_data_mut(context, self.id)
@@ -420,8 +407,6 @@ where
             let max_intrinsic_width = paragraph.max_intrinsic_width();
             paragraph.layout(max_intrinsic_width);
 
-            context.append_dirty_flags(self.id, DirtyFlags::NEEDS_LAYOUT);
-
             Extent::new(width, height)
         })
         .spacing(self.margin.unwrap_or_default())
@@ -433,19 +418,16 @@ impl<C> Layout<C, f32> for Text
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, context: &mut C) {
-        let Some(extent) = context.load(self.id) else {
-            warn!(
-                "Text widget with id {} isn't measured! The widget may be incorrectly drawn.",
-                *self.id
-            );
-            return;
-        };
-
+    fn on_layout(
+        &mut self,
+        context: &mut C,
+        _local_coord: Point<f32>,
+        provided_extent: Extent<f32>,
+    ) {
         let inner_spacing = self.margin.unwrap_or_default();
         let inner_extent = Extent::new(
-            extent.width - inner_spacing.horizontal() as f32,
-            extent.height - inner_spacing.vertical() as f32,
+            provided_extent.width - inner_spacing.horizontal() as f32,
+            provided_extent.height - inner_spacing.vertical() as f32,
         );
 
         let text_style = self.base_text_style();

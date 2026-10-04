@@ -405,7 +405,6 @@ impl Backend {
             )?;
 
             window_manager.handle_close_notifications()?;
-            window_manager.handle_actions()?;
             window_manager.remove_closed(config.clone())?;
         }
 

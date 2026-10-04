@@ -9,16 +9,11 @@ use syn::{
     Token,
 };
 
-use crate::{
-    general::{DeriveInfo, Structure},
-    propagate_err,
-};
+use crate::{general::Structure, propagate_err};
 
 pub(super) fn make_widget(item: TokenStream, attributes: TokenStream) -> TokenStream {
     let macro_attributes = parse_macro_input!(attributes as WidgetAttributes);
     let mut structure = parse_macro_input!(item as Structure);
-
-    let widget_style_name = propagate_err!(take_make_widget_style(&mut structure));
 
     let callbacks = propagate_err!(take_callbacks(&mut structure));
     let field_attributes = propagate_err!(take_field_attrs(&mut structure));
@@ -30,30 +25,6 @@ pub(super) fn make_widget(item: TokenStream, attributes: TokenStream) -> TokenSt
     impl_widget_information(&structure, &macro_attributes).to_tokens(&mut result);
     impl_widget(&structure, &macro_attributes).to_tokens(&mut result);
     impl_widget_diff(&structure, &macro_attributes, &field_attributes).to_tokens(&mut result);
-
-    if let Some(make_style_widget_info) = widget_style_name {
-        let (style_attributes, structure) = convert_to_widget_style(
-            &structure,
-            &macro_attributes,
-            &field_attributes,
-            make_style_widget_info,
-        );
-
-        widget_style_structure(&structure, &style_attributes).to_tokens(&mut result);
-        impls_configure(&structure, &style_attributes).to_tokens(&mut result);
-    }
-
-    result.into()
-}
-
-pub(super) fn make_widget_style(item: TokenStream, attributes: TokenStream) -> TokenStream {
-    let macro_attributes = parse_macro_input!(attributes as StyleAttributes);
-    let structure = parse_macro_input!(item as Structure);
-
-    let mut result = proc_macro2::TokenStream::new();
-
-    widget_style_structure(&structure, &macro_attributes).to_tokens(&mut result);
-    impls_configure(&structure, &macro_attributes).to_tokens(&mut result);
 
     result.into()
 }
@@ -127,9 +98,11 @@ fn widget_structure(
         let minimal_fields = quote! {
             #[builder(skip)]
             id: crate::types::WidgetId,
+
             key: std::option::Option<crate::types::identifiers::WidgetKey>,
-            #[builder(into, default)]
-            class: crate::types::WidgetClass,
+
+            #[builder(default)]
+            input_behavior: crate::types::InputBehavior,
         };
 
         let standard_fields = quote! {
@@ -211,8 +184,8 @@ fn impl_widget_information(
                 self.key.as_ref()
             }
 
-            fn get_class(&self) -> WidgetClass {
-                self.class.clone()
+            fn input_behavior(&self) -> &crate::types::InputBehavior {
+                &self.input_behavior
             }
         }
     }
@@ -284,11 +257,7 @@ fn impl_widget_diff(
             .to_tokens(&mut checks);
         });
 
-    let minimal_checks = quote! {
-        if self.class != other_widget.class {
-            dirty_flags |= crate::types::dirty_flags::DirtyFlags::NEEDS_REBUILD;
-        }
-    };
+    let minimal_checks = quote! {};
 
     let standard_checks = quote! {
         #minimal_checks
@@ -421,73 +390,6 @@ impl Parse for Callback {
     }
 }
 
-struct MakeStyleWidgetInfo {
-    name: syn::Ident,
-    derive: Option<DeriveInfo>,
-}
-
-impl Parse for MakeStyleWidgetInfo {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let ident = input.parse::<syn::Ident>()?;
-        let mut derive_info = None;
-
-        if !input.is_empty() {
-            let _comma = input.parse::<Token![,]>()?;
-
-            let derive_ident = input.parse::<syn::Ident>()?;
-            if derive_ident != "derive" {
-                return Err(syn::Error::new(
-                    derive_ident.span(),
-                    "Expected derive ident and input.",
-                ));
-            }
-
-            derive_info = Some(DeriveInfo::from_ident_and_input(derive_ident, &input)?);
-        }
-
-        Ok(MakeStyleWidgetInfo {
-            name: ident,
-            derive: derive_info,
-        })
-    }
-}
-
-fn take_make_widget_style(structure: &mut Structure) -> syn::Result<Option<MakeStyleWidgetInfo>> {
-    let mut style_widget_info = None;
-
-    for index in (0..structure.attributes.len()).rev() {
-        match &structure.attributes[index].meta {
-            syn::Meta::Path(path) => {
-                if path.to_token_stream().to_string() == "make_widget_style" {
-                    return Err(syn::Error::new(
-                        path.span(),
-                        "Expected single \"#[make_widget_style(Name)]\" attribute.",
-                    ));
-                }
-            }
-            syn::Meta::List(meta_list) => {
-                if meta_list.path.to_token_stream().to_string() == "make_widget_style" {
-                    style_widget_info = Some(syn::parse2::<MakeStyleWidgetInfo>(
-                        meta_list.tokens.clone(),
-                    )?);
-                    structure.attributes.remove(index);
-                    break;
-                }
-            }
-            syn::Meta::NameValue(meta_name_value) => {
-                if meta_name_value.path.to_token_stream().to_string() == "make_widget_style" {
-                    return Err(syn::Error::new(
-                        meta_name_value.span(),
-                        "Expected single \"#[make_widget_style(Name)]\" attribute.",
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(style_widget_info)
-}
-
 fn take_callbacks(structure: &mut Structure) -> syn::Result<Vec<Callback>> {
     let mut callbacks = vec![];
 
@@ -597,243 +499,4 @@ fn take_field_attrs(
     }
 
     Ok(field_attributes)
-}
-
-struct StyleAttributes {
-    targets: Vec<syn::Ident>,
-    widget_kind: WidgetKind,
-}
-
-impl Parse for StyleAttributes {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let mut targets = None;
-        let mut widget_kind = WidgetKind::default();
-
-        while !input.is_empty() {
-            let ident = input.parse::<syn::Ident>()?;
-
-            match ident.to_string().as_str() {
-                "targets" => {
-                    let content;
-                    syn::parenthesized!(content in input);
-
-                    targets = Some(
-                        syn::punctuated::Punctuated::<syn::Ident, Token![,]>::parse_terminated(
-                            &content,
-                        )?
-                        .into_iter()
-                        .collect::<Vec<_>>(),
-                    );
-                }
-                "kind" => {
-                    let _eq = input.parse::<Token![=]>()?;
-                    widget_kind = WidgetKind::from_ident(input.parse::<syn::Ident>()?)?;
-                }
-                _ => {
-                    return Err(syn::Error::new(
-                        ident.span(),
-                        "Unknown attribute. Available attributes: kind, targets.",
-                    ));
-                }
-            }
-
-            if !input.is_empty() {
-                input.parse::<Token![,]>()?;
-            }
-        }
-
-        let Some(targets) = targets else {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "Missing \"targets\" attribute.",
-            ));
-        };
-
-        Ok(StyleAttributes {
-            targets,
-            widget_kind,
-        })
-    }
-}
-
-fn convert_to_widget_style(
-    structure: &Structure,
-    macro_attributes: &WidgetAttributes,
-    field_attributes: &HashMap<syn::Ident, FieldAttributes>,
-    make_style_widget_info: MakeStyleWidgetInfo,
-) -> (StyleAttributes, Structure) {
-    let mut structure = structure.clone();
-
-    structure.attributes.clear();
-    structure.fields = syn::punctuated::Punctuated::<syn::Field, Token![,]>::from_iter(
-        structure
-            .fields
-            .iter()
-            .filter(|&field| {
-                field_attributes
-                    .get(field.ident.as_ref().expect("Field must be named"))
-                    .is_some_and(|attr| attr.is_style)
-            })
-            .cloned(),
-    );
-
-    let style_attributes = StyleAttributes {
-        targets: vec![structure.name.clone()],
-        widget_kind: macro_attributes.widget_kind.clone(),
-    };
-
-    structure.name = make_style_widget_info.name;
-
-    if let Some(derive_info) = make_style_widget_info.derive {
-        structure.attributes.push(syn::Attribute {
-            pound_token: Token![#](proc_macro2::Span::call_site()),
-            style: syn::AttrStyle::Outer,
-            bracket_token: syn::token::Bracket(derive_info.span()),
-            meta: syn::Meta::List(syn::MetaList {
-                delimiter: syn::MacroDelimiter::Paren(derive_info.paren),
-                path: syn::Path {
-                    leading_colon: None,
-                    segments: syn::punctuated::Punctuated::from_iter([syn::PathSegment {
-                        ident: derive_info.ident,
-                        arguments: syn::PathArguments::None,
-                    }]),
-                },
-                tokens: derive_info.traits.to_token_stream(),
-            }),
-        });
-    }
-
-    (style_attributes, structure)
-}
-
-fn widget_style_structure(
-    structure: &Structure,
-    macro_attributes: &StyleAttributes,
-) -> proc_macro2::TokenStream {
-    let Structure {
-        attributes,
-        visibility,
-        struct_token,
-        name,
-        braces,
-        fields,
-    } = structure;
-
-    let attrs = attributes
-        .iter()
-        .fold(proc_macro2::TokenStream::new(), |mut acc, attr| {
-            attr.to_tokens(&mut acc);
-            acc
-        });
-
-    let mut body = proc_macro2::TokenStream::new();
-    braces.surround(&mut body, |body| {
-        for field in fields {
-            let syn::Field {
-                attrs,
-                vis,
-                ident,
-                colon_token,
-                ty,
-                ..
-            } = field;
-
-            let attrs = attrs.iter().fold(proc_macro2::TokenStream::new(), |mut acc, attr| {
-                attr.to_tokens(&mut acc);
-                acc
-            });
-
-            quote! {
-                #attrs
-                #[builder(with = |v: #ty| crate::types::style::StyleProperty::FromClass(v), default)]
-                #vis #ident #colon_token crate::types::style::StyleProperty<#ty>,
-            }.to_tokens(body);
-        }
-
-
-        let standard_fields = quote! {
-            #[builder(with = |v: crate::types::spacing::Spacing| crate::types::style::StyleProperty::FromClass(v), default)]
-            margin: crate::types::style::StyleProperty<crate::types::spacing::Spacing>,
-        };
-
-        let container_fields = quote! {
-            #standard_fields
-
-            #[builder(with = |v: crate::types::spacing::Spacing| crate::types::style::StyleProperty::FromClass(v), default)]
-            padding: crate::types::style::StyleProperty<crate::types::spacing::Spacing>,
-
-            #[builder(with = |v: crate::types::Color| crate::types::style::StyleProperty::FromClass(v), default)]
-            background_color: crate::types::style::StyleProperty<crate::types::Color>,
-
-            #[builder(with = |v: crate::types::border::Border| crate::types::style::StyleProperty::FromClass(v), default)]
-            border: crate::types::style::StyleProperty<crate::types::border::Border>,
-
-            #[builder(with = |v: crate::types::alignment::Alignment| crate::types::style::StyleProperty::FromClass(v), default)]
-            alignment: crate::types::style::StyleProperty<crate::types::alignment::Alignment>,
-        };
-
-        let additional_fields = match macro_attributes.widget_kind {
-            WidgetKind::Minimal => proc_macro2::TokenStream::new(),
-            WidgetKind::Standard => standard_fields,
-            WidgetKind::Container => container_fields,
-        };
-
-        additional_fields.to_tokens(body);
-    });
-
-    quote! {
-        #attrs
-        #visibility #struct_token #name #body
-    }
-}
-
-fn impls_configure(
-    structure: &Structure,
-    macro_attributes: &StyleAttributes,
-) -> proc_macro2::TokenStream {
-    let Structure { name, fields, .. } = structure;
-
-    let mut body = fields
-        .iter()
-        .fold(proc_macro2::TokenStream::new(), |mut acc, field| {
-            let field_ident = field.ident.as_ref().expect("Field must be named");
-            quote! {
-                self.#field_ident.override_if_higher(config.#field_ident);
-            }
-            .to_tokens(&mut acc);
-            acc
-        });
-
-    let standard_fields = quote! {
-        self.margin.override_if_higher(config.margin);
-    };
-
-    let container_fields = quote! {
-        #standard_fields
-        self.padding.override_if_higher(config.padding);
-        self.background_color.override_if_higher(config.background_color);
-        self.border.override_if_higher(config.border);
-        self.alignment.override_if_higher(config.alignment);
-    };
-
-    match macro_attributes.widget_kind {
-        WidgetKind::Minimal => (),
-        WidgetKind::Standard => standard_fields.to_tokens(&mut body),
-        WidgetKind::Container => container_fields.to_tokens(&mut body),
-    }
-
-    let mut impls = proc_macro2::TokenStream::new();
-
-    for target in &macro_attributes.targets {
-        quote! {
-            impl crate::types::style::Configure<#name> for #target {
-                fn configure(&mut self, config: #name) {
-                    #body
-                }
-            }
-        }
-        .to_tokens(&mut impls);
-    }
-
-    impls
 }

@@ -5,7 +5,8 @@ use macros::widget;
 use crate::{
     context::{LoadExtent, ManageIntrinsic},
     decorator::{
-        content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, MeasureDecorator,
+        content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, LayoutDecorator,
+        MeasureDecorator,
     },
     events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
     stage::{
@@ -20,10 +21,9 @@ use crate::{
         alignment::Position,
         direction::Direction,
         extent::{Extent, FlexExtent},
-        identifiers::{WidgetClass, WidgetId, WidgetKey},
+        identifiers::{WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
-        style::{Configure, WidgetStyle},
         Point,
     },
     widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
@@ -43,7 +43,6 @@ use crate::{
 /// full CSS flexbox algorithm, but provides enough flexibility to build
 /// common layouts without duplicating positioning logic.
 #[widget(kind = container)]
-#[make_widget_style(FlexBoxStyle, derive(bon::Builder, Debug, Default, Clone))]
 #[derive(bon::Builder)]
 pub struct FlexBox {
     #[style]
@@ -69,69 +68,75 @@ impl FlexBox {
         self.direction.unwrap_or_default()
     }
 
-    /// Calculates the total space required by all children along a specific axis.
+    /// Calculates the total space required by all children with spacing along a specific axis.
     ///
-    /// - **Horizontal Direction:** the sum of all children's widths.
+    /// - **Horizontal Direction:** the sum of all children's widths and spacings between them.
     /// - **Vertical Direction:** the width of the widest child.
-    pub(crate) fn children_width<C>(&self, context: &C) -> f32
+    pub(crate) fn content_width<C>(&self, context: &C) -> f32
     where
         C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
     {
-        let widths = context
-            .childrens_identifiers_of(self.id)
-            .into_iter()
-            .map(|child_widget_id| context.load(child_widget_id).unwrap_or_default().width);
+        let children = context.childrens_identifiers_of(self.id);
+        let widths = children
+            .iter()
+            .map(|child_widget_id| context.load(*child_widget_id).unwrap_or_default().width);
 
         match self.direction() {
-            Direction::Horizontal => widths.sum(),
+            Direction::Horizontal => {
+                widths.sum::<f32>()
+                    + (children.len().saturating_sub(1) * self.spacing.unwrap_or_default()) as f32
+            }
             Direction::Vertical => widths.reduce(|a, b| a.max(b)).unwrap_or_default(),
         }
     }
 
-    /// Calculates the total space required by all children along a specific axis.
+    /// Calculates the total space required by all children with spacing along a specific axis.
     ///
     /// - **Horizontal Direction:** the height of the tallest child.
-    /// - **Vertical Direction:** the sum of all children's heights.
-    pub(crate) fn children_height<C>(&self, context: &C) -> f32
+    /// - **Vertical Direction:** the sum of all children's heights and spacing between them.
+    pub(crate) fn content_height<C>(&self, context: &C) -> f32
     where
         C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
     {
-        let heights = context
-            .childrens_identifiers_of(self.id)
-            .into_iter()
-            .map(|child_widget_id| context.load(child_widget_id).unwrap_or_default().height);
+        let children = context.childrens_identifiers_of(self.id);
+        let heights = children
+            .iter()
+            .map(|child_widget_id| context.load(*child_widget_id).unwrap_or_default().height);
 
         match self.direction() {
             Direction::Horizontal => heights.reduce(|a, b| a.max(b)).unwrap_or_default(),
-            Direction::Vertical => heights.sum(),
+            Direction::Vertical => {
+                heights.sum::<f32>()
+                    + (children.len().saturating_sub(1) * self.spacing.unwrap_or_default()) as f32
+            }
         }
     }
 
-    /// Returns the total size occupied by children along the primary axis.
+    /// Returns the total size occupied by children with spacing along the primary axis.
     ///
     /// The **Main Extent** follows the container's `direction` (e.g., total
     /// width in a row).
-    fn main_children_extent<C>(&self, context: &C) -> f32
+    fn main_content_extent<C>(&self, context: &C) -> f32
     where
         C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
     {
         match self.direction() {
-            Direction::Horizontal => self.children_width(context),
-            Direction::Vertical => self.children_height(context),
+            Direction::Horizontal => self.content_width(context),
+            Direction::Vertical => self.content_height(context),
         }
     }
 
-    /// Returns the total size occupied by children along the perpendicular axis.
+    /// Returns the total size occupied by children with spacing along the perpendicular axis.
     ///
     /// **Cross Extent** measures the "thickness" of the layout (e.g., the height of a row).
     #[allow(unused)]
-    fn cross_children_extent<C>(&self, context: &C) -> f32
+    fn cross_content_extent<C>(&self, context: &C) -> f32
     where
         C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
     {
         match self.direction() {
-            Direction::Horizontal => self.children_height(context),
-            Direction::Vertical => self.children_width(context),
+            Direction::Horizontal => self.content_height(context),
+            Direction::Vertical => self.content_width(context),
         }
     }
 
@@ -163,21 +168,20 @@ impl FlexBox {
         }
     }
 
-    fn iterate_over_children<F, C>(
+    fn compute_children_offsets<C>(
         &self,
         context: &C,
         provided_extent: Extent<f32>,
-        callback: &mut F,
-    ) where
+    ) -> Vec<((usize, WidgetId), Offset<f32>)>
+    where
         C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
-        F: FnMut((usize, &WidgetId), Offset<f32>) -> IteratorProcess,
     {
         let mut plane = FBPlane::new(Offset::<f32>::default(), provided_extent, self.direction());
 
-        let main_children_extent = self.main_children_extent(context);
+        let main_content_extent = self.main_content_extent(context);
         plane.main.start = self
             .main_axis_alignment()
-            .get_start(plane.main.extent, main_children_extent);
+            .get_start(plane.main.extent, main_content_extent);
 
         let childrens_indices = context.childrens_identifiers_of(self.id);
 
@@ -191,7 +195,7 @@ impl FlexBox {
                 } else {
                     // INFO: there's no needs for self.spacing, because during measurement the code
                     // guarantess that there is available space equal or greater than self.spacing.
-                    (plane.main.extent - main_children_extent)
+                    (plane.main.extent - main_content_extent)
                         / childrens_indices.len().saturating_sub(1) as f32
                 }
             }
@@ -200,32 +204,30 @@ impl FlexBox {
         let cross_axis_start = plane.cross.start;
         let cross_axis_alignment = self.cross_axis_alignment();
 
-        for (index, child_widget_id) in childrens_indices.iter().enumerate() {
-            let child_extent = <C as LoadExtent<f32, WidgetId>>::load(context, *child_widget_id)
-                .unwrap_or_default()
-                .to_flex(&self.direction());
+        childrens_indices
+            .into_iter()
+            .enumerate()
+            .map(|(index, child_widget_id)| {
+                let child_extent = <C as LoadExtent<f32, WidgetId>>::load(context, child_widget_id)
+                    .unwrap_or_default()
+                    .to_flex(&self.direction());
 
-            plane.cross.start = cross_axis_start
-                + cross_axis_alignment.get_start(plane.cross.extent, child_extent.cross);
+                plane.cross.start = cross_axis_start
+                    + cross_axis_alignment.get_start(plane.cross.extent, child_extent.cross);
 
-            match callback((index, child_widget_id), plane.as_offset()) {
-                IteratorProcess::Continue => (),
-                IteratorProcess::Break => break,
-            }
+                let offset = plane.as_offset();
 
-            plane.cut_front(child_extent.main + incrementor);
-        }
+                plane.cut_front(child_extent.main + incrementor);
+
+                ((index, child_widget_id), offset)
+            })
+            .collect::<Vec<_>>()
     }
-}
-
-enum IteratorProcess {
-    Continue,
-    Break,
 }
 
 impl WidgetGetType for FlexBox {
     fn get_type(&self) -> &'static str {
-        "flex_container"
+        "flexbox"
     }
 }
 
@@ -242,11 +244,7 @@ impl<C> Init<C> for FlexBox
 where
     C: InitContext,
 {
-    fn on_init(&mut self, context: &mut C) {
-        if let Some(WidgetStyle::FlexBox(flexbox_style)) = context.get_style(&self.class) {
-            self.configure(flexbox_style.clone());
-        }
-    }
+    fn on_init(&mut self, _context: &mut C) {}
 }
 
 impl<C> Deinit<C> for FlexBox where C: DeinitContext {}
@@ -255,12 +253,6 @@ impl<C> Invalidate<C> for FlexBox
 where
     C: InvalidateContext,
 {
-    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
-        if let WidgetStyle::FlexBox(flexbox_style) = style {
-            self.configure(flexbox_style);
-        }
-    }
-
     fn on_rebuild(&mut self, _context: &mut C) -> RebuildStatus {
         RebuildStatus::NothingChanged
     }
@@ -472,7 +464,24 @@ impl<C> Layout<C, f32> for FlexBox
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, _context: &mut C) {}
+    fn on_layout(
+        &mut self,
+        context: &mut C,
+        local_coord: Point<f32>,
+        provided_extent: Extent<f32>,
+    ) {
+        Content::layout_fn(|local_coord: Point<f32>, provided_extent: Extent<f32>| {
+            for ((_index, child_widget_id), offset) in
+                self.compute_children_offsets(context, provided_extent)
+            {
+                context.layout_widget(&child_widget_id, local_coord + offset.into());
+            }
+        })
+        .spacing(self.padding.unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .spacing(self.margin.unwrap_or_default())
+        .layout(local_coord, provided_extent);
+    }
 }
 
 impl<C> Draw<C, f32> for FlexBox
@@ -488,15 +497,11 @@ where
     ) {
         Content::draw_fn(
             |offset: &Offset<f32>, provided_extent: Extent<f32>, drawer: &mut Drawer| {
-                self.iterate_over_children(
-                    context,
-                    provided_extent,
-                    &mut |(_, child_widget_id), local_offset| {
-                        context.draw_widget(child_widget_id, &(local_offset + *offset), drawer);
-
-                        IteratorProcess::Continue
-                    },
-                );
+                for ((_index, child_widget_id), local_offset) in
+                    self.compute_children_offsets(context, provided_extent)
+                {
+                    context.draw_widget(&child_widget_id, &(local_offset + *offset), drawer);
+                }
 
                 if context.get_debug_options().show_layout_bounds {
                     let plane =
@@ -540,22 +545,25 @@ where
         Content::hit_test_fn(
             |local_coords: Point<f32>, provided_extent: Extent<f32>, router: &mut EventRouter| {
                 let mut hit_result = HitTestResult::Missed;
-                self.iterate_over_children(
-                    context,
-                    provided_extent,
-                    &mut |(index, child_widget_id), offset| {
-                        hit_result = context.hit_test_widget(child_widget_id, local_coords - offset.into(), router).expect("A child widget must exist and be able to hit test in a FlexContainer!");
 
-                        match &hit_result {
-                            HitTestResult::Missed => IteratorProcess::Continue,
-                            HitTestResult::Hit => {
-                                router.set_next_index(self.id, index);
-                                IteratorProcess::Break
-                            }
-                            HitTestResult::Failed => IteratorProcess::Break,
+                for ((index, child_widget_id), offset) in
+                    self.compute_children_offsets(context, provided_extent)
+                {
+                    hit_result = context
+                        .hit_test_widget(&child_widget_id, local_coords - offset.into(), router)
+                        .expect(
+                            "A child widget must exist and be able to hit test in a FlexContainer!",
+                        );
+
+                    match &hit_result {
+                        HitTestResult::Missed => (),
+                        HitTestResult::Hit => {
+                            router.set_next_index(self.id, index);
+                            break;
                         }
-                    },
-                );
+                        HitTestResult::Failed => break,
+                    }
+                }
 
                 hit_result
             },

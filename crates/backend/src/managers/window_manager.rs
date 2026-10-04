@@ -256,17 +256,6 @@ impl WindowManager {
         self.signals.pop()
     }
 
-    /// Handles user interaction with the window, if any has occurred.
-    pub(crate) fn handle_actions(&mut self) -> Result<(), Error> {
-        //TODO: make widgets more interactable for better handling user events
-
-        if let Some(window) = self.window.as_mut() {
-            window.handle_user_actions();
-        }
-
-        Ok(())
-    }
-
     /// Resets the timeout for all notifications.
     ///
     /// This is useful when the configuration is updated with new values or other important

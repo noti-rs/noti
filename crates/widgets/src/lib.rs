@@ -10,17 +10,16 @@ pub mod widget;
 
 use crate::{
     context::{
-        Context, CreateState, DebugOptions, GetState, LoadExtent, ManageDirtyFlags, SetState,
-        SetStyleClass, Tick,
+        Context, CreateState, DebugOptions, GetState, LoadExtent, ManageDirtyFlags, SetState, Tick,
     },
     events::{EventManager, RawEvent},
     stage::{draw::DrawContext, measure::Constraints, rebuild::RebuildTree},
-    types::{dirty_flags::DirtyFlags, Extent, WidgetId, WidgetStyle},
+    types::{dirty_flags::DirtyFlags, Extent, Point, WidgetId},
 };
 
 pub struct WidgetSystem {
     event_manager: EventManager,
-    context: Context,
+    pub context: Context,
     cached_constraints: Constraints<Extent<f32>>,
 }
 
@@ -100,6 +99,10 @@ impl WidgetSystem {
                 .dispatch_event(&mut self.context, event, &root_id);
         }
     }
+
+    pub fn collect_input_regions(&self) -> Vec<(Point<f32>, Extent<f32>)> {
+        self.context.collect_input_regions()
+    }
 }
 
 impl<T> CreateState<T> for WidgetSystem {
@@ -125,15 +128,6 @@ impl GetState for WidgetSystem {
 impl SetState for WidgetSystem {
     fn set<T: 'static>(&mut self, mutable_state: state::MutableState<T>, value: T) {
         self.context.set(mutable_state, value);
-    }
-}
-
-impl SetStyleClass for WidgetSystem {
-    fn set_style_class<Class>(&mut self, class: Class, style: WidgetStyle)
-    where
-        Class: Into<types::WidgetClass>,
-    {
-        self.context.set_style_class(class, style);
     }
 }
 

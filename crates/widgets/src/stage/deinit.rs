@@ -6,11 +6,8 @@
 //! [Deinit::on_deinit] method to free this data.
 
 use crate::{
-    context::{
-        ClearWidgetResources, ManageAnimationRegistry, StateSubscription, StyleSubscription,
-        UnregisterKey,
-    },
-    types::{identifiers::WidgetKey, WidgetClass, WidgetId},
+    context::{ClearWidgetResources, ManageAnimationRegistry, StateSubscription, UnregisterKey},
+    types::{identifiers::WidgetKey, WidgetId},
     widget::{WidgetBase, WidgetInformationContext},
 };
 
@@ -18,7 +15,6 @@ pub trait DeinitContext:
     WidgetInformationContext
     + UnregisterKey<WidgetKey>
     + StateSubscription<WidgetId>
-    + StyleSubscription<WidgetClass, WidgetId>
     + ManageAnimationRegistry<WidgetId>
     + ClearWidgetResources<WidgetId>
 {
@@ -28,7 +24,6 @@ impl<C> DeinitContext for C where
     C: WidgetInformationContext
         + UnregisterKey<WidgetKey>
         + StateSubscription<WidgetId>
-        + StyleSubscription<WidgetClass, WidgetId>
         + ManageAnimationRegistry<WidgetId>
         + ClearWidgetResources<WidgetId>
 {
@@ -51,14 +46,6 @@ where
 
         if let Some(key) = self.get_key() {
             context.unregister_key(key.clone());
-        }
-
-        if !self.get_class().is_empty() {
-            <C as StyleSubscription<WidgetClass, WidgetId>>::unsubscribe(
-                context,
-                self.get_id(),
-                self.get_class(),
-            );
         }
 
         context.clear_widget_resources(self.get_id());

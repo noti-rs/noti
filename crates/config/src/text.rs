@@ -54,7 +54,7 @@ impl Default for Font {
     }
 }
 
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Deserialize, Default, Clone, Copy)]
 pub enum TextStyle {
     #[default]
     #[serde(rename = "regular")]
@@ -78,7 +78,7 @@ impl From<TextStyle> for widgets::widget::FontStyle {
     }
 }
 
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Deserialize, Default, Clone, Copy)]
 pub enum TextAlignment {
     #[serde(rename = "center")]
     Center,

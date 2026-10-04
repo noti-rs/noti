@@ -1,20 +1,9 @@
-use std::collections::HashSet;
-
-use crate::{
-    types::WidgetId,
-    widget::{
-        animated_visibility::AnimatedVisibilityStyle, flexbox::FlexBoxStyle, image::ImageStyle,
-        r#box::BoxStyle, text::TextStyle,
-    },
-};
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum StyleProperty<T>
 where
     T: PartialEq,
 {
     Explicit(T),
-    FromClass(T),
     #[default]
     Default,
 }
@@ -26,7 +15,6 @@ where
     pub(crate) fn as_ref(&self) -> StyleProperty<&T> {
         match self {
             StyleProperty::Explicit(val) => StyleProperty::Explicit(val),
-            StyleProperty::FromClass(val) => StyleProperty::FromClass(val),
             StyleProperty::Default => StyleProperty::Default,
         }
     }
@@ -38,32 +26,20 @@ where
     {
         match self {
             StyleProperty::Explicit(val) => StyleProperty::Explicit(mapper(val)),
-            StyleProperty::FromClass(val) => StyleProperty::FromClass(mapper(val)),
             StyleProperty::Default => StyleProperty::Default,
-        }
-    }
-
-    pub(crate) fn override_if_higher(&mut self, other: Self) {
-        match self {
-            StyleProperty::Explicit(_) => (),
-            StyleProperty::FromClass(_) => match &other {
-                StyleProperty::Explicit(_) | StyleProperty::FromClass(_) => *self = other,
-                StyleProperty::Default => (),
-            },
-            StyleProperty::Default => *self = other,
         }
     }
 
     pub(crate) fn expect(self, msg: &str) -> T {
         match self {
-            StyleProperty::Explicit(v) | StyleProperty::FromClass(v) => v,
+            StyleProperty::Explicit(v) => v,
             StyleProperty::Default => panic!("{}", msg),
         }
     }
 
     pub(crate) fn unwrap_or(self, other: T) -> T {
         match self {
-            StyleProperty::Explicit(val) | StyleProperty::FromClass(val) => val,
+            StyleProperty::Explicit(val) => val,
             StyleProperty::Default => other,
         }
     }
@@ -73,14 +49,14 @@ where
         T: Default,
     {
         match self {
-            StyleProperty::Explicit(val) | StyleProperty::FromClass(val) => val,
+            StyleProperty::Explicit(val) => val,
             StyleProperty::Default => Default::default(),
         }
     }
 
     pub(crate) fn as_option(&self) -> Option<&T> {
         match self {
-            StyleProperty::Explicit(val) | StyleProperty::FromClass(val) => Some(val),
+            StyleProperty::Explicit(val) => Some(val),
             StyleProperty::Default => None,
         }
     }
@@ -89,89 +65,4 @@ where
     pub(crate) fn is_default(&self) -> bool {
         matches!(self, StyleProperty::Default)
     }
-}
-
-#[derive(Clone)]
-pub(crate) struct StyleInfo {
-    /// The secondary visual or layout settings (e.g., alignment or colors).
-    style: WidgetStyle,
-    subscribers: HashSet<WidgetId>,
-}
-
-impl StyleInfo {
-    pub(crate) fn new(style: WidgetStyle) -> Self {
-        StyleInfo {
-            style,
-            subscribers: HashSet::new(),
-        }
-    }
-
-    pub(crate) fn set_style(&mut self, style: WidgetStyle) {
-        self.style = style
-    }
-
-    pub(crate) fn get_style(&self) -> &WidgetStyle {
-        &self.style
-    }
-
-    pub(crate) fn add_subscriber<Id>(&mut self, subscriber: Id)
-    where
-        Id: Into<WidgetId>,
-    {
-        self.subscribers.insert(subscriber.into());
-    }
-
-    pub(crate) fn remove_subscriber<Id>(&mut self, subscriber: Id)
-    where
-        Id: Into<WidgetId>,
-    {
-        self.subscribers.remove(&subscriber.into());
-    }
-
-    pub(crate) fn subscribers(&self) -> impl Iterator<Item = &WidgetId> {
-        self.subscribers.iter()
-    }
-}
-
-/// A collection of specific configuration structs for specialized widgets.
-///
-/// These structs (like `TextConfiguration`) typically mirror the fields
-/// of their corresponding widget. They allow the caller to override
-/// or set properties externally through the `CompileCtx`.
-#[derive(Debug, Clone)]
-pub enum WidgetStyle {
-    Text(TextStyle),
-    Image(ImageStyle),
-    Box(BoxStyle),
-    FlexBox(FlexBoxStyle),
-    AnimatedVisibility(AnimatedVisibilityStyle),
-    Unknown,
-}
-
-/// Internal trait for updating a widget's state via a configuration struct.
-///
-/// This trait is typically implemented automatically by macros. It
-/// allows a widget to ingest a configuration (`C`) and apply its
-/// values to the widget's own fields, usually acting as a "patch"
-/// that fills in missing or default values.
-pub(crate) trait Configure<C> {
-    fn configure(&mut self, config: C);
-}
-
-impl From<WidgetStyle> for StyleInfo {
-    fn from(value: WidgetStyle) -> Self {
-        StyleInfo {
-            style: value,
-            subscribers: HashSet::new(),
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! make_style {
-    ($name:ident { $($field_name:ident: $val:expr),* $(,)? }) => {
-            $name::builder()
-                $(.$field_name($val))*
-                .build()
-    };
 }

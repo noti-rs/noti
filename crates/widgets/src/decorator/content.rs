@@ -1,7 +1,9 @@
 use std::marker::PhantomData;
 
 use crate::{
-    decorator::{DecoratorType, DrawDecorator, EventHitTestDecorator, MeasureDecorator},
+    decorator::{
+        DecoratorType, DrawDecorator, EventHitTestDecorator, LayoutDecorator, MeasureDecorator,
+    },
     events::{EventRouter, HitTestResult},
     stage::{
         draw::Drawer,
@@ -17,6 +19,7 @@ pub(crate) struct Content<F, FnT> {
 
 pub(crate) struct IntrinsicFn;
 pub(crate) struct MeasureFn;
+pub(crate) struct LayoutFn;
 pub(crate) struct DrawFn;
 pub(crate) struct HitTestFn;
 
@@ -37,6 +40,19 @@ impl<F> Content<F, MeasureFn> {
     pub(crate) fn measure_fn<T>(f: F) -> Self
     where
         F: FnMut(Constraints<Extent<T>>) -> Extent<T>,
+        T: DecoratorType,
+    {
+        Self {
+            function: f,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<F> Content<F, LayoutFn> {
+    pub(crate) fn layout_fn<T>(f: F) -> Self
+    where
+        F: FnMut(Point<T>, Extent<T>),
         T: DecoratorType,
     {
         Self {
@@ -81,8 +97,17 @@ where
         (self.function)()
     }
 
-    fn measure(&mut self, _constraints: Constraints<Extent<T>>) -> Extent<T> {
-        Extent::default()
+    fn measure(&mut self, constraints: Constraints<Extent<T>>) -> Extent<T> {
+        Extent::default().clamp_with(constraints.min, constraints.max)
+    }
+}
+
+impl<T, F> LayoutDecorator<T> for Content<F, IntrinsicFn>
+where
+    T: DecoratorType,
+{
+    fn layout(&mut self, _local_coord: Point<T>, _provided_extent: Extent<T>) {
+        // No op, just allow to implement trait
     }
 }
 
@@ -125,6 +150,15 @@ where
     }
 }
 
+impl<T, F> LayoutDecorator<T> for Content<F, MeasureFn>
+where
+    T: DecoratorType,
+{
+    fn layout(&mut self, _local_coord: Point<T>, _provided_extent: Extent<T>) {
+        // No op, just allow to implement trait
+    }
+}
+
 impl<T, F> DrawDecorator<T> for Content<F, MeasureFn>
 where
     T: DecoratorType,
@@ -150,6 +184,54 @@ where
     }
 }
 
+impl<T, F> MeasureDecorator<T> for Content<F, LayoutFn>
+where
+    T: DecoratorType,
+{
+    fn intrinsic(&mut self) -> Intrinsic<T> {
+        Intrinsic::default()
+    }
+
+    fn measure(&mut self, constraints: Constraints<Extent<T>>) -> Extent<T> {
+        Extent::default().clamp_with(constraints.min, constraints.max)
+    }
+}
+
+impl<T, F> LayoutDecorator<T> for Content<F, LayoutFn>
+where
+    T: DecoratorType,
+    F: FnMut(Point<T>, Extent<T>),
+{
+    fn layout(&mut self, local_coord: Point<T>, provided_extent: Extent<T>) {
+        (self.function)(local_coord, provided_extent)
+    }
+}
+
+impl<T, F> DrawDecorator<T> for Content<F, LayoutFn>
+where
+    T: DecoratorType,
+{
+    fn draw(&self, _offset: &Offset<T>, _provided_extent: Extent<T>, _drawer: &mut Drawer) {
+        // No op, just allow to implement trait
+    }
+}
+
+impl<T, F> EventHitTestDecorator<T> for Content<F, LayoutFn>
+where
+    T: DecoratorType,
+{
+    fn on_hit_test(
+        &self,
+        _widget_id: WidgetId,
+        _local_coords: Point<T>,
+        _provided_extent: Extent<T>,
+        _router: &mut EventRouter,
+    ) -> HitTestResult {
+        // INFO: it's not right function callback to use, therefore it's failure
+        HitTestResult::Failed
+    }
+}
+
 impl<T, F> MeasureDecorator<T> for Content<F, DrawFn>
 where
     T: DecoratorType,
@@ -158,8 +240,17 @@ where
         Intrinsic::default()
     }
 
-    fn measure(&mut self, _constraints: Constraints<Extent<T>>) -> Extent<T> {
-        Extent::default()
+    fn measure(&mut self, constraints: Constraints<Extent<T>>) -> Extent<T> {
+        Extent::default().clamp_with(constraints.min, constraints.max)
+    }
+}
+
+impl<T, F> LayoutDecorator<T> for Content<F, DrawFn>
+where
+    T: DecoratorType,
+{
+    fn layout(&mut self, _local_coord: Point<T>, _provided_extent: Extent<T>) {
+        // No op, just allow to implement trait
     }
 }
 
@@ -197,8 +288,17 @@ where
         Intrinsic::default()
     }
 
-    fn measure(&mut self, _constraints: Constraints<Extent<T>>) -> Extent<T> {
-        Extent::default()
+    fn measure(&mut self, constraints: Constraints<Extent<T>>) -> Extent<T> {
+        Extent::default().clamp_with(constraints.min, constraints.max)
+    }
+}
+
+impl<T, F> LayoutDecorator<T> for Content<F, HitTestFn>
+where
+    T: DecoratorType,
+{
+    fn layout(&mut self, _local_coord: Point<T>, _provided_extent: Extent<T>) {
+        // No op, just allow to implement trait
     }
 }
 

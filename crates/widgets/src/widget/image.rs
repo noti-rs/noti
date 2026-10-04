@@ -25,10 +25,9 @@ use crate::{
     state::State,
     types::{
         extent::Extent,
-        identifiers::{WidgetClass, WidgetId, WidgetKey},
+        identifiers::{WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
-        style::{Configure, WidgetStyle},
         Border, Point,
     },
     widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
@@ -52,7 +51,6 @@ const DEFAULT_ICON_THEME: &str = "hicolor";
 /// - Getting the picture ready to be drawn (like unpacking it and making it the right size).
 /// - Telling the rest of the layout how much space it needs so everything stays organized.
 #[widget]
-#[make_widget_style(ImageStyle, derive(bon::Builder, Debug, Clone))]
 #[derive(bon::Builder, Default)]
 pub struct Image {
     #[builder(into)]
@@ -162,10 +160,6 @@ where
     C: InitContext,
 {
     fn on_init(&mut self, context: &mut C) {
-        if let Some(WidgetStyle::Image(image_config)) = context.get_style(&self.class) {
-            self.configure(image_config.clone());
-        }
-
         if let Some(state) = self.state {
             <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
 
@@ -195,12 +189,6 @@ impl<C> Invalidate<C> for Image
 where
     C: InvalidateContext,
 {
-    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
-        if let WidgetStyle::Image(image_style) = style {
-            self.configure(image_style);
-        }
-    }
-
     fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
         let mut runtime_information: Unique<ImageRuntimeInformation> =
             widget_data_mut(context, self.id)
@@ -270,7 +258,13 @@ impl<C> Layout<C, f32> for Image
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, _context: &mut C) {}
+    fn on_layout(
+        &mut self,
+        _context: &mut C,
+        _local_coord: Point<f32>,
+        _provided_extent: Extent<f32>,
+    ) {
+    }
 }
 
 impl<C> Draw<C, f32> for Image
@@ -524,12 +518,19 @@ impl ImageData {
         let format = match image::guess_format(&data) {
             Ok(format) => format,
             Err(err) => {
+                if image_path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
+                {
+                    return Self::from_svg(image_path);
+                }
+
                 warn!(
                     "Cannot guess the format of image at {image_path}. \
-                    Error: {err}. Maybe it's SVG, trying to parse.",
+                    Error: {err}.",
                     image_path = image_path.display()
                 );
-                return Self::from_svg(image_path);
+                return None;
             }
         };
 

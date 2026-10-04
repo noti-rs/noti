@@ -3,7 +3,8 @@ use macros::widget;
 use crate::{
     context::{LoadExtent, ManageIntrinsic},
     decorator::{
-        content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, MeasureDecorator,
+        content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, LayoutDecorator,
+        MeasureDecorator,
     },
     events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
     stage::{
@@ -16,10 +17,9 @@ use crate::{
     },
     types::{
         extent::Extent,
-        identifiers::{WidgetClass, WidgetId, WidgetKey},
+        identifiers::{WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
-        style::{Configure, WidgetStyle},
         Point,
     },
     widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
@@ -38,7 +38,6 @@ use crate::{
 /// Use this when you need a UI element to stay exactly the same,
 /// like a fixed icon or a status light that should never grow or shrink.
 #[widget(kind = container)]
-#[make_widget_style(BoxStyle, derive(bon::Builder, Debug, Clone))]
 #[derive(bon::Builder, Default)]
 pub struct Box {
     /// A hard-coded, fixed dimension for this axis.
@@ -64,7 +63,7 @@ pub struct Box {
 
 impl WidgetGetType for Box {
     fn get_type(&self) -> &'static str {
-        "container"
+        "box"
     }
 }
 
@@ -81,11 +80,7 @@ impl<C> Init<C> for Box
 where
     C: InitContext,
 {
-    fn on_init(&mut self, context: &mut C) {
-        if let Some(WidgetStyle::Box(container_style)) = context.get_style(&self.class) {
-            self.configure(container_style.clone());
-        }
-    }
+    fn on_init(&mut self, _context: &mut C) {}
 }
 
 impl<C> Deinit<C> for Box where C: DeinitContext {}
@@ -94,12 +89,6 @@ impl<C> Invalidate<C> for Box
 where
     C: InvalidateContext,
 {
-    fn on_style_update(&mut self, _context: &mut C, style: WidgetStyle) {
-        if let WidgetStyle::Box(container_style) = style {
-            self.configure(container_style);
-        }
-    }
-
     fn on_rebuild(&mut self, _context: &mut C) -> RebuildStatus {
         RebuildStatus::NothingChanged
     }
@@ -156,7 +145,25 @@ impl<C> Layout<C, f32> for Box
 where
     C: LayoutContext<f32>,
 {
-    fn layout(&mut self, _context: &mut C) {}
+    fn on_layout(
+        &mut self,
+        context: &mut C,
+        local_coord: Point<f32>,
+        provided_extent: Extent<f32>,
+    ) {
+        Content::layout_fn(|local_coord: Point<f32>, _provided_extent: Extent<f32>| {
+            if let Some(child_widget_id) = context.childrens_identifiers_of(self.id).first() {
+                context.layout_widget(child_widget_id, local_coord);
+            }
+        })
+        .spacing(self.padding.unwrap_or_default())
+        .box_size(
+            self.width.as_option().map(|&width| width as f32),
+            self.height.as_option().map(|&height| height as f32),
+        )
+        .spacing(self.margin.unwrap_or_default())
+        .layout(local_coord, provided_extent);
+    }
 }
 
 impl<C> Draw<C, f32> for Box

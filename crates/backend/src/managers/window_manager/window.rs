@@ -1,8 +1,5 @@
-use super::{
-    banner_stack::{Banner, BannerStack},
-    CachedLayout,
-};
-use crate::{dispatcher::Dispatcher, EglState};
+use super::{banner_stack::BannerStack, CachedLayout};
+use crate::{dispatcher::Dispatcher, managers::window_manager::banner_stack::Banner, EglState};
 use config::{self, Config};
 use dbus::{actions::ClosingReason, notification::Notification};
 use log::{debug, error, trace};
@@ -45,9 +42,13 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
 };
 use widgets::{
-    context::Tick,
+    context::{Context, DebugOptions, Tick, WidgetTreeCreation},
     events::{MouseButton, RawEvent, RawEventKind},
-    types::{extent::Extent, offset::Offset, Point},
+    make_widget,
+    stage::{draw::Drawer, measure::Constraints},
+    types::{extent::Extent, offset::Offset, InputBehavior, Point, Spacing},
+    widget::FlexBox,
+    WidgetSystem,
 };
 
 /// Wraps a [WindowState] and holds an event queue used only for dispatching.
@@ -68,6 +69,7 @@ pub(super) struct Window {
 /// redrawing much easier.
 pub(super) struct WindowState {
     banner_stack: BannerStack<u32>,
+    widget_system: WidgetSystem,
 
     actual_size: Extent<usize>,
     anchor: Anchor,
@@ -79,7 +81,6 @@ pub(super) struct WindowState {
     egl_surface: Option<khronos_egl::Surface>,
     egl_state: EglState,
 
-    font_collection: skia_safe::textlayout::FontCollection,
     gr_context: skia_safe::gpu::DirectContext,
     config: Data<Config, Borrowed>,
     #[allow(unused)]
@@ -87,8 +88,8 @@ pub(super) struct WindowState {
 
     pointer: WlPointer,
     cursor_device: WpCursorShapeDeviceV1,
-    pointer_state: PointerState,
-
+    mouse_position: Point<f32>,
+    // pointer_state: PointerState,
     has_requested_frame: bool,
     last_presented_time_ns: Option<u64>,
     configuration_state: ConfigurationState,
@@ -157,10 +158,13 @@ impl Window {
 
         surface.commit();
 
+        // TODO: create styles for the widget system
+
         let egl_state: &EglState = gpu.as_ref();
         let gr_context: &DirectContext = gpu.as_ref();
         let mut state = WindowState {
             banner_stack: BannerStack::new(),
+            widget_system: WidgetSystem::new(Context::new(font_collection)),
 
             actual_size,
             anchor,
@@ -172,14 +176,13 @@ impl Window {
             egl_surface: None,
             egl_state: egl_state.clone(),
 
-            font_collection,
             gr_context: gr_context.clone(),
             config: config.clone(),
             cached_layouts: cached_layouts.clone(),
 
-            pointer_state: Default::default(),
             cursor_device,
             pointer,
+            mouse_position: Point::default(),
 
             has_requested_frame: false,
             last_presented_time_ns: None,
@@ -280,23 +283,13 @@ impl Window {
     pub(super) fn update_input_regions(&mut self, compositor: &WlCompositor) {
         let region = compositor.create_region(&self.event_queue.handle(), ());
 
-        let mut offset = Offset::new(self.state.margin.left, self.state.margin.top);
-        let gap = self.state.config.general().gap as usize;
-
-        let iterator = |banner: &Banner| {
+        for (local_coord, extent) in self.widget_system.collect_input_regions() {
             region.add(
-                offset.x as i32,
-                offset.y as i32,
-                banner.width() as i32,
-                banner.height() as i32,
+                local_coord.x as i32,
+                local_coord.y as i32,
+                extent.width as i32,
+                extent.height as i32,
             );
-            offset.y += banner.height() + gap;
-        };
-
-        if self.state.config.general().anchor.is_top() {
-            self.state.banner_stack.banners().for_each(iterator)
-        } else {
-            self.state.banner_stack.banners().rev().for_each(iterator)
         }
 
         self.state.surface.set_input_region(Some(&region));
@@ -338,9 +331,16 @@ impl Window {
 impl WindowState {
     /// Applies a new user configuration to an existing `Window` state, updating it with the new values.
     pub(super) fn reconfigure(&mut self, config: Data<Config, Borrowed>) {
+        self.widget_system.update_debug_options(DebugOptions {
+            show_layout_bounds: config.general().debug.show_layout_bounds,
+        });
+
         self.relocate(config.general().offset, &config.general().anchor);
-        self.banner_stack.configure(&config);
+        self.banner_stack
+            .configure(&config, &mut self.widget_system.context);
         self.config = config.clone();
+
+        self.rebuild_widget_tree();
 
         debug!("Window: Reconfigured by updated config");
     }
@@ -362,14 +362,19 @@ impl WindowState {
     pub(super) fn add_banners(&mut self, notifications: Vec<Notification>) {
         self.banner_stack.extend_from(
             notifications.into_iter(),
-            self.font_collection.clone(),
             &self.config,
+            &mut self.widget_system.context,
         );
+        self.rebuild_widget_tree();
     }
 
     pub(super) fn replace_by_indices(&mut self, notifications: &mut VecDeque<Notification>) {
-        self.banner_stack
-            .replace_by_keys(notifications, &self.config);
+        self.banner_stack.replace_by_keys(
+            notifications,
+            &self.config,
+            &mut self.widget_system.context,
+        );
+        self.rebuild_widget_tree();
     }
 
     pub(super) fn close_banners_by_id(&mut self, notification_indices: &[u32]) {
@@ -378,59 +383,45 @@ impl WindowState {
                 banner.close(ClosingReason::CallCloseNotification)
             }
         }
+        self.rebuild_widget_tree();
     }
 
     pub(super) fn remove_closed_banners(&mut self) -> Vec<(Notification, ClosingReason)> {
-        self.banner_stack.remove_closed()
+        let closed_banners = self.banner_stack.remove_closed(&self.widget_system.context);
+        self.rebuild_widget_tree();
+
+        closed_banners
     }
 
     pub(super) fn reset_timeouts(&mut self) {
         self.banner_stack
             .banners_mut()
-            .for_each(Banner::reset_timeout);
+            .for_each(|banner| banner.reset_timeout(&mut self.widget_system.context));
     }
 
-    pub(super) fn handle_user_actions(&mut self) {
-        if !self.pointer_state.entered && self.pointer_state.events.is_empty() {
-            return;
-        }
+    fn rebuild_widget_tree(&mut self) {
+        let context = &mut self.widget_system.context;
+        let flexbox = make_widget!(context <== FlexBox(
+            direction: widgets::types::Direction::Vertical,
+            input_behavior: InputBehavior::PassesToChildren,
+            margin: self.margin.into(),
+        ));
 
-        let mut banners = if self.config.general().anchor.is_top() {
-            self.banner_stack.banners_mut().collect::<Vec<_>>()
-        } else {
-            self.banner_stack.banners_mut().rev().collect::<Vec<_>>()
+        let iterator = |banner: &Banner| {
+            let banner_widget_subtree = banner.build_widget_tree(context, &self.config);
+            context.append_child(flexbox, banner_widget_subtree);
         };
 
-        while let Some(event) = self.pointer_state.events.pop_front() {
-            let mut offset = Offset::new(self.margin.left as f64, self.margin.top as f64);
-            let gap = self.config.general().gap as f64;
-
-            for banner in &mut banners {
-                let banner_height = banner.height() as f64;
-
-                let bottom = offset.y + banner_height;
-                let right = offset.x + banner.width() as f64;
-
-                if (offset.y..bottom).contains(&event.y) {
-                    if !(offset.x..right).contains(&event.x) {
-                        break;
-                    }
-
-                    let event = RawEvent {
-                        kind: event.kind.clone().into(),
-                        local_coord: Point {
-                            x: (event.x - offset.x) as f32,
-                            y: (event.y - offset.y) as f32,
-                        },
-                    };
-
-                    banner.dispatch_event(event);
-                    break;
-                } else {
-                    offset.y += banner_height + gap;
-                }
-            }
+        if self.config.general().anchor.is_top() {
+            self.banner_stack.banners().for_each(iterator);
+        } else {
+            self.banner_stack.banners().rev().for_each(iterator);
         }
+
+        context.set_pending_root(flexbox);
+        self.widget_system
+            .set_constraints(Constraints::new_soft(Extent::new_square(f32::MAX)));
+        self.widget_system.update();
     }
 
     fn draw_surface(&mut self) {
@@ -439,30 +430,19 @@ impl WindowState {
         self.use_current_egl_surface()
             .expect("The EGL surface must be available to make current and use it");
 
-        // TODO: correctly resize for specific animation
-        let gap = self.config.general().gap as usize;
-        let logical_size = Extent::new(
-            self.banner_stack.width(),
-            self.banner_stack.total_height_with_gap(gap),
+        let new_size = Extent::new(
+            self.widget_system.width() as usize,
+            self.widget_system.height() as usize,
         );
-        self.resize(logical_size);
+        self.resize(new_size);
 
         let mut sk_surface = self
             .create_drawing_surface()
             .expect("The skia's surface must be correct and created without issues");
         sk_surface.canvas().clear(Color::from_argb(0, 0, 0, 0));
 
-        let mut offset = Offset::new(self.margin.left, self.margin.top);
-        let writer = |banner: &Banner| {
-            banner.draw(&offset.into(), &mut sk_surface);
-            offset.y += banner.height() + gap;
-        };
-
-        if self.config.general().anchor.is_top() {
-            self.banner_stack.banners().for_each(writer)
-        } else {
-            self.banner_stack.banners().rev().for_each(writer)
-        }
+        let mut drawer = Drawer::use_surface(sk_surface.clone());
+        self.widget_system.draw(&Offset::default(), &mut drawer);
 
         self.gr_context
             .flush_and_submit_surface(&mut sk_surface, skia_safe::gpu::SyncCpu::No);
@@ -530,7 +510,7 @@ impl WindowState {
             // avoid this need to set dummy size. It's always last frames before disappearing.
             self.actual_size = Extent::new(1, 1);
         } else {
-            self.actual_size = self.margin.apply_to_size(logical_size);
+            self.actual_size = logical_size;
         }
 
         let Extent { width, height } = self.actual_size;
@@ -605,6 +585,7 @@ impl Dispatcher for Window {
 // Actually it uses for differing the logical and actual window positions and sizes instead of
 // setting at Wayland level. Some animations may require appearing from edges of screen including
 // gaps, and because of this we here use specific margin.
+#[derive(Clone, Copy)]
 struct Margin {
     left: usize,
     right: usize,
@@ -641,139 +622,16 @@ impl Margin {
 
         margin
     }
-
-    fn apply_to_size(&self, mut extent: Extent<usize>) -> Extent<usize> {
-        extent.width += self.left + self.right;
-        extent.height += self.top + self.bottom;
-        extent
-    }
 }
 
-/// Represents the state of the user pointer.
-///
-/// The `state` tracks events that are useful for handling interactions with notification banners.
-#[derive(Default)]
-struct PointerState {
-    events: VecDeque<PointerEvent>,
-    x: f64,
-    y: f64,
-
-    entered: bool,
-}
-
-struct PointerEvent {
-    x: f64,
-    y: f64,
-    kind: PointerEventKind,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-enum PointerEventKind {
-    Hover,
-    MouseDown { button: MouseButton },
-    MouseUp { button: MouseButton },
-}
-
-impl From<PointerEventKind> for RawEventKind {
-    fn from(value: PointerEventKind) -> Self {
-        match value {
-            PointerEventKind::Hover => RawEventKind::MouseMove,
-            PointerEventKind::MouseDown { button } => RawEventKind::MouseDown(button),
-            PointerEventKind::MouseUp { button } => RawEventKind::MouseUp(button),
+impl From<Margin> for Spacing {
+    fn from(value: Margin) -> Self {
+        Spacing {
+            top: value.top,
+            right: value.right,
+            bottom: value.bottom,
+            left: value.left,
         }
-    }
-}
-
-impl PointerState {
-    const LEFT_BTN: u32 = 272;
-    const RIGHT_BTN: u32 = 273;
-    const MIDDLE_BTN: u32 = 274;
-
-    /// Updates the current pointer state to indicate that it has left the window frame.
-    fn leave(&mut self) {
-        self.entered = false;
-
-        debug!("Pointer: Left");
-    }
-
-    fn enter(&mut self, x: f64, y: f64) {
-        self.entered = true;
-        self.update_or_push_hover(x, y);
-    }
-
-    /// Updates the current pointer state to reflect movement to a new position.
-    ///
-    /// Behavior may differ if `ignore_first_relocate` is enabled.
-    fn relocate(&mut self, x: f64, y: f64) {
-        // if self.ignore_first_relocate {
-        //     debug!("Pointer: Forced to ignore first relocate.");
-        //
-        //     self.ignore_first_relocate = false;
-        //     return;
-        // }
-        self.update_or_push_hover(x, y);
-
-        // INFO: Pointer state updates very frequently so in 'DEBUG' level rows will be filled with
-        // useless information about pointer. So moved into 'TRACE' level.
-        trace!("Pointer: Relocate to x - {x}, y - {y}")
-    }
-
-    fn update_or_push_hover(&mut self, x: f64, y: f64) {
-        self.x = x;
-        self.y = y;
-
-        // TODO: it's not good code at all, better to move RootUi and its event manager logic when
-        // the banners is in an single window which is an widget too
-        if let Some(event) = self
-            .events
-            .back_mut()
-            .take_if(|event| event.kind == PointerEventKind::Hover)
-        {
-            event.x = x;
-            event.y = y;
-        } else {
-            self.events.push_back(PointerEvent {
-                x,
-                y,
-                kind: PointerEventKind::Hover,
-            });
-        }
-    }
-
-    /// Updates the current pointer state to reflect a user’s mouse button click.
-    fn press(&mut self, button: u32) {
-        let Some(button) = Self::get_button(button) else {
-            return;
-        };
-        debug!("Pointer: Pressed button {button:?}");
-
-        self.events.push_back(PointerEvent {
-            x: self.x,
-            y: self.y,
-            kind: PointerEventKind::MouseDown { button },
-        });
-    }
-
-    fn release(&mut self, button: u32) {
-        let Some(button) = Self::get_button(button) else {
-            return;
-        };
-        debug!("Pointer: Released button {button:?}");
-
-        self.events.push_back(PointerEvent {
-            x: self.x,
-            y: self.y,
-            kind: PointerEventKind::MouseUp { button },
-        });
-    }
-
-    fn get_button(button: u32) -> Option<MouseButton> {
-        Some(match button {
-            PointerState::LEFT_BTN => MouseButton::Left,
-            PointerState::RIGHT_BTN => MouseButton::Right,
-            PointerState::MIDDLE_BTN => MouseButton::Middle,
-            _ => return None,
-        })
     }
 }
 
@@ -814,7 +672,9 @@ impl Dispatch<WpPresentationFeedback, ()> for WindowState {
 
                 if let Some(last_presented_time_ns) = &mut state.last_presented_time_ns {
                     let delta_time_ns = time_ns - *last_presented_time_ns;
-                    state.banner_stack.banners_mut().for_each(|banner| banner.tick(delta_time_ns as u128));
+
+                    state.widget_system.tick(delta_time_ns as u128);
+                    state.banner_stack.banners_mut().for_each(|banner| banner.update(&mut state.widget_system.context));
 
                     trace!("Window Presentation: Current FPS — {}", 1_000_000_000.0 / delta_time_ns as f64);
                 }
@@ -838,6 +698,19 @@ impl Dispatch<WlPointer, ()> for WindowState {
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
+        const LEFT_BTN: u32 = 272;
+        const RIGHT_BTN: u32 = 273;
+        const MIDDLE_BTN: u32 = 274;
+
+        fn get_button(button: u32) -> Option<MouseButton> {
+            match button {
+                LEFT_BTN => Some(MouseButton::Left),
+                RIGHT_BTN => Some(MouseButton::Right),
+                MIDDLE_BTN => Some(MouseButton::Right),
+                _ => None,
+            }
+        }
+
         match event {
             wl_pointer::Event::Enter {
                 surface_x,
@@ -849,29 +722,65 @@ impl Dispatch<WlPointer, ()> for WindowState {
                     .cursor_device
                     .set_shape(serial, wp_cursor_shape_device_v1::Shape::Pointer);
 
-                state.pointer_state.enter(surface_x, surface_y);
+                state.mouse_position = Point {
+                    x: surface_x as f32,
+                    y: surface_y as f32,
+                };
+
+                state.widget_system.dispatch_event(RawEvent {
+                    kind: RawEventKind::MouseMove,
+                    local_coord: state.mouse_position,
+                });
             }
             wl_pointer::Event::Leave { serial, .. } => {
                 state
                     .cursor_device
                     .set_shape(serial, wp_cursor_shape_device_v1::Shape::Default);
-                state.pointer_state.leave()
+
+                state.widget_system.dispatch_event(RawEvent {
+                    kind: RawEventKind::MouseLeave,
+                    local_coord: Point::default(),
+                });
             }
             wl_pointer::Event::Motion {
                 surface_x,
                 surface_y,
                 ..
-            } => state.pointer_state.relocate(surface_x, surface_y),
+            } => {
+                state.mouse_position = Point {
+                    x: surface_x as f32,
+                    y: surface_y as f32,
+                };
+
+                state.widget_system.dispatch_event(RawEvent {
+                    kind: RawEventKind::MouseMove,
+                    local_coord: state.mouse_position,
+                });
+            }
             wl_pointer::Event::Button {
                 button,
                 state: WEnum::Value(ButtonState::Pressed),
                 ..
-            } => state.pointer_state.press(button),
+            } => {
+                if let Some(kind) = get_button(button).map(RawEventKind::MouseDown) {
+                    state.widget_system.dispatch_event(RawEvent {
+                        kind,
+                        local_coord: state.mouse_position,
+                    });
+                }
+            }
             wl_pointer::Event::Button {
                 button,
                 state: WEnum::Value(ButtonState::Released),
                 ..
-            } => state.pointer_state.release(button),
+            } => {
+                if let Some(kind) = get_button(button).map(RawEventKind::MouseUp) {
+                    state.widget_system.dispatch_event(RawEvent {
+                        kind,
+                        local_coord: state.mouse_position,
+                    });
+                }
+            }
             _ => (),
         }
     }

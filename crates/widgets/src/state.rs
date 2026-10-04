@@ -65,6 +65,7 @@ impl<T: 'static> From<MutableState<T>> for State<T> {
     }
 }
 
+// TODO: implement a reference counter so it can be freed on explicit release
 pub(crate) struct StateInfo {
     data: Box<dyn Any>,
     subscribers: HashSet<WidgetId>,

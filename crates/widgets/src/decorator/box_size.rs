@@ -1,7 +1,9 @@
 use std::ops::{Div, Mul};
 
 use crate::{
-    decorator::{DecoratorType, DrawDecorator, EventHitTestDecorator, MeasureDecorator},
+    decorator::{
+        DecoratorType, DrawDecorator, EventHitTestDecorator, LayoutDecorator, MeasureDecorator,
+    },
     events::{EventRouter, HitTestResult},
     stage::{
         draw::Drawer,
@@ -133,6 +135,18 @@ where
         self.next
             .measure(new_constraints)
             .clamp_with(constraints.min, constraints.max)
+    }
+}
+
+impl<N, T> LayoutDecorator<T> for BoxSizeDecorator<N, T>
+where
+    N: LayoutDecorator<T>,
+    T: DecoratorType + Div<f32, Output = T> + Mul<f32, Output = T>,
+{
+    fn layout(&mut self, local_coord: Point<T>, provided_extent: Extent<T>) {
+        let new_extent = self.update_extent(provided_extent);
+
+        self.next.layout(local_coord, new_extent);
     }
 }
 

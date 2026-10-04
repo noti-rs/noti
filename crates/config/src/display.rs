@@ -3,11 +3,7 @@ use std::{collections::HashMap, marker::PhantomData, path::PathBuf, time::Durati
 use dbus::notification::Urgency;
 use macros::ConfigProperty;
 use serde::{de::Visitor, Deserialize};
-use widgets::{
-    animations::{AnimationKind, Fade, Pop, Translate},
-    make_style,
-    widget::ImageStyle,
-};
+use widgets::animations::{AnimationKind, Fade, Pop, Translate};
 
 use crate::{
     public,
@@ -292,21 +288,7 @@ impl Default for ImageProperty {
     }
 }
 
-impl From<ImageProperty> for ImageStyle {
-    fn from(value: ImageProperty) -> Self {
-        make_style! {
-            ImageStyle {
-                rounding: value.rounding,
-                margin: value.margin.into(),
-                resizing_method: value.resizing_method.into(),
-                mipmap_mode: value.mipmap_mode.into(),
-                fit_mode: value.fit_mode.into(),
-            }
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Deserialize, Default, Clone, Copy)]
 pub enum ResizingMethod {
     #[serde(rename = "nearest")]
     Nearest,
@@ -324,7 +306,7 @@ impl From<ResizingMethod> for widgets::widget::ResizingMethod {
     }
 }
 
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Deserialize, Default, Clone, Copy)]
 pub enum MipmapMode {
     #[serde(rename = "none")]
     None,
@@ -345,7 +327,7 @@ impl From<MipmapMode> for widgets::widget::MipmapMode {
     }
 }
 
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Deserialize, Default, Clone, Copy)]
 pub enum FitMode {
     #[default]
     #[serde(rename = "contain")]

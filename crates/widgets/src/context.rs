@@ -6,6 +6,7 @@ use crate::{
     forest::Forest,
     stage::{
         draw::DrawContext,
+        layout::LayoutContext,
         measure::{Constraints, Intrinsic, MeasureContext},
         rebuild::{
             keyed_diffing, positional_diffing, scan_forest, RebuildContext, RebuildOperation,
@@ -14,8 +15,9 @@ use crate::{
     },
     state::{MutableState, State, StateInfo},
     types::{
-        dirty_flags::DirtyFlags, identifiers::WidgetKey, Extent, StyleInfo, WidgetClass, WidgetId,
-        WidgetStyle,
+        dirty_flags::{propagate_needs_measure, DirtyFlags},
+        identifiers::WidgetKey,
+        Extent, Point, WidgetId,
     },
     widget::{Widget, WidgetInformationContext},
 };
@@ -54,9 +56,6 @@ pub struct Context {
     /// Registry of unique widget keys mapped to known widget IDs.
     key_registry: HashMap<WidgetKey, WidgetId>,
 
-    /// Registry of widget style information bound to widget classes.
-    style_registry: HashMap<WidgetClass, StyleInfo>,
-
     /// Registry of dirty flags bound to widget IDs.
     dirty_registry: HashMap<WidgetId, DirtyFlags>,
 
@@ -79,7 +78,6 @@ impl Context {
             measure_cache: HashMap::new(),
             state_registry: HashMap::new(),
             key_registry: HashMap::new(),
-            style_registry: HashMap::new(),
             dirty_registry: HashMap::new(),
             animation_regirsty: HashMap::new(),
         }
@@ -105,18 +103,16 @@ impl Context {
     }
 
     pub(super) fn has_invalid_widgets(&self) -> bool {
-        self.dirty_registry.values().any(|flags| {
-            flags.intersects(DirtyFlags::NEEDS_REBUILD | DirtyFlags::NEEDS_UPDATE_STYLES)
-        })
+        self.dirty_registry
+            .values()
+            .any(|flags| flags.intersects(DirtyFlags::NEEDS_REBUILD))
     }
 
     pub(super) fn invalidate_widgets(&mut self) {
         let suitable_widget_identifiers = self
             .dirty_registry
             .iter()
-            .filter(|(_, flags)| {
-                flags.intersects(DirtyFlags::NEEDS_REBUILD | DirtyFlags::NEEDS_UPDATE_STYLES)
-            })
+            .filter(|(_, flags)| flags.intersects(DirtyFlags::NEEDS_REBUILD))
             .map(|(widget_id, _)| *widget_id)
             .collect::<Vec<_>>();
 
@@ -193,13 +189,56 @@ impl Context {
             .collect::<Vec<_>>();
 
         for widget_id in &suitable_widget_identifiers {
-            let mut widget = self
+            let dirty_flags = self
+                .dirty_registry
+                .get(widget_id)
+                .copied()
+                .unwrap_or(DirtyFlags::empty());
+
+            // INFO: during re-layouting one widget it may affect other, so here need ot check to
+            // avoid unnecessary re-layouts.
+            if !dirty_flags.contains(DirtyFlags::NEEDS_LAYOUT) {
+                continue;
+            }
+
+            let mut current_node_id = *widget_id;
+            while let Some(parent_id) = self.widget_forest.parent_id_by_id(current_node_id) {
+                let parent_dirty_flags = self
+                    .dirty_registry
+                    .get(&parent_id)
+                    .copied()
+                    .unwrap_or(DirtyFlags::empty());
+                current_node_id = parent_id;
+
+                if !parent_dirty_flags.contains(DirtyFlags::NEEDS_LAYOUT) {
+                    break;
+                }
+            }
+
+            let mut current_widget = self
                 .widget_forest
-                .node_by_id_mut(widget_id)
+                .node_by_id_mut(&current_node_id)
                 .expect("Since there is a widget ID, then there must be a widget in a main tree!");
 
-            widget.layout(self);
+            let local_coord = if Some(&current_node_id) == self.widget_forest.main_tree_root_id() {
+                Point::default()
+            } else {
+                <Context as LoadLocalCoord<f32, WidgetId>>::load(self, current_node_id)
+                    .unwrap_or_default()
+            };
+
+            current_widget.layout(self, local_coord);
         }
+    }
+
+    pub(super) fn collect_input_regions(&self) -> Vec<(Point<f32>, Extent<f32>)> {
+        let mut input_regions = vec![];
+
+        if let Some(main_tree_root_id) = self.widget_forest.main_tree_root_id() {
+            collect_input_regions(*main_tree_root_id, self, &mut input_regions);
+        }
+
+        input_regions
     }
 }
 
@@ -223,6 +262,11 @@ impl Default for DebugOptions {
 /// are cached into [Context] to reuse them further witouth re-measuring.
 #[derive(Debug, Clone, Default)]
 struct MeasureCache {
+    /// The local coordinates of a widget.
+    ///
+    /// The value always set by a parent widget.
+    local_coord: Option<Point<f32>>,
+
     /// The intrinsic size of a widget.
     ///
     /// A widget must know what is the minimal and the maximal size of itself.
@@ -497,7 +541,7 @@ fn perform_operation_set(context: &mut Context, rebuild_context: &RebuildContext
                     .node(new_node_id)
                     .expect("There must be a node in a forest!");
 
-                let dirty_flags = new_node.diff(old_node);
+                let dirty_flags = new_node.diff(old_node.as_ref());
 
                 let new_node_mut = context
                     .widget_forest
@@ -505,7 +549,14 @@ fn perform_operation_set(context: &mut Context, rebuild_context: &RebuildContext
                     .expect("There must be a node in a forest!");
                 new_node_mut.set_id(old_node_id);
 
+                context
+                    .widget_forest
+                    .make_relation(old_node_id, *new_node_id);
+
                 context.append_dirty_flags(old_node_id, dirty_flags);
+                if dirty_flags.contains(DirtyFlags::NEEDS_MEASURE) {
+                    propagate_needs_measure(old_node_id, context);
+                }
             }
         }
     }
@@ -754,73 +805,6 @@ where
     }
 }
 
-pub trait StyleSubscription<C, Id>
-where
-    C: Into<WidgetClass>,
-    Id: Into<WidgetId>,
-{
-    /// A provided id subscribes to style changes by its class.
-    fn subscribe(&mut self, id: Id, class: C);
-
-    /// A provided id unsubscribes to style changes by its class.
-    fn unsubscribe(&mut self, id: Id, class: C);
-}
-
-impl<C, Id> StyleSubscription<C, Id> for Context
-where
-    Id: Into<WidgetId>,
-    C: Into<WidgetClass>,
-{
-    fn subscribe(&mut self, id: Id, class: C) {
-        let id = id.into();
-        self.style_registry
-            .entry(class.into())
-            .and_modify(|style_info| style_info.add_subscriber(id))
-            .or_insert_with(|| {
-                let mut style = StyleInfo::new(WidgetStyle::Unknown);
-                style.add_subscriber(id);
-                style
-            });
-    }
-
-    fn unsubscribe(&mut self, id: Id, class: C) {
-        self.style_registry
-            .entry(class.into())
-            .and_modify(|style_info| style_info.remove_subscriber(id));
-    }
-}
-
-pub trait SetStyleClass {
-    /// Assigns a widget style to a style class.
-    fn set_style_class<Class>(&mut self, class: Class, style: WidgetStyle)
-    where
-        Class: Into<WidgetClass>;
-}
-
-impl SetStyleClass for Context {
-    fn set_style_class<Class>(&mut self, class: Class, style: WidgetStyle)
-    where
-        Class: Into<WidgetClass>,
-    {
-        self.style_registry
-            .entry(class.into())
-            .and_modify(|style_info| {
-                style_info.set_style(style.clone());
-
-                // TODO: check the validity of exising widget
-                // For instance, in subscriber list may be some unexisting widget and marking dirty
-                // flags will be invalid
-                style_info.subscribers().for_each(|subscriber| {
-                    self.dirty_registry
-                        .entry(*subscriber)
-                        .and_modify(|flags| *flags |= DirtyFlags::NEEDS_UPDATE_STYLES)
-                        .or_insert(DirtyFlags::NEEDS_UPDATE_STYLES);
-                });
-            })
-            .or_insert_with(|| StyleInfo::new(style));
-    }
-}
-
 pub trait Tick {
     fn tick(&mut self, delta_ns: u128);
 }
@@ -893,7 +877,8 @@ where
     fn get_dirty_flags(&self, id: Id) -> DirtyFlags;
     fn set_dirty_flags(&mut self, id: Id, dirty_flags: DirtyFlags);
     fn append_dirty_flags(&mut self, id: Id, dirty_flags: DirtyFlags);
-    fn remove_dirty_flags(&mut self, id: Id);
+    fn remove_dirty_flags(&mut self, id: Id, dirty_flags: DirtyFlags);
+    fn clear_dirty_flags(&mut self, id: Id);
 }
 
 impl<Id> ManageDirtyFlags<Id> for Context
@@ -909,7 +894,7 @@ where
 
     fn set_dirty_flags(&mut self, id: Id, dirty_flags: DirtyFlags) {
         if dirty_flags.is_empty() {
-            self.remove_dirty_flags(id);
+            self.clear_dirty_flags(id);
         } else {
             self.dirty_registry.insert(id.into(), dirty_flags);
         }
@@ -924,18 +909,20 @@ where
         }
     }
 
-    fn remove_dirty_flags(&mut self, id: Id) {
-        self.dirty_registry.remove(&id.into());
+    fn remove_dirty_flags(&mut self, id: Id, dirty_flags: DirtyFlags) {
+        let widget_id = id.into();
+
+        if let Some(flags) = self.dirty_registry.get_mut(&widget_id) {
+            flags.remove(dirty_flags);
+
+            if flags.is_empty() {
+                self.dirty_registry.remove(&widget_id);
+            }
+        }
     }
-}
 
-pub trait GetStyle {
-    fn get_style(&self, class: &WidgetClass) -> Option<&WidgetStyle>;
-}
-
-impl GetStyle for Context {
-    fn get_style(&self, class: &WidgetClass) -> Option<&WidgetStyle> {
-        self.style_registry.get(class).map(StyleInfo::get_style)
+    fn clear_dirty_flags(&mut self, id: Id) {
+        self.dirty_registry.remove(&id.into());
     }
 }
 
@@ -947,6 +934,37 @@ impl GetFont for Context {
     fn get_font(&self) -> skia_safe::textlayout::FontCollection {
         self.font_collection.clone()
     }
+}
+
+pub trait SaveLocalCoord<T, Id>
+where
+    T: Default + Copy,
+    Id: Into<WidgetId>,
+{
+    fn save(&mut self, id: Id, local_coord: Point<T>);
+}
+
+pub trait LoadLocalCoord<T, Id>
+where
+    T: Default + Copy,
+    Id: Into<WidgetId>,
+{
+    fn load(&self, id: Id) -> Option<Point<T>>;
+}
+
+pub trait ManageLocalCoord<T, Id>: SaveLocalCoord<T, Id> + LoadLocalCoord<T, Id>
+where
+    T: Default + Copy,
+    Id: Into<WidgetId>,
+{
+}
+
+impl<C, T, Id> ManageLocalCoord<T, Id> for C
+where
+    T: Default + Copy,
+    Id: Into<WidgetId>,
+    C: SaveLocalCoord<T, Id> + LoadLocalCoord<T, Id>,
+{
 }
 
 pub trait SaveIntrinsic<T, Id>
@@ -1040,6 +1058,34 @@ where
     Id: Into<WidgetId>,
     C: SaveConstraints<T, Id> + LoadConstraints<T, Id>,
 {
+}
+
+impl<Id> SaveLocalCoord<f32, Id> for Context
+where
+    Id: Into<WidgetId>,
+{
+    fn save(&mut self, id: Id, local_coord: Point<f32>) {
+        self.measure_cache
+            .entry(id.into())
+            .and_modify(|cache| {
+                cache.local_coord.replace(local_coord);
+            })
+            .or_insert(MeasureCache {
+                local_coord: local_coord.into(),
+                ..Default::default()
+            });
+    }
+}
+
+impl<Id> LoadLocalCoord<f32, Id> for Context
+where
+    Id: Into<WidgetId>,
+{
+    fn load(&self, id: Id) -> Option<Point<f32>> {
+        self.measure_cache
+            .get(&id.into())
+            .and_then(|cache| cache.local_coord)
+    }
 }
 
 impl<Id> SaveIntrinsic<f32, Id> for Context
@@ -1141,6 +1187,14 @@ impl MeasureContext<f32> for Context {
         self.widget_forest
             .node_by_id_mut(widget_id)
             .map(|w| w.measure(self, constraints))
+    }
+}
+
+impl LayoutContext<f32> for Context {
+    fn layout_widget(&mut self, widget_id: &WidgetId, local_coord: Point<f32>) {
+        if let Some(mut widget) = self.widget_forest.node_by_id_mut(widget_id) {
+            widget.layout(self, local_coord);
+        }
     }
 }
 
@@ -1253,5 +1307,31 @@ where
         self.measure_cache.remove(&widget_id);
         self.dirty_registry.remove(&widget_id);
         self.animation_regirsty.remove(&widget_id);
+    }
+}
+
+fn collect_input_regions<C>(
+    current_node: WidgetId,
+    context: &C,
+    input_regions: &mut Vec<(Point<f32>, Extent<f32>)>,
+) where
+    C: WidgetInformationContext + LoadLocalCoord<f32, WidgetId> + LoadExtent<f32, WidgetId>,
+{
+    if let Some(widget) = context.widget_by(current_node) {
+        match widget.input_behavior() {
+            crate::types::InputBehavior::Accepts => {
+                input_regions.push((
+                    <C as LoadLocalCoord<f32, WidgetId>>::load(context, current_node)
+                        .unwrap_or_default(),
+                    <C as LoadExtent<f32, WidgetId>>::load(context, current_node)
+                        .unwrap_or_default(),
+                ));
+            }
+            crate::types::InputBehavior::PassesToChildren => {
+                for child_widget_id in context.childrens_identifiers_of(current_node) {
+                    collect_input_regions(child_widget_id, context, input_regions);
+                }
+            }
+        }
     }
 }

@@ -10,16 +10,14 @@ bitflags::bitflags! {
     pub struct DirtyFlags: u8 {
         const NEEDS_REBUILD       = 1;
 
-        const NEEDS_UPDATE_STYLES = 1 << 1;
-
         /// The widget's own geometric constraints or intrinsic sizes are invalid.
         /// Triggers a re-calculation of the cached size in the Arena.
-        const NEEDS_MEASURE       = 1 << 2;
+        const NEEDS_MEASURE       = 1 << 1;
 
         /// One or more descendants are marked with NEEDS_MEASURE.
-        const CHILD_NEEDS_MEASURE = 1 << 3;
+        const CHILD_NEEDS_MEASURE = 1 << 2;
 
-        const NEEDS_LAYOUT        = 1 << 4;
+        const NEEDS_LAYOUT        = 1 << 3;
     }
 }
 
@@ -27,10 +25,7 @@ pub(crate) fn propagate_needs_measure<C>(node_id: WidgetId, context: &mut C)
 where
     C: WidgetInformationContext + ManageDirtyFlags<WidgetId>,
 {
-    context.set_dirty_flags(
-        node_id,
-        context.get_dirty_flags(node_id) | DirtyFlags::NEEDS_MEASURE,
-    );
+    context.append_dirty_flags(node_id, DirtyFlags::NEEDS_MEASURE);
 
     let mut current_id = node_id;
     while let Some(node) = context.parent_of(current_id) {

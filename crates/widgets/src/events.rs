@@ -19,6 +19,7 @@ pub enum RawEventKind {
     MouseMove,
     MouseDown(MouseButton),
     MouseUp(MouseButton),
+    MouseLeave,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -61,19 +62,22 @@ impl EventManager {
         &mut self,
         context: &mut C,
         event: RawEvent,
-        widget_tree: &WidgetId,
+        widget_id: &WidgetId,
     ) where
         C: EventContext<f32>,
     {
         match event.kind {
             RawEventKind::MouseMove => {
-                self.dispatch_mouse_move(context, event, widget_tree);
+                self.dispatch_mouse_move(context, event, widget_id);
             }
             RawEventKind::MouseDown(mouse_button) => {
-                self.dispatch_mouse_down(context, event, mouse_button, widget_tree);
+                self.dispatch_mouse_down(context, event, mouse_button, widget_id);
             }
             RawEventKind::MouseUp(mouse_button) => {
-                self.dispatch_mouse_up(context, event, mouse_button, widget_tree);
+                self.dispatch_mouse_up(context, event, mouse_button, widget_id);
+            }
+            RawEventKind::MouseLeave => {
+                self.dispatch_mouse_leave(context, event, widget_id);
             }
         }
     }
@@ -174,6 +178,19 @@ impl EventManager {
             .remove(&TrackingEvent::Pressed(mouse_button));
     }
 
+    fn dispatch_mouse_leave<C>(&mut self, context: &mut C, event: RawEvent, widget_id: &WidgetId)
+    where
+        C: EventContext<f32>,
+    {
+        self.current_router
+            .iter_node_metadata_mut()
+            .for_each(|metadata| Self::make_cancel_event(metadata, &event.kind));
+
+        context.route_events_to_widget(widget_id, &self.current_router);
+
+        self.current_router = EventRouter::default();
+    }
+
     fn make_cancel_event(metadata: &mut EventNodeMetadata, raw_event: &RawEventKind) {
         match raw_event {
             RawEventKind::MouseMove => {
@@ -196,6 +213,14 @@ impl EventManager {
                     metadata
                         .pending_events
                         .push(PendingEvent::PressOut(*mouse_button));
+                }
+            }
+            RawEventKind::MouseLeave => {
+                if metadata.capabilities.contains(EventNodeCapabilities::HOVER)
+                    && metadata.states.contains(&EventNodeStates::Hovered)
+                {
+                    metadata.states.remove(&EventNodeStates::Hovered);
+                    metadata.pending_events.push(PendingEvent::HoverOut);
                 }
             }
         }
@@ -226,18 +251,29 @@ impl EventManager {
                 }
             }
             RawEventKind::MouseUp(mouse_button) => {
-                if metadata.capabilities.contains(EventNodeCapabilities::CLICK)
-                    && metadata
-                        .states
-                        .contains(&EventNodeStates::Pressed(*mouse_button))
+                if metadata
+                    .states
+                    .contains(&EventNodeStates::Pressed(*mouse_button))
                 {
                     metadata
                         .states
                         .remove(&EventNodeStates::Pressed(*mouse_button));
-                    metadata
-                        .pending_events
-                        .push(PendingEvent::Click(*mouse_button));
+
+                    if metadata.capabilities.contains(EventNodeCapabilities::PRESS) {
+                        metadata
+                            .pending_events
+                            .push(PendingEvent::PressOut(*mouse_button));
+                    }
+
+                    if metadata.capabilities.contains(EventNodeCapabilities::CLICK) {
+                        metadata
+                            .pending_events
+                            .push(PendingEvent::Click(*mouse_button));
+                    }
                 }
+            }
+            RawEventKind::MouseLeave => {
+                // INFO: Mouse leave does not make pending events, so ignore this part.
             }
         }
     }

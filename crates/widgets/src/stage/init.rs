@@ -1,22 +1,20 @@
 use crate::{
     context::{
-        GenerateId, GetFont, GetState, GetStyle, ManageAnimationRegistry, RegisterKey,
-        StateSubscription, StyleSubscription,
+        GenerateId, GetFont, GetState, ManageAnimationRegistry, ManageDirtyFlags, RegisterKey,
+        StateSubscription,
     },
-    types::{identifiers::WidgetKey, WidgetClass, WidgetId},
+    types::{dirty_flags::DirtyFlags, identifiers::WidgetKey, WidgetId},
     widget::{WidgetBase, WidgetInformationContext},
 };
 
-// TODO: add dirty flag management
 pub trait InitContext:
     GenerateId
     + RegisterKey<WidgetKey, WidgetId>
     + GetState
     + StateSubscription<WidgetId>
-    + StyleSubscription<WidgetClass, WidgetId>
     + WidgetInformationContext
+    + ManageDirtyFlags<WidgetId>
     + ManageAnimationRegistry<WidgetId>
-    + GetStyle
     + GetFont
 {
 }
@@ -26,10 +24,9 @@ impl<C> InitContext for C where
         + RegisterKey<WidgetKey, WidgetId>
         + GetState
         + StateSubscription<WidgetId>
-        + StyleSubscription<WidgetClass, WidgetId>
         + WidgetInformationContext
+        + ManageDirtyFlags<WidgetId>
         + ManageAnimationRegistry<WidgetId>
-        + GetStyle
         + GetFont
 {
 }
@@ -47,15 +44,9 @@ where
             context.register_key(key.clone(), self.get_id());
         }
 
-        if !self.get_class().is_empty() {
-            <C as StyleSubscription<WidgetClass, WidgetId>>::subscribe(
-                context,
-                self.get_id(),
-                self.get_class().clone(),
-            );
-        }
-
         self.on_init(context);
+
+        context.append_dirty_flags(self.get_id(), DirtyFlags::NEEDS_MEASURE);
     }
 
     fn on_init(&mut self, context: &mut C);
