@@ -50,6 +50,9 @@ pub struct FlexBox {
     #[dirty(NEEDS_MEASURE)]
     expand: bool,
 
+    #[style]
+    spacing: usize,
+
     /// The primary axis used for arranging the child widgets.
     ///
     /// This determines the "flow" of the container. In a horizontal
@@ -169,7 +172,7 @@ impl FlexBox {
         C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
         F: FnMut((usize, &WidgetId), Offset<f32>) -> IteratorProcess,
     {
-        let mut plane = FCPlane::new(Offset::<f32>::default(), provided_extent, self.direction());
+        let mut plane = FBPlane::new(Offset::<f32>::default(), provided_extent, self.direction());
 
         let main_children_extent = self.main_children_extent(context);
         plane.main.start = self
@@ -179,11 +182,15 @@ impl FlexBox {
         let childrens_indices = context.childrens_identifiers_of(self.id);
 
         let incrementor = match self.main_axis_alignment() {
-            Position::Start | Position::Center | Position::End => 0.0,
+            Position::Start | Position::Center | Position::End => {
+                self.spacing.unwrap_or_default() as f32
+            }
             Position::SpaceBetween => {
                 if childrens_indices.len() <= 1 {
                     0.0
                 } else {
+                    // INFO: there's no needs for self.spacing, because during measurement the code
+                    // guarantess that there is available space equal or greater than self.spacing.
                     (plane.main.extent - main_children_extent)
                         / childrens_indices.len().saturating_sub(1) as f32
                 }
@@ -273,13 +280,17 @@ where
                 return measure::Intrinsic::default();
             }
 
+            let between_children_spacing = (childrens_indices.len().saturating_sub(1)
+                * self.spacing.unwrap_or_default())
+                as f32;
+
             let mut min_intrinsic = FlexExtent::<f32> {
-                main: 0.0,
+                main: between_children_spacing,
                 cross: 0.0,
             };
 
             let mut max_intrinsic = FlexExtent::<f32> {
-                main: 0.0,
+                main: between_children_spacing,
                 cross: 0.0,
             };
 
@@ -338,6 +349,10 @@ where
             };
 
             let mut used_extent = <FlexExtent<f32>>::default();
+            let between_children_spacing = (childrens_indices.len().saturating_sub(1)
+                * self.spacing.unwrap_or_default())
+                as f32;
+            used_extent.main += between_children_spacing;
 
             for (child_widget_id, child_intrinsic) in fixed_children {
                 let child_constraints = Constraints::new_tight(
@@ -485,7 +500,7 @@ where
 
                 if context.get_debug_options().show_layout_bounds {
                     let plane =
-                        FCPlane::new(Offset::<f32>::default(), provided_extent, self.direction());
+                        FBPlane::new(Offset::<f32>::default(), provided_extent, self.direction());
                     let shift = match self.direction() {
                         Direction::Horizontal => Offset::new(plane.main.start, plane.cross.start),
                         Direction::Vertical => Offset::new(plane.cross.start, plane.main.start),
@@ -569,7 +584,7 @@ where
     }
 }
 
-/// FC stands for Flex Container.
+/// FB stands for FlexBox.
 ///
 /// A helper type that abstracts away the difference between horizontal
 /// and vertical layout, allowing the container logic to operate on a
@@ -578,7 +593,7 @@ where
 /// This prevents code duplication — layout math can be written once
 /// for a generic axis, and converted back into X/Y coordinates on
 /// demand.
-struct FCPlane<T>
+struct FBPlane<T>
 where
     T: Default + Copy,
 {
@@ -588,11 +603,11 @@ where
     direction: Direction,
 }
 
-impl<T> FCPlane<T>
+impl<T> FBPlane<T>
 where
     T: Default + Copy,
 {
-    /// Creates a new [`FCPlane`] from an offset and container extent, mapping
+    /// Creates a new [`FBPlane`] from an offset and container extent, mapping
     /// corresponding main/cross axis values depending on [`Direction`].
     fn new<O, R>(offset: O, extent: R, direction: Direction) -> Self
     where
