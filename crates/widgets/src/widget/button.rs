@@ -167,6 +167,7 @@ where
         )
         .clickable()
         .pressable()
+        .pointer_shape(crate::events::PointerShape::Pointer)
         .hit_test(self.id, local_coords, provided_extent, router)
     }
 }

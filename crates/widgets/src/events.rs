@@ -58,6 +58,21 @@ impl EventManager {
         }
     }
 
+    pub(crate) fn resolve_pointer_shape(&self) -> PointerShape {
+        self.current_router
+            .path
+            .iter()
+            .rev()
+            .find_map(|node| {
+                if node.pointer_shape != PointerShape::Default {
+                    Some(node.pointer_shape)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default()
+    }
+
     pub(crate) fn dispatch_event<C>(
         &mut self,
         context: &mut C,
@@ -290,6 +305,7 @@ pub(crate) struct EventNodeMetadata {
     next_node_index: usize,
     capabilities: EventNodeCapabilities,
     states: HashSet<EventNodeStates>,
+    pointer_shape: PointerShape,
     pending_events: Vec<PendingEvent>,
 }
 
@@ -300,6 +316,7 @@ impl EventNodeMetadata {
             next_node_index: 0,
             capabilities: EventNodeCapabilities::empty(),
             states: HashSet::new(),
+            pointer_shape: PointerShape::Default,
             pending_events: vec![],
         }
     }
@@ -307,6 +324,13 @@ impl EventNodeMetadata {
     fn clear_pending_events(&mut self) {
         self.pending_events.clear()
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum PointerShape {
+    #[default]
+    Default,
+    Pointer,
 }
 
 bitflags::bitflags! {
@@ -366,6 +390,22 @@ impl EventRouter {
             self.register_node_if_missing({
                 let mut metadata = EventNodeMetadata::new_empty(widget_id);
                 metadata.capabilities = capability;
+                metadata
+            });
+        }
+    }
+
+    pub(crate) fn set_pointer_shape(&mut self, widget_id: WidgetId, pointer_shape: PointerShape) {
+        if let Some(node) = self
+            .map
+            .get(&widget_id)
+            .and_then(|&index| self.path.get_mut(index))
+        {
+            node.pointer_shape = pointer_shape;
+        } else {
+            self.register_node_if_missing({
+                let mut metadata = EventNodeMetadata::new_empty(widget_id);
+                metadata.pointer_shape = pointer_shape;
                 metadata
             });
         }

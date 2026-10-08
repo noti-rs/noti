@@ -8,9 +8,10 @@ use crate::{
         border::BorderDecorator,
         box_size::BoxSizeDecorator,
         callback::{Clickable, EventDecorator, Hoverable, Pressable},
+        pointer_shape::PointerShapeDecorator,
         spacing::SpacingDecorator,
     },
-    events::{EventRouter, HitTestResult},
+    events::{EventRouter, HitTestResult, PointerShape},
     stage::{
         draw::Drawer,
         measure::{Constraints, Intrinsic},
@@ -23,6 +24,7 @@ pub(crate) mod border;
 pub(crate) mod box_size;
 pub(crate) mod callback;
 pub(crate) mod content;
+pub(crate) mod pointer_shape;
 pub(crate) mod spacing;
 
 pub(crate) trait DecoratorType:
@@ -140,6 +142,13 @@ where
 
     fn clickable(self) -> EventDecorator<Clickable, Self> {
         EventDecorator::clickable(self)
+    }
+
+    fn pointer_shape(self, pointer_shape: PointerShape) -> PointerShapeDecorator<Self> {
+        PointerShapeDecorator {
+            next: self,
+            pointer_shape,
+        }
     }
 }
 

@@ -42,13 +42,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
 };
 use widgets::{
-    context::{Context, DebugOptions, Tick, WidgetTreeCreation},
-    events::{MouseButton, RawEvent, RawEventKind},
-    make_widget,
-    stage::{draw::Drawer, measure::Constraints},
-    types::{extent::Extent, offset::Offset, InputBehavior, Point, Spacing},
-    widget::FlexBox,
-    WidgetSystem,
+    WidgetSystem, context::{Context, DebugOptions, Tick, WidgetTreeCreation}, events::{MouseButton, PointerShape, RawEvent, RawEventKind}, make_widget, stage::{draw::Drawer, measure::Constraints}, types::{InputBehavior, Point, Spacing, extent::Extent, offset::Offset}, widget::FlexBox
 };
 
 /// Wraps a [WindowState] and holds an event queue used only for dispatching.
@@ -89,7 +83,9 @@ pub(super) struct WindowState {
     pointer: WlPointer,
     cursor_device: WpCursorShapeDeviceV1,
     mouse_position: Point<f32>,
-    // pointer_state: PointerState,
+    pointer_enter_serial: u32,
+    pointer_shape: PointerShape,
+
     has_requested_frame: bool,
     last_presented_time_ns: Option<u64>,
     configuration_state: ConfigurationState,
@@ -178,6 +174,8 @@ impl Window {
             cursor_device,
             pointer,
             mouse_position: Point::default(),
+            pointer_enter_serial: 0,
+            pointer_shape: PointerShape::Default,
 
             has_requested_frame: false,
             last_presented_time_ns: None,
@@ -733,9 +731,7 @@ impl Dispatch<WlPointer, ()> for WindowState {
                 serial,
                 ..
             } => {
-                state
-                    .cursor_device
-                    .set_shape(serial, wp_cursor_shape_device_v1::Shape::Pointer);
+                state.pointer_enter_serial = serial;
 
                 state.mouse_position = Point {
                     x: surface_x as f32,
@@ -797,6 +793,17 @@ impl Dispatch<WlPointer, ()> for WindowState {
                 }
             }
             _ => (),
+        }
+
+        let current_pointer_shape = state.widget_system.resolve_pointer_shape();
+        if current_pointer_shape != state.pointer_shape {
+            state.pointer_shape = current_pointer_shape;
+            let shape = match current_pointer_shape {
+                PointerShape::Default => wp_cursor_shape_device_v1::Shape::Default,
+                PointerShape::Pointer => wp_cursor_shape_device_v1::Shape::Pointer,
+            };
+
+            state.cursor_device.set_shape(state.pointer_enter_serial, shape);
         }
     }
 }

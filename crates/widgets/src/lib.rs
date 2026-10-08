@@ -100,6 +100,10 @@ impl WidgetSystem {
         }
     }
 
+    pub fn resolve_pointer_shape(&self) -> events::PointerShape {
+        self.event_manager.resolve_pointer_shape()
+    }
+
     pub fn collect_input_regions(&self) -> Vec<(Point<f32>, Extent<f32>)> {
         self.context.collect_input_regions()
     }
