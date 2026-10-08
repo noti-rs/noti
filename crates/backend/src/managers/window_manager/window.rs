@@ -42,7 +42,13 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, Anchor, ZwlrLayerSurfaceV1},
 };
 use widgets::{
-    WidgetSystem, context::{Context, DebugOptions, Tick, WidgetTreeCreation}, events::{MouseButton, PointerShape, RawEvent, RawEventKind}, make_widget, stage::{draw::Drawer, measure::Constraints}, types::{InputBehavior, Point, Spacing, extent::Extent, offset::Offset}, widget::FlexBox
+    context::{Context, DebugOptions, Tick, WidgetTreeCreation},
+    events::{MouseButton, PointerShape, RawEvent, RawEventKind},
+    make_widget,
+    stage::{draw::Drawer, measure::Constraints},
+    types::{extent::Extent, offset::Offset, InputBehavior, Point, Spacing},
+    widget::FlexBox,
+    WidgetSystem,
 };
 
 /// Wraps a [WindowState] and holds an event queue used only for dispatching.
@@ -803,7 +809,9 @@ impl Dispatch<WlPointer, ()> for WindowState {
                 PointerShape::Pointer => wp_cursor_shape_device_v1::Shape::Pointer,
             };
 
-            state.cursor_device.set_shape(state.pointer_enter_serial, shape);
+            state
+                .cursor_device
+                .set_shape(state.pointer_enter_serial, shape);
         }
     }
 }

@@ -13,11 +13,11 @@ use theme::{Theme, TomlTheme};
 pub mod color;
 pub mod display;
 pub mod general;
+pub mod size;
 pub mod sorting;
 pub mod spacing;
 pub mod text;
 pub mod theme;
-pub mod size;
 
 use spacing::Spacing;
 

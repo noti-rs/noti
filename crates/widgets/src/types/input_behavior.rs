@@ -14,5 +14,5 @@ pub enum InputBehavior {
     /// itself to an application at the back.
     ///
     /// For children, they're will be checked independently.
-    PassesToChildren
+    PassesToChildren,
 }

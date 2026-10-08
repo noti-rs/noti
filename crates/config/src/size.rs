@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use serde::{Deserialize, de::Visitor};
+use serde::{de::Visitor, Deserialize};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Size {
@@ -122,7 +122,7 @@ height = {{ min = 100, max = 150 }}
 
         for possible_key in Size::POSSIBLE_KEYS {
             if !table.contains_key(possible_key) {
-                return Err(serde::de::Error::missing_field(possible_key))
+                return Err(serde::de::Error::missing_field(possible_key));
             }
         }
 

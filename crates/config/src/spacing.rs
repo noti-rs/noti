@@ -191,10 +191,7 @@ margin = {{ top = 5, horizontal = 10 }}"#
                         &self,
                     ))
                 }
-                "vertical"
-                    if table.contains_key("top")
-                        || table.contains_key("bottom") =>
-                {
+                "vertical" if table.contains_key("top") || table.contains_key("bottom") => {
                     return Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Str(key.as_str()),
                         &self,
@@ -206,10 +203,7 @@ margin = {{ top = 5, horizontal = 10 }}"#
                         &self,
                     ))
                 }
-                "horizontal"
-                    if table.contains_key("right")
-                        || table.contains_key("left") =>
-                {
+                "horizontal" if table.contains_key("right") || table.contains_key("left") => {
                     return Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Str(key.as_str()),
                         &self,

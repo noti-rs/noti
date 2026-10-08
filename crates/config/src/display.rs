@@ -6,7 +6,10 @@ use serde::{de::Visitor, Deserialize};
 use widgets::animations::{AnimationKind, Fade, Pop, Translate};
 
 use crate::{
-    public, size::Size, spacing::Spacing, text::{TextProperty, TomlTextProperty}
+    public,
+    size::Size,
+    spacing::Spacing,
+    text::{TextProperty, TomlTextProperty},
 };
 
 public! {
