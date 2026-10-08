@@ -11,7 +11,9 @@ use shared::{
 };
 
 use crate::{
-    context::{widget_data, widget_data_mut, ManageIntrinsic, StateSubscription},
+    context::{
+        widget_data, widget_data_mut, ManageIntrinsic, StateLifetimeManagement, StateSubscription,
+    },
     decorator::{content::Content, DecoratorExt, DrawDecorator, MeasureDecorator},
     events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
     stage::{
@@ -28,7 +30,7 @@ use crate::{
         identifiers::{WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
-        Border, Point,
+        Border, DirtyFlags, Point,
     },
     widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
 };
@@ -161,6 +163,7 @@ where
 {
     fn on_init(&mut self, context: &mut C) {
         if let Some(state) = self.state {
+            context.retain(state);
             <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
 
             let mut runtime_information = ImageRuntimeInformation { image_data: None };
@@ -181,6 +184,7 @@ where
     fn on_deinit(&mut self, context: &mut C) {
         if let Some(state) = self.state {
             <C as StateSubscription<WidgetId>>::unsubscribe(context, self.id, state);
+            context.release(state);
         }
     }
 }
@@ -189,6 +193,29 @@ impl<C> Invalidate<C> for Image
 where
     C: InvalidateContext,
 {
+    fn on_reuse(&mut self, old: &dyn std::any::Any, context: &mut C) -> crate::types::DirtyFlags
+    where
+        C: StateLifetimeManagement,
+    {
+        let old_image_widget = old
+            .downcast_ref::<Self>()
+            .expect("An old widget must be same type as Self! Something went wrong during a tree rebuild process.");
+
+        if self.state != old_image_widget.state {
+            if let Some(state) = self.state {
+                context.retain(state);
+            }
+
+            if let Some(state) = old_image_widget.state {
+                context.release(state);
+            }
+
+            DirtyFlags::NEEDS_REBUILD
+        } else {
+            DirtyFlags::empty()
+        }
+    }
+
     fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
         let mut runtime_information: Unique<ImageRuntimeInformation> =
             widget_data_mut(context, self.id)

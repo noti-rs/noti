@@ -6,9 +6,7 @@ use serde::{de::Visitor, Deserialize};
 use widgets::animations::{AnimationKind, Fade, Pop, Translate};
 
 use crate::{
-    public,
-    spacing::Spacing,
-    text::{TextProperty, TomlTextProperty},
+    public, size::Size, spacing::Spacing, text::{TextProperty, TomlTextProperty}
 };
 
 public! {
@@ -16,6 +14,15 @@ public! {
     #[cfg_prop(name(TomlDisplayConfig), derive(Debug, Deserialize, Default, Clone))]
     struct DisplayConfig {
         layout: Layout,
+
+        #[cfg_prop(default(Size::Fixed(300)))]
+        width: Size,
+
+        #[cfg_prop(default(Size::Fixed(150)))]
+        height: Size,
+
+        #[cfg_prop(use_type(TopBarProperty), mergeable)]
+        top_bar: TopBar,
 
         #[cfg_prop(use_type(AnimationProperty), mergeable)]
         animation: Animation,
@@ -32,6 +39,13 @@ public! {
 
         #[cfg_prop(use_type(TomlBorder), mergeable)]
         border: Border,
+
+        #[cfg_prop(
+            also_from(name = text, mergeable),
+            use_type(TomlTextProperty),
+            mergeable
+        )]
+        app_name: TextProperty,
 
         #[cfg_prop(
             also_from(name = text, mergeable),
@@ -96,6 +110,18 @@ impl From<String> for Layout {
                     .unwrap_or(value),
             ),
         }
+    }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(TopBarProperty), derive(Debug, Deserialize, Clone, Default))]
+    struct TopBar {
+        #[cfg_prop(default(true))]
+        enable: bool,
+
+        #[cfg_prop(default(true))]
+        show_icon: bool,
     }
 }
 

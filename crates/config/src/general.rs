@@ -11,11 +11,6 @@ public! {
     #[derive(ConfigProperty, Debug)]
     #[cfg_prop(name(TomlGeneralConfig), derive(Debug, Default, Deserialize, Clone))]
     struct GeneralConfig {
-        #[cfg_prop(default(300))]
-        width: u16,
-        #[cfg_prop(default(150))]
-        height: u16,
-
         anchor: Anchor,
         offset: (u8, u8),
         #[cfg_prop(default(10))]

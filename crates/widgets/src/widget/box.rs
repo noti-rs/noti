@@ -20,7 +20,7 @@ use crate::{
         identifiers::{WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
-        Point,
+        DirtyFlags, Point,
     },
     widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
 };
@@ -89,6 +89,10 @@ impl<C> Invalidate<C> for Box
 where
     C: InvalidateContext,
 {
+    fn on_reuse(&mut self, _old: &dyn std::any::Any, _context: &mut C) -> crate::types::DirtyFlags {
+        DirtyFlags::empty()
+    }
+
     fn on_rebuild(&mut self, _context: &mut C) -> RebuildStatus {
         RebuildStatus::NothingChanged
     }

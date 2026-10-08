@@ -7,7 +7,8 @@ use crate::{
     animations::{AnimationFilter, AnimationKind, Easing},
     context::{
         widget_data, widget_data_mut, AnimationDirection, AnimationProgress,
-        ManageAnimationRegistry, ManageIntrinsic, ScopedContext, StateSubscription,
+        ManageAnimationRegistry, ManageIntrinsic, ScopedContext, StateLifetimeManagement,
+        StateSubscription,
     },
     decorator::{content::Content, DecoratorExt, EventHitTestDecorator},
     events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
@@ -262,6 +263,7 @@ where
     fn on_init(&mut self, context: &mut C) {
         let mut visible = true;
         if let Some(state) = self.visibility_state {
+            context.retain(state);
             <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
 
             if let Some(actual_visibility) = context.get(state) {
@@ -296,6 +298,7 @@ where
     fn on_deinit(&mut self, context: &mut C) {
         if let Some(state) = self.visibility_state {
             <C as StateSubscription<WidgetId>>::unsubscribe(context, self.id, state);
+            context.release(state);
         }
     }
 }
@@ -304,6 +307,28 @@ impl<C> Invalidate<C> for AnimatedVisibility
 where
     C: InvalidateContext,
 {
+    fn on_reuse(&mut self, old: &dyn std::any::Any, context: &mut C) -> DirtyFlags
+    where
+        C: StateLifetimeManagement,
+    {
+        let old_av_widget = old.downcast_ref::<Self>()
+            .expect("An old widget must be the same type as Self! Something went wrong during a tree rebuild process.");
+
+        if self.visibility_state != old_av_widget.visibility_state {
+            if let Some(state) = self.visibility_state {
+                context.retain(state);
+            }
+
+            if let Some(state) = old_av_widget.visibility_state {
+                context.release(state);
+            }
+
+            DirtyFlags::NEEDS_REBUILD
+        } else {
+            DirtyFlags::empty()
+        }
+    }
+
     fn on_rebuild(&mut self, context: &mut C) -> crate::stage::invalidate::RebuildStatus {
         let mut runtime_information: Unique<AVRuntimeInformation> =
             widget_data_mut(context, self.id)

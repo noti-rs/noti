@@ -137,10 +137,7 @@ impl Window {
 
         let mut event_queue = wayland_connection.new_event_queue();
 
-        let actual_size = Extent::new(
-            config.general().width.into(),
-            config.general().height.into(),
-        );
+        let actual_size = Extent::new(1, 1);
 
         let (surface, layer_surface) = Self::make_surface(protocols, &event_queue.handle());
         let (pointer, cursor_device) = Self::make_pointer(protocols, &event_queue.handle());
@@ -157,8 +154,6 @@ impl Window {
         layer_surface.set_size(actual_size.width as u32, actual_size.height as u32);
 
         surface.commit();
-
-        // TODO: create styles for the widget system
 
         let egl_state: &EglState = gpu.as_ref();
         let gr_context: &DirectContext = gpu.as_ref();
@@ -380,14 +375,19 @@ impl WindowState {
     pub(super) fn close_banners_by_id(&mut self, notification_indices: &[u32]) {
         for notification_id in notification_indices {
             if let Some(banner) = self.banner_stack.get_mut(notification_id) {
-                banner.close(ClosingReason::CallCloseNotification)
+                banner.close(
+                    &mut self.widget_system.context,
+                    ClosingReason::CallCloseNotification,
+                )
             }
         }
         self.rebuild_widget_tree();
     }
 
     pub(super) fn remove_closed_banners(&mut self) -> Vec<(Notification, ClosingReason)> {
-        let closed_banners = self.banner_stack.remove_closed(&self.widget_system.context);
+        let closed_banners = self
+            .banner_stack
+            .remove_closed(&mut self.widget_system.context);
         self.rebuild_widget_tree();
 
         closed_banners
@@ -400,12 +400,27 @@ impl WindowState {
     }
 
     fn rebuild_widget_tree(&mut self) {
+        let horizontal_position = match self.config.general().anchor {
+            config::general::Anchor::Left
+            | config::general::Anchor::TopLeft
+            | config::general::Anchor::BottomLeft => widgets::types::Position::Start,
+            config::general::Anchor::Right
+            | config::general::Anchor::TopRight
+            | config::general::Anchor::BottomRight => widgets::types::Position::End,
+            config::general::Anchor::Top | config::general::Anchor::Bottom => {
+                widgets::types::Position::Center
+            }
+        };
+
         let context = &mut self.widget_system.context;
         let flexbox = make_widget!(context <== FlexBox(
             direction: widgets::types::Direction::Vertical,
             input_behavior: InputBehavior::PassesToChildren,
+            alignment: widgets::types::Alignment::new(horizontal_position, widgets::types::Position::Start),
             margin: self.margin.into(),
-        ));
+            spacing: self.config.general().gap as usize,
+        ))
+        .unwrap();
 
         let iterator = |banner: &Banner| {
             let banner_widget_subtree = banner.build_widget_tree(context, &self.config);
@@ -420,7 +435,7 @@ impl WindowState {
 
         context.set_pending_root(flexbox);
         self.widget_system
-            .set_constraints(Constraints::new_soft(Extent::new_square(f32::MAX)));
+            .set_constraints(Constraints::new_soft(Extent::new_square(f32::INFINITY)));
         self.widget_system.update();
     }
 

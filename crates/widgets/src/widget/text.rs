@@ -23,7 +23,7 @@ use crate::{
         identifiers::{WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
-        Color, Point,
+        Color, DirtyFlags, Point,
     },
     widget::{
         Draw, DrawContext, Init, InitContext, Invalidate, InvalidateContext, WidgetGetType,
@@ -286,6 +286,7 @@ where
         };
 
         if let Some(state) = self.state {
+            context.retain(state);
             <C as StateSubscription<WidgetId>>::subscribe(context, self.id, state);
 
             if let Some(text) = context.get(state) {
@@ -316,6 +317,7 @@ where
     fn on_deinit(&mut self, context: &mut C) {
         if let Some(state) = self.state {
             <C as StateSubscription<WidgetId>>::unsubscribe(context, self.id, state);
+            context.release(state);
         }
     }
 }
@@ -324,6 +326,28 @@ impl<C> Invalidate<C> for Text
 where
     C: InvalidateContext,
 {
+    fn on_reuse(&mut self, old: &dyn std::any::Any, context: &mut C) -> crate::types::DirtyFlags
+    where
+        C: crate::context::StateLifetimeManagement,
+    {
+        let old_text_widget = old.downcast_ref::<Self>()
+            .expect("An old widget must be same type as Self! Something went wrong during a tree rebuild process.");
+
+        if self.state != old_text_widget.state {
+            if let Some(state) = self.state {
+                context.retain(state);
+            }
+
+            if let Some(state) = old_text_widget.state {
+                context.release(state);
+            }
+
+            DirtyFlags::NEEDS_REBUILD
+        } else {
+            DirtyFlags::empty()
+        }
+    }
+
     fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
         let mut runtime_information: Unique<TextRuntimeInformation> =
             widget_data_mut(context, self.id)

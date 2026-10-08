@@ -147,24 +147,6 @@ where
             .cloned()
     }
 
-    pub(crate) fn parent_by_id(&self, id: Id) -> Option<&Node> {
-        self.relations
-            .get_by_left(&id)
-            .and_then(|node_id| node_id.parent(&self.arena))
-            .and_then(|parent_node_id| self.node(&parent_node_id))
-    }
-
-    pub(crate) fn parent_by_id_mut(&mut self, id: Id) -> Option<Unique<Node>> {
-        self.relations
-            .get_by_left(&id)
-            .and_then(|node_id| node_id.parent(&self.arena))
-            .and_then(|parent_node_id| {
-                self.arena
-                    .get_data_mut(parent_node_id)
-                    .map(|val| unsafe { Unique::from_mut(val) })
-            })
-    }
-
     pub(crate) fn children_of(&self, node_id: &NodeId) -> indextree::Children<'_, Node> {
         node_id.children(&self.arena)
     }
@@ -178,38 +160,6 @@ where
             .map(|node_id| {
                 self.children_of(node_id)
                     .flat_map(|child_node_id| self.relations.get_by_right(&child_node_id).cloned())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn children_by_id(&self, id: Id) -> Vec<&Node> {
-        self.relations
-            .get_by_left(&id)
-            .map(|node_id| {
-                self.children_of(node_id)
-                    .flat_map(|child_node_id| self.node(&child_node_id))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn children_by_id_mut(&mut self, id: Id) -> Vec<Unique<Node>> {
-        self.relations
-            .get_by_left(&id)
-            .copied()
-            .map(|node_id| {
-                // INFO: here children twice collects into Vec<NodeId> and Vec<Unique<Node>> because
-                // borrow checker doesn't allow immutable and mutable access to &mut self at the
-                // same time.
-                self.children_of(&node_id)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .flat_map(|child_node_id| {
-                        self.arena
-                            .get_data_mut(child_node_id)
-                            .map(|val| unsafe { Unique::from_mut(val) })
-                    })
                     .collect()
             })
             .unwrap_or_default()

@@ -1,7 +1,7 @@
 use crate::{
     context::{
         GenerateId, GetFont, GetState, ManageAnimationRegistry, ManageDirtyFlags, RegisterKey,
-        StateSubscription,
+        StateLifetimeManagement, StateSubscription,
     },
     types::{dirty_flags::DirtyFlags, identifiers::WidgetKey, WidgetId},
     widget::{WidgetBase, WidgetInformationContext},
@@ -12,6 +12,7 @@ pub trait InitContext:
     + RegisterKey<WidgetKey, WidgetId>
     + GetState
     + StateSubscription<WidgetId>
+    + StateLifetimeManagement
     + WidgetInformationContext
     + ManageDirtyFlags<WidgetId>
     + ManageAnimationRegistry<WidgetId>
@@ -24,6 +25,7 @@ impl<C> InitContext for C where
         + RegisterKey<WidgetKey, WidgetId>
         + GetState
         + StateSubscription<WidgetId>
+        + StateLifetimeManagement
         + WidgetInformationContext
         + ManageDirtyFlags<WidgetId>
         + ManageAnimationRegistry<WidgetId>

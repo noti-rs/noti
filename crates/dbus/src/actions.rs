@@ -54,7 +54,7 @@ pub enum Signal {
 }
 
 /// Represents the reason why a notification was closed, as defined by the freedesktop specification.
-#[derive(Display)]
+#[derive(Display, Clone)]
 pub enum ClosingReason {
     /// The notification expired (timeout reached).
     Expired,

@@ -95,13 +95,13 @@ impl<'de> Deserialize<'de> for Spacing {
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_any(PaddingVisitor(PhantomData))
+        deserializer.deserialize_any(SpacingVisitor(PhantomData))
     }
 }
 
-struct PaddingVisitor<T>(PhantomData<fn() -> T>);
+struct SpacingVisitor<T>(PhantomData<fn() -> T>);
 
-impl<'de, T> Visitor<'de> for PaddingVisitor<T>
+impl<'de, T> Visitor<'de> for SpacingVisitor<T>
 where
     T: Deserialize<'de> + From<HashMap<String, u16>> + From<Vec<u16>> + From<i64>,
 {
@@ -174,7 +174,7 @@ margin = {{ top = 5, horizontal = 10 }}"#
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut custom_padding = HashMap::new();
+        let mut table = HashMap::new();
 
         while let Some((key, value)) = map.next_entry::<String, u16>()? {
             if !Spacing::POSSIBLE_KEYS.contains(&key.as_str()) {
@@ -185,30 +185,30 @@ margin = {{ top = 5, horizontal = 10 }}"#
             }
 
             match key.as_str() {
-                "top" | "bottom" if custom_padding.contains_key("vertical") => {
+                "top" | "bottom" if table.contains_key("vertical") => {
                     return Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Str(key.as_str()),
                         &self,
                     ))
                 }
                 "vertical"
-                    if custom_padding.contains_key("top")
-                        || custom_padding.contains_key("bottom") =>
+                    if table.contains_key("top")
+                        || table.contains_key("bottom") =>
                 {
                     return Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Str(key.as_str()),
                         &self,
                     ))
                 }
-                "right" | "left" if custom_padding.contains_key("horizontal") => {
+                "right" | "left" if table.contains_key("horizontal") => {
                     return Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Str(key.as_str()),
                         &self,
                     ))
                 }
                 "horizontal"
-                    if custom_padding.contains_key("right")
-                        || custom_padding.contains_key("left") =>
+                    if table.contains_key("right")
+                        || table.contains_key("left") =>
                 {
                     return Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Str(key.as_str()),
@@ -218,11 +218,11 @@ margin = {{ top = 5, horizontal = 10 }}"#
                 _ => (),
             }
 
-            custom_padding.insert(key, value);
+            table.insert(key, value);
         }
 
-        if !custom_padding.is_empty() {
-            Ok(custom_padding.into())
+        if !table.is_empty() {
+            Ok(table.into())
         } else {
             Err(serde::de::Error::invalid_length(0, &self))
         }

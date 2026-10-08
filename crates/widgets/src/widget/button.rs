@@ -10,7 +10,7 @@ use crate::{
         layout::{Layout, LayoutContext},
         measure::{Measure, MeasureContext},
     },
-    types::{Extent, Point},
+    types::{DirtyFlags, Extent, Point},
     widget::{WidgetGetType, WidgetInformationContext, WidgetKey, WidgetSizingMode},
     WidgetId,
 };
@@ -59,6 +59,10 @@ impl<C> Invalidate<C> for Button
 where
     C: InvalidateContext,
 {
+    fn on_reuse(&mut self, _old: &dyn std::any::Any, _context: &mut C) -> DirtyFlags {
+        DirtyFlags::empty()
+    }
+
     fn on_rebuild(&mut self, _context: &mut C) -> crate::stage::invalidate::RebuildStatus {
         crate::stage::invalidate::RebuildStatus::NothingChanged
     }

@@ -6,7 +6,10 @@
 //! [Deinit::on_deinit] method to free this data.
 
 use crate::{
-    context::{ClearWidgetResources, ManageAnimationRegistry, StateSubscription, UnregisterKey},
+    context::{
+        ClearWidgetResources, ManageAnimationRegistry, StateLifetimeManagement, StateSubscription,
+        UnregisterKey,
+    },
     types::{identifiers::WidgetKey, WidgetId},
     widget::{WidgetBase, WidgetInformationContext},
 };
@@ -15,6 +18,7 @@ pub trait DeinitContext:
     WidgetInformationContext
     + UnregisterKey<WidgetKey>
     + StateSubscription<WidgetId>
+    + StateLifetimeManagement
     + ManageAnimationRegistry<WidgetId>
     + ClearWidgetResources<WidgetId>
 {
@@ -24,6 +28,7 @@ impl<C> DeinitContext for C where
     C: WidgetInformationContext
         + UnregisterKey<WidgetKey>
         + StateSubscription<WidgetId>
+        + StateLifetimeManagement
         + ManageAnimationRegistry<WidgetId>
         + ClearWidgetResources<WidgetId>
 {

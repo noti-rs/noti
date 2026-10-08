@@ -1,6 +1,7 @@
 use crate::{
     context::{
         AnimationQuery, GetState, ManageAnimationRegistry, ManageDirtyFlags, ScopedManageState,
+        StateLifetimeManagement,
     },
     types::{
         dirty_flags::{propagate_needs_measure, DirtyFlags},
@@ -38,9 +39,20 @@ pub trait Invalidate<C>: WidgetInformation + WidgetSizingMode<C>
 where
     C: InvalidateContext,
 {
+    /// When a widget reuses during a tree rebuild process, this method is called.
+    ///
+    /// The implementation must check the difference from current and old information that cannot be
+    /// compared by [`crate::stage::rebuild::WidgetDiff`], also requiring additional actions.
+    ///
+    /// For instance, states cannot be easily checked by the trait above, because on change need to
+    /// decrement reference counter of the old state and increment reference counter of the new state.
+    fn on_reuse(&mut self, old: &dyn std::any::Any, context: &mut C) -> DirtyFlags
+    where
+        C: StateLifetimeManagement;
+
     fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus;
 
-    fn invalidate(&mut self, context: &mut C) -> DirtyFlags {
+    fn invalidate(&mut self, context: &mut C) {
         let mut dirty_flags = context.get_dirty_flags(self.get_id());
 
         if dirty_flags.contains(DirtyFlags::NEEDS_REBUILD) {
@@ -61,7 +73,5 @@ where
                 propagate_needs_measure(self.get_id(), context);
             }
         }
-
-        dirty_flags
     }
 }

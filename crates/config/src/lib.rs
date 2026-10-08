@@ -17,6 +17,7 @@ pub mod sorting;
 pub mod spacing;
 pub mod text;
 pub mod theme;
+pub mod size;
 
 use spacing::Spacing;
 

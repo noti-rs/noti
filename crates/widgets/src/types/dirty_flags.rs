@@ -1,6 +1,4 @@
-use crate::{
-    context::ManageDirtyFlags, forest::Get, types::WidgetId, widget::WidgetInformationContext,
-};
+use crate::{context::ManageDirtyFlags, types::WidgetId, widget::WidgetInformationContext};
 
 bitflags::bitflags! {
     /// DirtyFlags represent the pending updates for a widget.
@@ -28,8 +26,8 @@ where
     context.append_dirty_flags(node_id, DirtyFlags::NEEDS_MEASURE);
 
     let mut current_id = node_id;
-    while let Some(node) = context.parent_of(current_id) {
-        current_id = node.get();
+    while let Some(parent_node_id) = context.parent_id_of(current_id) {
+        current_id = parent_node_id;
 
         let mut parent_dirty_flags = context.get_dirty_flags(current_id);
         // INFO: If an ancestor already has NEEDS_MEASURE, propagating this invalidation farther

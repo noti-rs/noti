@@ -1,4 +1,5 @@
 use indextree::NodeId;
+use log::warn;
 use shared::unique::Unique;
 
 use crate::{
@@ -414,64 +415,20 @@ pub trait WidgetTreeAccess<Id>
 where
     Id: Into<WidgetId>,
 {
-    fn widget_by(&self, id: Id) -> Option<&dyn Widget<Context>>;
-    fn widget_by_mut(&mut self, id: Id) -> Option<Unique<dyn Widget<Context>>>;
-
     fn parent_id_of(&self, id: Id) -> Option<WidgetId>;
-    fn parent_of(&self, id: Id) -> Option<&dyn Widget<Context>>;
-    fn parent_of_mut(&mut self, id: Id) -> Option<Unique<dyn Widget<Context>>>;
-
     fn childrens_identifiers_of(&self, id: Id) -> Vec<WidgetId>;
-    fn children_of(&self, id: Id) -> Vec<&dyn Widget<Context>>;
-    fn children_of_mut(&mut self, id: Id) -> Vec<Unique<dyn Widget<Context>>>;
 }
 
 impl<Id> WidgetTreeAccess<Id> for Context
 where
     Id: Into<WidgetId>,
 {
-    fn widget_by(&self, id: Id) -> Option<&dyn Widget<Context>> {
-        self.widget_forest.node_by_id(&id.into()).map(|w| &**w)
-    }
-
-    fn widget_by_mut(&mut self, id: Id) -> Option<Unique<dyn Widget<Context>>> {
-        self.widget_forest
-            .node_by_id_mut(&id.into())
-            .map(|mut w| unsafe { Unique::from_mut(&mut **w) })
-    }
-
     fn parent_id_of(&self, id: Id) -> Option<WidgetId> {
         self.widget_forest.parent_id_by_id(id.into())
     }
 
-    fn parent_of(&self, id: Id) -> Option<&dyn Widget<Context>> {
-        self.widget_forest.parent_by_id(id.into()).map(|w| &**w)
-    }
-
-    fn parent_of_mut(&mut self, id: Id) -> Option<Unique<dyn Widget<Context>>> {
-        self.widget_forest
-            .parent_by_id_mut(id.into())
-            .map(|mut w| unsafe { Unique::from_mut(&mut **w) })
-    }
-
     fn childrens_identifiers_of(&self, id: Id) -> Vec<WidgetId> {
         self.widget_forest.childrens_indices_by_id(id.into())
-    }
-
-    fn children_of(&self, id: Id) -> Vec<&dyn Widget<Context>> {
-        self.widget_forest
-            .children_by_id(id.into())
-            .into_iter()
-            .map(|w| &**w)
-            .collect()
-    }
-
-    fn children_of_mut(&mut self, id: Id) -> Vec<Unique<dyn Widget<Context>>> {
-        self.widget_forest
-            .children_by_id_mut(id.into())
-            .into_iter()
-            .map(|mut w| unsafe { Unique::from_mut(&mut **w) })
-            .collect()
     }
 }
 
@@ -530,24 +487,56 @@ fn perform_operation_set(context: &mut Context, rebuild_context: &RebuildContext
                 old_node_id,
                 new_node_id,
             } => {
+                // SAFETY: this code cannot be expressed using ordinary Rust references because
+                // `on_reuse` requires simultaneous access to the new widget, the old widget,
+                // and the Context containing both of them. The borrow checker correctly
+                // rejects such code in general, so the aliasing created here must be justified
+                // by the specific semantics of this operation.
+                //
+                // The `on_reuse` method is intentionally restricted to reconciling the runtime
+                // state of the new widget with the old widget. In particular, while the
+                // `on_reuse` call is active, it must not use `Context` to access or invalidate
+                // either the old or the new node. This includes deleting, replacing, moving,
+                // or otherwise invalidating either node, or creating another mutable access
+                // to either node through `Context`.
+                //
+                // The references represented by `Unique<Context>`, `Unique<dyn Widget<Context>>`,
+                // and `&dyn Widget<Context>` must remain valid for the entire duration of the
+                // `on_reuse` call. After the call returns, these temporary aliases are no
+                // longer used and the normal `Context` reference is used again.
+                //
+                // SOUNDNESS: Rust's borrow checker guarantees that a value is accessed through
+                // either one mutable reference or multiple immutable references at a time.
+                // Because `Context` owns the widget forest and provides access to its nodes,
+                // obtaining a mutable reference to the new node while also passing a mutable
+                // reference to `Context` is normally prohibited. `Unique` is used here to
+                // express an aliasing pattern that cannot be represented by the borrow checker.
+                //
+                // This code is sound as long as the semantic requirements above are upheld:
+                // the old and new nodes remain valid and are not accessed through conflicting
+                // aliases during the `on_reuse` call.
+
+                let mut new_node_mut = unsafe {
+                    Unique::from_mut(
+                        &mut **context
+                            .widget_forest
+                            .node_mut(new_node_id)
+                            .expect("There must be a node in a forest!"),
+                    )
+                };
+
+                let mut unique_context = unsafe { Unique::from_mut(context) };
+
                 let old_node = context
                     .widget_forest
                     .node(old_node_id)
                     .expect("There must be a node in a forest!");
                 let old_node_id = old_node.get_id();
 
-                let new_node = context
-                    .widget_forest
-                    .node(new_node_id)
-                    .expect("There must be a node in a forest!");
-
-                let dirty_flags = new_node.diff(old_node.as_ref());
-
-                let new_node_mut = context
-                    .widget_forest
-                    .node_mut(new_node_id)
-                    .expect("There must be a node in a forest!");
+                let mut dirty_flags = new_node_mut.diff(old_node.as_ref());
                 new_node_mut.set_id(old_node_id);
+
+                dirty_flags |= new_node_mut.on_reuse(old_node.as_ref(), &mut unique_context);
 
                 context
                     .widget_forest
@@ -654,6 +643,61 @@ impl<T> CreateState<T> for Context {
     fn create_state_mut(&mut self, value: T) -> MutableState<T> {
         let state_info = StateInfo::new(value, true);
         MutableState::new(self.register_state(state_info))
+    }
+}
+
+pub trait StateLifetimeManagement {
+    /// Increases the strong reference counter in internal system.
+    fn retain<T, S>(&mut self, state: S)
+    where
+        S: Into<State<T>>,
+        T: 'static;
+
+    /// Decreases the strong reference counter in internal system, can be followed with freeing an
+    /// underlying data of a provided state.
+    fn release<T, S>(&mut self, state: S)
+    where
+        S: Into<State<T>>,
+        T: 'static;
+}
+
+impl StateLifetimeManagement for Context {
+    fn retain<T, S>(&mut self, state: S)
+    where
+        S: Into<State<T>>,
+        T: 'static,
+    {
+        let state = state.into();
+        if let Some(state_info) = self.state_registry.get_mut(&state.descriptor) {
+            state_info.increase_ref_count();
+        } else {
+            warn!(
+                "Someone tried to retain a non-existent state with descriptor {}. Ignored.",
+                state.descriptor
+            );
+        }
+    }
+
+    fn release<T, S>(&mut self, state: S)
+    where
+        S: Into<State<T>>,
+        T: 'static,
+    {
+        let state = state.into();
+        if let Some(state_info) = self.state_registry.get_mut(&state.descriptor) {
+            state_info.decrease_ref_count();
+
+            if state_info.strong_references() == 0 {
+                // INFO: we don't tell any child widgets about removing a state, since they
+                // explicitly retain and release.
+                self.state_registry.remove(&state.descriptor);
+            }
+        } else {
+            warn!(
+                "Someone tried to release a non-existent state with descriptor {}. Ignored.",
+                state.descriptor
+            );
+        }
     }
 }
 
@@ -1310,20 +1354,18 @@ where
     }
 }
 
-fn collect_input_regions<C>(
+fn collect_input_regions(
     current_node: WidgetId,
-    context: &C,
+    context: &Context,
     input_regions: &mut Vec<(Point<f32>, Extent<f32>)>,
-) where
-    C: WidgetInformationContext + LoadLocalCoord<f32, WidgetId> + LoadExtent<f32, WidgetId>,
-{
-    if let Some(widget) = context.widget_by(current_node) {
+) {
+    if let Some(widget) = context.widget_forest.node_by_id(&current_node) {
         match widget.input_behavior() {
             crate::types::InputBehavior::Accepts => {
                 input_regions.push((
-                    <C as LoadLocalCoord<f32, WidgetId>>::load(context, current_node)
+                    <Context as LoadLocalCoord<f32, WidgetId>>::load(context, current_node)
                         .unwrap_or_default(),
-                    <C as LoadExtent<f32, WidgetId>>::load(context, current_node)
+                    <Context as LoadExtent<f32, WidgetId>>::load(context, current_node)
                         .unwrap_or_default(),
                 ));
             }

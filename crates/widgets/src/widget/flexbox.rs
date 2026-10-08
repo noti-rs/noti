@@ -24,7 +24,7 @@ use crate::{
         identifiers::{WidgetId, WidgetKey},
         offset::Offset,
         spacing::Spacing,
-        Point,
+        DirtyFlags, Point,
     },
     widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
 };
@@ -253,6 +253,10 @@ impl<C> Invalidate<C> for FlexBox
 where
     C: InvalidateContext,
 {
+    fn on_reuse(&mut self, _old: &dyn std::any::Any, _context: &mut C) -> crate::types::DirtyFlags {
+        DirtyFlags::empty()
+    }
+
     fn on_rebuild(&mut self, _context: &mut C) -> RebuildStatus {
         RebuildStatus::NothingChanged
     }
@@ -347,10 +351,13 @@ where
             used_extent.main += between_children_spacing;
 
             for (child_widget_id, child_intrinsic) in fixed_children {
-                let child_constraints = Constraints::new_tight(
+                let child_constraints = Constraints::new_soft(
                     FlexExtent {
                         main: child_intrinsic.max.by_direction(&self.direction()),
-                        cross: flex_constraints.max.cross,
+                        cross: child_intrinsic
+                            .max
+                            .by_direction(&self.direction().orthogonalize())
+                            .min(flex_constraints.max.cross),
                     }
                     .to_normal(&self.direction()),
                 );

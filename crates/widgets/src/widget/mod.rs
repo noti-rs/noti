@@ -1,7 +1,7 @@
 pub mod animated_visibility;
 pub mod r#box;
 pub mod button;
-pub mod constraint_box;
+pub mod constrained_box;
 pub mod flexbox;
 pub mod image;
 pub mod text;
@@ -27,7 +27,7 @@ use crate::{
 
 pub use {
     button::{Button, ButtonBuilder},
-    constraint_box::{ConstrainedBox, ConstrainedBoxBuilder},
+    constrained_box::{ConstrainedBox, ConstrainedBoxBuilder},
     flexbox::{FlexBox, FlexBoxBuilder},
     image::{FitMode, Image, ImageBuilder, ImageInfo, MipmapMode, ResizingMethod},
     r#box::{Box, BoxBuilder},
@@ -258,6 +258,13 @@ impl<C> Invalidate<C> for WidgetEnum
 where
     C: InvalidateContext,
 {
+    fn on_reuse(&mut self, old: &dyn std::any::Any, context: &mut C) -> crate::types::DirtyFlags
+    where
+        C: crate::context::StateLifetimeManagement,
+    {
+        delegate!(self.on_reuse(old, context))
+    }
+
     fn on_rebuild(&mut self, context: &mut C) -> RebuildStatus {
         delegate!(self.on_rebuild(context))
     }
@@ -378,25 +385,24 @@ impl From<AnimatedVisibility> for WidgetEnum {
 #[macro_export]
 macro_rules! make_widget {
     ($context:ident <== $name:ident ( $($field_name:ident: $val:expr),* $(,)? ) { $($child_node_id:expr),*$(,)? }) => {{
-            let widget = Box::new($name::builder()
-                $(.$field_name($val))*
-                .build());
-            let node_id = $context.create_widget(widget);
+        let widget = Box::new($name::builder()
+            $(.$field_name($val))*
+            .build());
+        let node_id = $context.create_widget(widget);
 
-            $(
-                {
-                    let child_node_id = $child_node_id;
-                    $context.append_child(node_id, child_node_id);
-                }
-            )*
+        $(
+            if let Some(child_node_id) = $child_node_id {
+                $context.append_child(node_id, child_node_id);
+            }
+        )*
 
-            node_id
+        Some(node_id)
     }};
 
     ($context:ident <== $name:ident ( $($field_name:ident: $val:expr),* $(,)? )) => {{
-            let widget = Box::new($name::builder()
-                $(.$field_name($val))*
-                .build());
-            $context.create_widget(widget)
+        let widget = Box::new($name::builder()
+            $(.$field_name($val))*
+            .build());
+        Some($context.create_widget(widget))
     }};
 }

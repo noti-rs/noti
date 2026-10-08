@@ -1,4 +1,4 @@
-use config::{display::DisplayConfig, Config};
+use config::{display::DisplayConfig, size::Size, Config};
 use dbus::{actions::ClosingReason, notification::Notification};
 use indexmap::{
     indexmap,
@@ -7,13 +7,16 @@ use indexmap::{
 };
 use log::{debug, trace, warn};
 use shared::text;
-use std::{cmp::Ordering, collections::VecDeque, hash::Hash, time};
+use std::{cmp::Ordering, collections::VecDeque, hash::Hash, path::PathBuf, time};
 use widgets::{
     self,
     animations::AnimationKind,
-    context::{Context, CreateState, GetState, SetState, WidgetTreeCreation},
+    context::{
+        Context, CreateState, GetState, SetState, StateLifetimeManagement, WidgetTreeCreation,
+    },
     forest::NodeId,
     make_widget,
+    stage::measure::Constraints,
     state::MutableState,
     types::{Alignment, Border, Direction, Point, Position, Spacing},
     widget::{
@@ -57,7 +60,7 @@ where
     pub(super) fn configure(&mut self, config: &Config, context: &mut Context) {
         self.sort_by_config(config);
         self.banners_mut()
-            .for_each(|banner| banner.update_config(config, context));
+            .for_each(|banner| banner.update_by_config(config, context));
     }
 
     fn sort_by_config(&mut self, config: &Config) {
@@ -80,15 +83,20 @@ impl BannerStack<u32> {
     /// Removes already closed banners.
     pub(super) fn remove_closed(
         &mut self,
-        context: &Context,
+        context: &mut Context,
     ) -> Vec<(Notification, ClosingReason)> {
         self.banners
-            .drain_filter(|(_, banner)| banner.is_closed() && banner.is_finished(context))
+            .drain_filter(|(_, banner)| banner.is_closed(context) && banner.is_finished(context))
             .into_iter()
             .map(|(_, banner)| {
-                (banner.notification, unsafe {
-                    banner.close_status.into_reason().unwrap_unchecked()
-                })
+                let closing_reason = context
+                    .get(banner.banner_state.close_status)
+                    .expect("Close status must exist in a banner state!")
+                    .to_reason()
+                    .expect("A banner pust be properly closed with a closing reason!");
+                banner.banner_state.clear_states(context);
+
+                (banner.notification, closing_reason)
             })
             .collect()
     }
@@ -222,8 +230,6 @@ where
 /// Represents a notification banner.
 pub(super) struct Banner {
     notification: Notification,
-    close_status: CloseStatus,
-
     banner_state: BannerState,
 }
 
@@ -232,16 +238,23 @@ struct BannerState {
     shown_at: MutableState<time::Instant>,
     banner_phase: MutableState<BannerPhase>,
 
+    visibility_state: MutableState<bool>,
+    hovered: MutableState<bool>,
+    close_status: MutableState<CloseStatus>,
+
+    app_name_state: MutableState<text::Text>,
     summary_state: MutableState<text::Text>,
     body_state: MutableState<text::Text>,
+
     thumbnail_state: MutableState<ImageProvider>,
-    visibility_state: MutableState<bool>,
+    app_icon_state: MutableState<ImageProvider>,
+    window_close_icon_state: MutableState<ImageProvider>,
 }
 
 enum BannerPhase {
     NotShown,
     Shown,
-    Closing,
+    Disappearing,
     Closed,
 }
 
@@ -253,36 +266,69 @@ impl Banner {
             timeout: display.timeout.by_urgency(&notification.hints.urgency) as u128,
             shown_at: context.create_state_mut(time::Instant::now()),
             banner_phase: context.create_state_mut(BannerPhase::NotShown),
+
+            visibility_state: context.create_state_mut(true),
+            hovered: context.create_state_mut(false),
+            close_status: context.create_state_mut(CloseStatus::NotClosed),
+
+            app_name_state: context.create_state_mut(text::Text {
+                body: notification.app_name.to_string(),
+                entities: vec![],
+            }),
             summary_state: context.create_state_mut(notification.summary.clone()),
             body_state: context.create_state_mut(notification.body.clone()),
+
             thumbnail_state: context
-                .create_state_mut(get_notification_thumbnail(&notification, display)),
-            visibility_state: context.create_state_mut(true),
+                .create_state_mut(resolve_notification_thumbnail(&notification, display)),
+            app_icon_state: context.create_state_mut(resolve_app_icon(
+                &notification,
+                display,
+                None,
+            )),
+
+            window_close_icon_state: context.create_state_mut(resolve_window_close_icon(display)),
         };
         debug!("Banner (id={}): Created", notification.id);
 
         Self {
             notification,
-            close_status: CloseStatus::NotClosed,
             banner_state,
         }
     }
 
     pub(super) fn build_widget_tree(&self, context: &mut Context, config: &Config) -> NodeId {
-        let width = config.general().width;
-        let height = config.general().height;
+        fn get_constraints(size: Size) -> Constraints<usize> {
+            match size {
+                Size::Fixed(val) => Constraints::new_tight(val as usize),
+                Size::Dynamic { min, max } => Constraints {
+                    min: min as usize,
+                    max: max as usize,
+                },
+            }
+        }
 
         let display = config.display_by_app(&self.notification.app_name);
         let theme = config.theme_by_app(&self.notification.app_name);
         let colors = theme.by_urgency(&self.notification.hints.urgency);
 
+        let width_constraints = get_constraints(display.width);
+        let height_constraints = get_constraints(display.height);
+
         let BannerState {
-            visibility_state,
-            banner_phase,
             shown_at,
+            banner_phase,
+
+            visibility_state,
+            hovered,
+            close_status,
+
+            app_name_state,
             summary_state,
             body_state,
+
             thumbnail_state,
+            app_icon_state,
+            window_close_icon_state,
             ..
         } = self.banner_state;
 
@@ -306,16 +352,25 @@ impl Banner {
                     context.set(banner_phase, BannerPhase::Closed);
                 },
                 on_hover: move |mut context, _| {
-                    context.set(visibility_state, true);
+                    let close_status = context.get(close_status);
+
+                    if close_status.is_some_and(|status| !status.is_closed()) {
+                        context.set(visibility_state, true);
+                        context.set(hovered, true);
+                    }
                 },
+                on_leave: move |mut context, _| {
+                    context.set(hovered, false);
+                    context.set(shown_at, time::Instant::now());
+                }
             ) {
                 make_widget! {
                     context <== ConstrainedBox(
-                        min_width: width as usize,
-                        max_width: width as usize,
+                        min_width: width_constraints.min,
+                        max_width: width_constraints.max,
 
-                        min_height: width as usize,
-                        max_height: height as usize,
+                        min_height: height_constraints.min,
+                        max_height: height_constraints.max,
                     ) {
                         make_widget! {
                             context <== FlexBox(
@@ -328,57 +383,65 @@ impl Banner {
                                     color: colors.border.clone().into(),
                                 },
                             ) {
-                                make_widget! {
-                                    context <== FlexBox(
-                                        direction: Direction::Horizontal,
-                                        spacing: 10,
-                                        padding: Spacing { left: 15, right: 5, ..Default::default() },
-                                        alignment: Alignment::new(Position::SpaceBetween, Position::Center),
-                                        expand: true,
-                                    ) {
-                                        make_widget! {
-                                            context <== FlexBox(
-                                                direction: Direction::Horizontal,
-                                                spacing: 10,
-                                            ) {
-                                                make_widget! {
-                                                    context <== Image(
-                                                        state: context.create_state(ImageProvider::Icon {
-                                                            name: self.notification.app_icon.clone(),
-                                                            theme: display.icons.theme.clone(),
-                                                            sizes: vec![22, 12]
-                                                        }),
-                                                    )
-                                                },
-                                                make_widget! {
-                                                    context <== Text(
-                                                        state: context.create_state(text::Text {
-                                                            body: self.notification.app_name.to_string(), entities: vec![]
-                                                        }),
-                                                        color: colors.foreground.clone().into(),
-                                                    )
-                                                },
-                                            }
-                                        },
-                                        make_widget! {
-                                            context <== Button(
-                                                on_click: move |mut context, _| {
-                                                    context.set(visibility_state, false);
-                                                    context.set(banner_phase, BannerPhase::Closed);
+                                if display.top_bar.enable {
+                                    make_widget! {
+                                        context <== FlexBox(
+                                            direction: Direction::Horizontal,
+                                            spacing: 10,
+                                            padding: Spacing { left: 15, right: 5, ..Default::default() },
+                                            alignment: Alignment::new(Position::SpaceBetween, Position::Center),
+                                            expand: true,
+                                        ) {
+                                            make_widget! {
+                                                context <== FlexBox(
+                                                    direction: Direction::Horizontal,
+                                                    spacing: 10,
+                                                ) {
+                                                    if display.top_bar.show_icon {
+                                                        make_widget! {
+                                                            context <== Image(
+                                                                state: app_icon_state
+                                                            )
+                                                        }
+                                                    } else {
+                                                        None
+                                                    },
+                                                    make_widget! {
+                                                        context <== Text(
+                                                            state: app_name_state,
+                                                            font: widgets::widget::Font {
+                                                                name: display.app_name.font.name.clone(),
+                                                                size: display.app_name.font_size as usize,
+                                                                style: display.app_name.style.into(),
+                                                            },
+                                                            wrap: display.app_name.wrap,
+                                                            margin: display.app_name.margin.into(),
+                                                            alignment: display.app_name.alignment.into(),
+                                                            line_spacing: display.app_name.line_spacing as usize,
+                                                            color: colors.foreground.clone().into(),
+                                                        )
+                                                    },
                                                 }
-                                            ) {
-                                                make_widget! {
-                                                    context <== Image(
-                                                        state: context.create_state(ImageProvider::Icon {
-                                                            name: "window-close".to_string(),
-                                                            theme: display.icons.theme.clone(),
-                                                            sizes: vec![22, 12]
-                                                        })
-                                                    )
+                                            },
+                                            make_widget! {
+                                                context <== Button(
+                                                    on_click: move |mut context, _| {
+                                                        context.set(visibility_state, false);
+                                                        context.set(banner_phase, BannerPhase::Disappearing);
+                                                        context.set(close_status, CloseStatus::Closed(ClosingReason::DismissedByUser));
+                                                    }
+                                                ) {
+                                                    make_widget! {
+                                                        context <== Image(
+                                                            state: window_close_icon_state,
+                                                        )
+                                                    }
                                                 }
-                                            }
-                                        },
+                                            },
+                                        }
                                     }
+                                } else {
+                                    None
                                 },
                                 make_widget! {
                                     context <== FlexBox(
@@ -441,14 +504,23 @@ impl Banner {
                 },
             }
         }
+        // INFO: declarative macro explicitly wraps into `Some(NodeId)` and we know it. So just
+        // unwrap and go.
+        .unwrap()
     }
 
-    pub(super) fn close(&mut self, closing_reason: ClosingReason) {
-        self.close_status.close_with(closing_reason);
+    pub(super) fn close(&mut self, context: &mut Context, closing_reason: ClosingReason) {
+        context.set(
+            self.banner_state.close_status,
+            CloseStatus::Closed(closing_reason),
+        );
     }
 
-    pub(super) fn is_closed(&self) -> bool {
-        self.close_status.is_closed()
+    pub(super) fn is_closed(&self, context: &Context) -> bool {
+        context
+            .get(self.banner_state.close_status)
+            .map(|close_status| close_status.is_closed())
+            .unwrap_or(false)
     }
 
     fn is_finished(&self, context: &Context) -> bool {
@@ -471,19 +543,11 @@ impl Banner {
         context: &mut Context,
     ) {
         self.notification = notification;
+        let display = config.display_by_app(&self.notification.app_name);
 
-        context.set(
-            self.banner_state.summary_state,
-            self.notification.summary.clone(),
-        );
-        context.set(self.banner_state.body_state, self.notification.body.clone());
-        context.set(
-            self.banner_state.thumbnail_state,
-            get_notification_thumbnail(
-                &self.notification,
-                config.display_by_app(&self.notification.app_name),
-            ),
-        );
+        self.banner_state.update_texts(&self.notification, context);
+        self.banner_state
+            .update_images(&self.notification, display, context);
 
         self.reset_timeout(context);
         debug!(
@@ -492,18 +556,14 @@ impl Banner {
         );
     }
 
-    pub(super) fn update_config(&mut self, config: &Config, context: &mut Context) {
-        let display_config = config.display_by_app(&self.notification.app_name);
+    pub(super) fn update_by_config(&mut self, config: &Config, context: &mut Context) {
+        let display = config.display_by_app(&self.notification.app_name);
 
-        self.banner_state.timeout = display_config
-            .timeout
-            .by_urgency(&self.notification.hints.urgency)
-            as u128;
+        self.banner_state.timeout =
+            display.timeout.by_urgency(&self.notification.hints.urgency) as u128;
 
-        context.set(
-            self.banner_state.thumbnail_state,
-            get_notification_thumbnail(&self.notification, display_config),
-        );
+        self.banner_state
+            .update_images(&self.notification, display, context);
     }
 
     pub(super) fn update(&mut self, context: &mut Context) {
@@ -511,30 +571,112 @@ impl Banner {
             .get(self.banner_state.banner_phase)
             .expect("Banner State must be created!")
         {
-            BannerPhase::NotShown | BannerPhase::Closing => (),
+            BannerPhase::NotShown | BannerPhase::Disappearing => (),
             BannerPhase::Shown => {
+                if context
+                    .get(self.banner_state.hovered)
+                    .copied()
+                    .unwrap_or_default()
+                {
+                    return;
+                }
+
                 let shown_at = context
                     .get(self.banner_state.shown_at)
                     .expect("Time snapshot must be created!");
 
                 if self.banner_state.timeout != 0
                     && shown_at.elapsed().as_millis() >= self.banner_state.timeout
-                    && *context.get(self.banner_state.visibility_state).unwrap()
                 {
                     context.set(self.banner_state.visibility_state, false);
-                    context.set(self.banner_state.banner_phase, BannerPhase::Closing);
+                    context.set(self.banner_state.banner_phase, BannerPhase::Disappearing);
                 }
             }
             BannerPhase::Closed => {
-                self.close_status.close_with(ClosingReason::Expired);
+                context.set(
+                    self.banner_state.close_status,
+                    CloseStatus::Closed(ClosingReason::Expired),
+                );
             }
         }
     }
 }
 
-fn get_notification_thumbnail(
+impl BannerState {
+    fn clear_states(&self, context: &mut Context) {
+        let &Self {
+            timeout: _timeout,
+            shown_at,
+            banner_phase,
+
+            visibility_state,
+            hovered,
+            close_status,
+
+            app_name_state,
+            summary_state,
+            body_state,
+
+            thumbnail_state,
+            app_icon_state,
+            window_close_icon_state,
+        } = self;
+
+        context.release(shown_at);
+        context.release(banner_phase);
+
+        context.release(visibility_state);
+        context.release(hovered);
+        context.release(close_status);
+
+        context.release(app_name_state);
+        context.release(summary_state);
+        context.release(body_state);
+
+        context.release(thumbnail_state);
+        context.release(app_icon_state);
+        context.release(window_close_icon_state);
+    }
+
+    fn update_texts(&self, notification: &Notification, context: &mut Context) {
+        context.set(
+            self.app_name_state,
+            text::Text {
+                body: notification.app_name.clone(),
+                entities: vec![],
+            },
+        );
+
+        context.set(self.summary_state, notification.summary.clone());
+        context.set(self.body_state, notification.body.clone());
+    }
+
+    fn update_images(
+        &self,
+        notification: &Notification,
+        display: &DisplayConfig,
+        context: &mut Context,
+    ) {
+        context.set(
+            self.thumbnail_state,
+            resolve_notification_thumbnail(notification, display),
+        );
+
+        context.set(
+            self.app_icon_state,
+            resolve_app_icon(notification, display, None),
+        );
+
+        context.set(
+            self.window_close_icon_state,
+            resolve_window_close_icon(display),
+        );
+    }
+}
+
+fn resolve_notification_thumbnail(
     notification: &Notification,
-    display_config: &DisplayConfig,
+    display: &DisplayConfig,
 ) -> ImageProvider {
     notification
         .hints
@@ -550,25 +692,72 @@ fn get_notification_thumbnail(
             })
         })
         .or_else(|| {
-            notification
-                .hints
-                .image_path
-                .as_deref()
-                .map(std::path::PathBuf::from)
-                .map(ImageProvider::ImagePath)
+            notification.hints.image_path.as_deref().map(|path| {
+                if path.starts_with("file://") {
+                    ImageProvider::ImagePath(parse_uri_path(path).unwrap_or_default())
+                } else {
+                    ImageProvider::Icon {
+                        name: path.to_owned(),
+                        theme: display.icons.theme.clone(),
+                        sizes: display.icons.size.clone(),
+                    }
+                }
+            })
         })
-        // .or_else(|| {
-        //     if notification.app_icon.is_empty() {
-        //         return None;
-        //     }
-        //
-        //     Some(ImageProvider::Icon {
-        //         name: notification.app_icon.clone(),
-        //         theme: display_config.icons.theme.clone(),
-        //         sizes: display_config.icons.size.clone(),
-        //     })
-        // })
+        .or_else(|| {
+            if display.top_bar.enable {
+                return None;
+            }
+
+            if notification.app_icon.is_empty() {
+                return None;
+            }
+
+            Some(resolve_app_icon(
+                notification,
+                display,
+                display.icons.size.clone(),
+            ))
+        })
         .unwrap_or(ImageProvider::Unknown)
+}
+
+fn resolve_app_icon<S: Into<Option<Vec<u16>>>>(
+    notification: &Notification,
+    display: &DisplayConfig,
+    sizes: S,
+) -> ImageProvider {
+    if notification.app_icon.starts_with("file://") {
+        ImageProvider::ImagePath(dbg!(
+            parse_uri_path(&notification.app_icon).unwrap_or_default()
+        ))
+    } else {
+        ImageProvider::Icon {
+            name: if !notification.app_icon.is_empty() {
+                notification.app_icon.clone()
+            } else {
+                notification.hints.desktop_entry.clone().unwrap_or_default()
+            },
+            theme: display.icons.theme.clone(),
+            sizes: sizes.into().unwrap_or(vec![22, 18, 16, 14, 12]),
+        }
+    }
+}
+
+fn resolve_window_close_icon(display: &DisplayConfig) -> ImageProvider {
+    ImageProvider::Icon {
+        name: "window-close".to_string(),
+        theme: display.icons.theme.clone(),
+        sizes: vec![22, 18, 16, 14, 12],
+    }
+}
+
+fn parse_uri_path(path: &str) -> Option<PathBuf> {
+    url::Url::parse(path).ok().and_then(|path| {
+        debug_assert!(path.scheme() == "file");
+
+        path.to_file_path().ok()
+    })
 }
 
 impl<'a> From<&'a Banner> for &'a Notification {
@@ -589,18 +778,10 @@ impl CloseStatus {
         matches!(self, CloseStatus::Closed(_))
     }
 
-    fn close_with(&mut self, closing_reason: ClosingReason) {
-        match self {
-            CloseStatus::NotClosed | CloseStatus::Closed(_) => {
-                *self = CloseStatus::Closed(closing_reason)
-            }
-        }
-    }
-
-    fn into_reason(self) -> Option<ClosingReason> {
+    fn to_reason(&self) -> Option<ClosingReason> {
         match self {
             CloseStatus::NotClosed => None,
-            CloseStatus::Closed(reason) => Some(reason),
+            CloseStatus::Closed(reason) => Some(reason.clone()),
         }
     }
 }
@@ -611,7 +792,16 @@ fn correct_animation(
 ) -> AnimationDefinition {
     if let AnimationKind::Translate(translate) = &mut animation_definition.kind {
         const ADDITION: f32 = 50.0;
-        let max_banner_width = config.general().width as f32;
+
+        let max_banner_width = config
+            .displays()
+            .map(|display| match display.width {
+                Size::Fixed(val) => val,
+                Size::Dynamic { max, .. } => max,
+            })
+            .max()
+            .unwrap_or_default() as f32;
+
         let horizontal_margin = config.general().offset.0 as f32;
 
         let mut start = Point { x: 0.0, y: 0.0 };

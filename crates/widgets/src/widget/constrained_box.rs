@@ -5,7 +5,7 @@ use crate::stage::init::{Init, InitContext};
 use crate::stage::invalidate::{Invalidate, InvalidateContext};
 use crate::stage::layout::{Layout, LayoutContext};
 use crate::stage::measure::{Constraints, Measure, MeasureContext};
-use crate::types::Extent;
+use crate::types::{DirtyFlags, Extent};
 use crate::widget::{WidgetGetType, WidgetInformationContext, WidgetKey, WidgetSizingMode};
 use crate::WidgetId;
 use macros::widget;
@@ -99,6 +99,10 @@ impl<C> Invalidate<C> for ConstrainedBox
 where
     C: InvalidateContext,
 {
+    fn on_reuse(&mut self, _old: &dyn std::any::Any, _context: &mut C) -> DirtyFlags {
+        DirtyFlags::empty()
+    }
+
     fn on_rebuild(&mut self, _context: &mut C) -> crate::stage::invalidate::RebuildStatus {
         crate::stage::invalidate::RebuildStatus::NothingChanged
     }
@@ -178,6 +182,7 @@ where
                         max: constraints.max.height,
                     },
                 );
+
                 context.measure_widget(
                     child_widget_id,
                     Constraints {
