@@ -3,7 +3,7 @@ use crate::{
         GenerateId, GetFont, GetState, ManageAnimationRegistry, ManageDirtyFlags, RegisterKey,
         StateLifetimeManagement, StateSubscription,
     },
-    types::{dirty_flags::DirtyFlags, identifiers::WidgetKey, WidgetId},
+    types::{dirty_flags::propagate_needs_measure, identifiers::WidgetKey, WidgetId},
     widget::{WidgetBase, WidgetInformationContext},
 };
 
@@ -48,7 +48,7 @@ where
 
         self.on_init(context);
 
-        context.append_dirty_flags(self.get_id(), DirtyFlags::NEEDS_MEASURE);
+        propagate_needs_measure(self.get_id(), context);
     }
 
     fn on_init(&mut self, context: &mut C);

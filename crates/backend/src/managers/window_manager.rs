@@ -191,7 +191,7 @@ impl WindowManager {
     ///
     /// In case the window does not exist, these actions are not performed.
     fn process_notification_queue(&mut self, config: Data<Config, Borrowed>) -> Result<(), Error> {
-        if let Some(window) = self.window.as_mut() {
+        if let (Some(window), false) = (self.window.as_mut(), self.notification_queue.is_empty()) {
             let mut notifications_limit = config.general().limit as usize;
 
             if notifications_limit == 0 {

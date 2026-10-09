@@ -392,7 +392,10 @@ impl WindowState {
         let closed_banners = self
             .banner_stack
             .remove_closed(&mut self.widget_system.context);
-        self.rebuild_widget_tree();
+
+        if !closed_banners.is_empty() {
+            self.rebuild_widget_tree();
+        }
 
         closed_banners
     }
@@ -693,6 +696,7 @@ impl Dispatch<WpPresentationFeedback, ()> for WindowState {
                     let delta_time_ns = time_ns - *last_presented_time_ns;
 
                     state.widget_system.tick(delta_time_ns as u128);
+                    state.widget_system.update();
                     state.banner_stack.banners_mut().for_each(|banner| banner.update(&mut state.widget_system.context));
 
                     trace!("Window Presentation: Current FPS — {}", 1_000_000_000.0 / delta_time_ns as f64);
