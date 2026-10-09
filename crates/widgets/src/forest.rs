@@ -181,6 +181,10 @@ where
     }
 }
 
+/// The double-sided relation between two types.
+///
+/// A left type takes priority over a right type. And this type assumes that a left and a right
+/// types are unique, so it effectively clears old relations.
 struct Relations<Left, Right>
 where
     Left: std::hash::Hash + Eq,
@@ -213,8 +217,12 @@ where
         Left: Clone,
         Right: Clone,
     {
-        self.left_to_right.insert(left.clone(), right.clone());
-        self.right_to_left.insert(right, left);
+        if let Some(old) = self.left_to_right.insert(left.clone(), right.clone()) {
+            self.right_to_left.remove(&old);
+        }
+        if let Some(old) = self.right_to_left.insert(right, left) {
+            self.left_to_right.remove(&old);
+        }
     }
 
     fn remove_relation_by_left(&mut self, left: &Left) {
