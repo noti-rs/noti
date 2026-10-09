@@ -78,6 +78,7 @@
               [
                 pkg-config
 
+                alsa-lib
                 wayland
                 libGL
                 freetype
@@ -97,11 +98,15 @@
               hash = "sha256-WT7emMyv1IGT+NASwxAlzCyo2Ak/PTyry9lHal6dRtU=";
             };
 
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-              pkgs.llvmPackages_21.libllvm.lib
-              pkgs.wayland
-              pkgs.libGL
-            ];
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+              with pkgs;
+              [
+                llvmPackages_21.libllvm.lib
+                alsa-lib
+                wayland
+                libGL
+              ]
+            );
 
             mkDevShell = (
               rustToolchain:

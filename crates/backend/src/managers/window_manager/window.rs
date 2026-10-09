@@ -1,5 +1,9 @@
 use super::{banner_stack::BannerStack, CachedLayout};
-use crate::{dispatcher::Dispatcher, managers::window_manager::banner_stack::Banner, EglState};
+use crate::{
+    dispatcher::Dispatcher,
+    managers::window_manager::{audio_playback::AudioPlayback, banner_stack::Banner},
+    EglState,
+};
 use config::{self, Config};
 use dbus::{actions::ClosingReason, notification::Notification};
 use log::{debug, error, trace};
@@ -92,6 +96,8 @@ pub(super) struct WindowState {
     pointer_enter_serial: u32,
     pointer_shape: PointerShape,
 
+    audio_playback: AudioPlayback,
+
     has_requested_frame: bool,
     last_presented_time_ns: Option<u64>,
     configuration_state: ConfigurationState,
@@ -182,6 +188,8 @@ impl Window {
             mouse_position: Point::default(),
             pointer_enter_serial: 0,
             pointer_shape: PointerShape::Default,
+
+            audio_playback: AudioPlayback::new(),
 
             has_requested_frame: false,
             last_presented_time_ns: None,
@@ -363,6 +371,7 @@ impl WindowState {
             notifications.into_iter(),
             &self.config,
             &mut self.widget_system.context,
+            &mut self.audio_playback,
         );
         self.rebuild_widget_tree();
     }

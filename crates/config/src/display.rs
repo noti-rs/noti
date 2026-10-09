@@ -1,6 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData, path::PathBuf, time::Duration};
 
 use dbus::notification::Urgency;
+use log::warn;
 use macros::ConfigProperty;
 use serde::{de::Visitor, Deserialize};
 use widgets::animations::{AnimationKind, Fade, Pop, Translate};
@@ -70,6 +71,9 @@ public! {
 
         #[cfg_prop(default(Timeout::new(0)))]
         timeout: Timeout,
+
+        #[cfg_prop(use_type(SoundProperty), mergeable)]
+        sound: Sound,
     }
 }
 
@@ -523,5 +527,44 @@ critical = 0 # but for critical the default value will be overriden
         }
 
         Ok(local_map.into())
+    }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(SoundProperty), derive(Debug, Deserialize, Clone, Default))]
+    struct Sound {
+        path: SoundPath,
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(from = "String")]
+pub enum SoundPath {
+    Exists(String),
+
+    #[default]
+    Empty,
+}
+
+impl SoundPath {
+    pub fn to_option(&self) -> Option<&str> {
+        match self {
+            SoundPath::Exists(val) => Some(val),
+            SoundPath::Empty => None,
+        }
+    }
+}
+
+impl From<String> for SoundPath {
+    fn from(value: String) -> Self {
+        if let Ok(path) = shellexpand::full(&value)
+            .map(|path| path.into_owned())
+            .inspect_err(|err| warn!("Failed to expand a sound path. Error: {err}"))
+        {
+            Self::Exists(path)
+        } else {
+            Self::Empty
+        }
     }
 }

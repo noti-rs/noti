@@ -42,7 +42,7 @@ impl IdleNotifier {
     where
         P: AsRef<WlSeat> + AsRef<ExtIdleNotifierV1>,
     {
-        let threshold = config.general().idle_threshold.duration;
+        let threshold = *config.general().idle_threshold;
 
         let notification = if threshold != 0 {
             Some(
@@ -79,7 +79,8 @@ impl IdleNotifier {
     ) where
         P: AsRef<WlSeat> + AsRef<ExtIdleNotifierV1>,
     {
-        self.threshold = config.general().idle_threshold.duration;
+        self.threshold = *config.general().idle_threshold;
+
         if let Some(notification) = self.notification.take() {
             self.idle_state = None;
             self.was_idled = false;

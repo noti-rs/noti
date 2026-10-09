@@ -26,6 +26,10 @@ use widgets::{
     },
 };
 
+use crate::managers::window_manager::audio_playback::{
+    decode_from_sound_name, decode_from_sound_path, AudioPlayback,
+};
+
 /// The container of banners which allows manage them easily.
 pub(super) struct BannerStack<K>
 where
@@ -126,12 +130,15 @@ impl BannerStack<u32> {
         notifications: I,
         config: &Config,
         context: &mut Context,
+        audio_playback: &mut AudioPlayback,
     ) where
         I: Iterator<Item = Notification>,
     {
         for notification in notifications {
-            self.banners
-                .insert(notification.id, Banner::new(notification, config, context));
+            self.banners.insert(
+                notification.id,
+                Banner::new(notification, config, context, audio_playback),
+            );
         }
         self.sort_by_config(config);
     }
@@ -259,8 +266,40 @@ enum BannerPhase {
 }
 
 impl Banner {
-    pub(super) fn new(notification: Notification, config: &Config, context: &mut Context) -> Self {
+    pub(super) fn new(
+        notification: Notification,
+        config: &Config,
+        context: &mut Context,
+        audio_playback: &mut AudioPlayback,
+    ) -> Self {
         let display = config.display_by_app(&notification.app_name);
+
+        if !notification.hints.suppress_sound.unwrap_or(false) && !audio_playback.is_busy() {
+            if let Some(file_reader) = display
+                .sound
+                .path
+                .to_option()
+                .and_then(decode_from_sound_path)
+                .or_else(|| {
+                    notification
+                        .hints
+                        .sound_file
+                        .as_deref()
+                        .and_then(decode_from_sound_path)
+                })
+                .or_else(|| {
+                    notification
+                        .hints
+                        .sound_name
+                        .as_deref()
+                        .and_then(decode_from_sound_name)
+                })
+            {
+                audio_playback.play_audio(file_reader, config.general());
+            } else {
+                audio_playback.play_default_audio(config.general());
+            }
+        }
 
         let banner_state = BannerState {
             timeout: display.timeout.by_urgency(&notification.hints.urgency) as u128,

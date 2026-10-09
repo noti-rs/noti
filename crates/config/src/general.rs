@@ -24,39 +24,53 @@ public! {
         #[cfg_prop(default(0))]
         limit: u8,
 
-        idle_threshold: IdleThreshold,
+        #[cfg_prop(default(TimeDuration::default_idle_threshold()))]
+        idle_threshold: TimeDuration,
+
+        #[cfg_prop(default(TimeDuration::default_sound_cooldown()))]
+        sound_cooldown: TimeDuration,
     }
 }
 
-public! {
-    #[derive(Debug, Deserialize, Clone)]
-    #[serde(from = "String")]
-    struct IdleThreshold {
-        duration: u32,
+#[derive(Debug, Deserialize, Clone)]
+#[serde(from = "String")]
+pub struct TimeDuration(u32);
+
+impl TimeDuration {
+    fn default_idle_threshold() -> Self {
+        Self(
+            humantime::parse_duration("5 min")
+                .expect("The default duration must be valid")
+                .as_millis() as u32,
+        )
+    }
+
+    fn default_sound_cooldown() -> Self {
+        Self(
+            humantime::parse_duration("300ms")
+                .expect("The default sound cooldown duration must be valid")
+                .as_millis() as u32,
+        )
     }
 }
 
-impl From<String> for IdleThreshold {
+impl From<String> for TimeDuration {
     fn from(duration_str: String) -> Self {
         if duration_str.to_lowercase() == "none" {
-            return Self { duration: 0 };
+            return Self(0);
         }
 
         humantime::parse_duration(&duration_str)
-            .map(|duration| Self {
-                duration: duration.as_millis() as u32,
-            })
-            .unwrap_or_default()
+            .map(|duration| Self(duration.as_millis() as u32))
+            .unwrap_or_else(|_| Self(0))
     }
 }
 
-impl Default for IdleThreshold {
-    fn default() -> Self {
-        IdleThreshold {
-            duration: humantime::parse_duration("5 min")
-                .expect("The default duration must be valid")
-                .as_millis() as u32,
-        }
+impl std::ops::Deref for TimeDuration {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
