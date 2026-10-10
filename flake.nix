@@ -63,6 +63,7 @@
               additionalPackages:
               with pkgs;
               [
+                alsa-lib
                 wayland
                 libGL
                 freetype
