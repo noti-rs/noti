@@ -141,6 +141,7 @@
                 fileset = pkgs.lib.fileset.unions [
                   ((craneLib toolchain).fileset.commonCargoSources unfilteredRoot)
                   ./crates/filetype/src/layout.pest
+                  ./assets/default-notification-sound.mp3
                 ];
               };
 
