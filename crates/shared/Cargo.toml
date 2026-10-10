@@ -10,3 +10,5 @@ anyhow.workspace = true
 derive_more.workspace = true
 
 inotify = "0.11.0"
+html-escape = "0.2.13"
+unic-segment = "0.9.0"

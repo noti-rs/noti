@@ -1,0 +1,721 @@
+use std::ops::{Add, AddAssign, Sub, SubAssign};
+
+use macros::widget;
+
+use crate::{
+    context::{LoadExtent, ManageIntrinsic},
+    decorator::{
+        content::Content, DecoratorExt, DrawDecorator, EventHitTestDecorator, LayoutDecorator,
+        MeasureDecorator,
+    },
+    events::{EventContext, EventHandling, EventHitTest, EventRouter, HitTestResult, PendingEvent},
+    stage::{
+        deinit::{Deinit, DeinitContext},
+        draw::{draw_debug_bounds, Draw, DrawContext, Drawer},
+        init::{Init, InitContext},
+        invalidate::{Invalidate, InvalidateContext, RebuildStatus},
+        layout::{Layout, LayoutContext},
+        measure::{self, Constraints, ManageMeasures, Measure, MeasureContext, SizingMode},
+    },
+    types::{
+        alignment::Position,
+        direction::Direction,
+        extent::{Extent, FlexExtent},
+        identifiers::{WidgetId, WidgetKey},
+        offset::Offset,
+        spacing::Spacing,
+        DirtyFlags, Point,
+    },
+    widget::{WidgetGetType, WidgetInformationContext, WidgetSizingMode},
+};
+
+/// A container widget that arranges its child widgets along a single
+/// axis, inspired by CSS flexbox layout but with a simpler and more
+/// predictable implementation.
+///
+/// The container is responsible for:
+/// * Compiling each child widget and determining its size.
+/// * Shrinking the available space as children are placed.
+/// * Arranging children according to the configured [`Alignment`]
+///   on both the main and cross axis.
+///
+/// This type is intentionally lightweight — it does not implement the
+/// full CSS flexbox algorithm, but provides enough flexibility to build
+/// common layouts without duplicating positioning logic.
+#[widget(kind = container)]
+#[derive(bon::Builder)]
+pub struct FlexBox {
+    #[style]
+    #[dirty(NEEDS_MEASURE)]
+    expand: bool,
+
+    #[style]
+    spacing: usize,
+
+    /// The primary axis used for arranging the child widgets.
+    ///
+    /// This determines the "flow" of the container. In a horizontal
+    /// direction, children are laid out side-by-side in a row. In a
+    /// vertical direction, they are stacked on top of each other
+    /// in a column.
+    #[style(required)]
+    #[dirty(NEEDS_MEASURE)]
+    direction: Direction,
+}
+
+impl FlexBox {
+    fn direction(&self) -> Direction {
+        self.direction.unwrap_or_default()
+    }
+
+    /// Calculates the total space required by all children with spacing along a specific axis.
+    ///
+    /// - **Horizontal Direction:** the sum of all children's widths and spacings between them.
+    /// - **Vertical Direction:** the width of the widest child.
+    pub(crate) fn content_width<C>(&self, context: &C) -> f32
+    where
+        C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
+    {
+        let children = context.childrens_identifiers_of(self.id);
+        let widths = children
+            .iter()
+            .map(|child_widget_id| context.load(*child_widget_id).unwrap_or_default().width);
+
+        match self.direction() {
+            Direction::Horizontal => {
+                widths.sum::<f32>()
+                    + (children.len().saturating_sub(1) * self.spacing.unwrap_or_default()) as f32
+            }
+            Direction::Vertical => widths.reduce(|a, b| a.max(b)).unwrap_or_default(),
+        }
+    }
+
+    /// Calculates the total space required by all children with spacing along a specific axis.
+    ///
+    /// - **Horizontal Direction:** the height of the tallest child.
+    /// - **Vertical Direction:** the sum of all children's heights and spacing between them.
+    pub(crate) fn content_height<C>(&self, context: &C) -> f32
+    where
+        C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
+    {
+        let children = context.childrens_identifiers_of(self.id);
+        let heights = children
+            .iter()
+            .map(|child_widget_id| context.load(*child_widget_id).unwrap_or_default().height);
+
+        match self.direction() {
+            Direction::Horizontal => heights.reduce(|a, b| a.max(b)).unwrap_or_default(),
+            Direction::Vertical => {
+                heights.sum::<f32>()
+                    + (children.len().saturating_sub(1) * self.spacing.unwrap_or_default()) as f32
+            }
+        }
+    }
+
+    /// Returns the total size occupied by children with spacing along the primary axis.
+    ///
+    /// The **Main Extent** follows the container's `direction` (e.g., total
+    /// width in a row).
+    fn main_content_extent<C>(&self, context: &C) -> f32
+    where
+        C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
+    {
+        match self.direction() {
+            Direction::Horizontal => self.content_width(context),
+            Direction::Vertical => self.content_height(context),
+        }
+    }
+
+    /// Returns the total size occupied by children with spacing along the perpendicular axis.
+    ///
+    /// **Cross Extent** measures the "thickness" of the layout (e.g., the height of a row).
+    #[allow(unused)]
+    fn cross_content_extent<C>(&self, context: &C) -> f32
+    where
+        C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
+    {
+        match self.direction() {
+            Direction::Horizontal => self.content_height(context),
+            Direction::Vertical => self.content_width(context),
+        }
+    }
+
+    /// Retrieves the alignment rules specifically for the primary axis.
+    ///
+    /// This unifies how the container treats positioning:
+    /// - In a **Row**, Horizontal.
+    /// - In a **Column**, Vertical.
+    fn main_axis_alignment(&self) -> Position {
+        let alignment = self.alignment.clone().unwrap_or_default();
+
+        match self.direction() {
+            Direction::Horizontal => alignment.horizontal,
+            Direction::Vertical => alignment.vertical,
+        }
+    }
+
+    /// Retrieves the alignment rules specifically for the secondary axis.
+    ///
+    /// This unifies how the container treats positioning:
+    /// - In a **Row**, Vertical.
+    /// - In a **Column**, Horizontal.
+    fn cross_axis_alignment(&self) -> Position {
+        let alignment = self.alignment.clone().unwrap_or_default();
+
+        match self.direction() {
+            Direction::Horizontal => alignment.vertical,
+            Direction::Vertical => alignment.horizontal,
+        }
+    }
+
+    fn compute_children_offsets<C>(
+        &self,
+        context: &C,
+        provided_extent: Extent<f32>,
+    ) -> Vec<((usize, WidgetId), Offset<f32>)>
+    where
+        C: WidgetInformationContext + LoadExtent<f32, WidgetId>,
+    {
+        let mut plane = FBPlane::new(Offset::<f32>::default(), provided_extent, self.direction());
+
+        let main_content_extent = self.main_content_extent(context);
+        plane.main.start = self
+            .main_axis_alignment()
+            .get_start(plane.main.extent, main_content_extent);
+
+        let childrens_indices = context.childrens_identifiers_of(self.id);
+
+        let incrementor = match self.main_axis_alignment() {
+            Position::Start | Position::Center | Position::End => {
+                self.spacing.unwrap_or_default() as f32
+            }
+            Position::SpaceBetween => {
+                if childrens_indices.len() <= 1 {
+                    0.0
+                } else {
+                    // INFO: there's no needs for self.spacing, because during measurement the code
+                    // guarantess that there is available space equal or greater than self.spacing.
+                    (plane.main.extent - main_content_extent)
+                        / childrens_indices.len().saturating_sub(1) as f32
+                }
+            }
+        };
+
+        let cross_axis_start = plane.cross.start;
+        let cross_axis_alignment = self.cross_axis_alignment();
+
+        childrens_indices
+            .into_iter()
+            .enumerate()
+            .map(|(index, child_widget_id)| {
+                let child_extent = <C as LoadExtent<f32, WidgetId>>::load(context, child_widget_id)
+                    .unwrap_or_default()
+                    .to_flex(&self.direction());
+
+                plane.cross.start = cross_axis_start
+                    + cross_axis_alignment.get_start(plane.cross.extent, child_extent.cross);
+
+                let offset = plane.as_offset();
+
+                plane.cut_front(child_extent.main + incrementor);
+
+                ((index, child_widget_id), offset)
+            })
+            .collect::<Vec<_>>()
+    }
+}
+
+impl WidgetGetType for FlexBox {
+    fn get_type(&self) -> &'static str {
+        "flexbox"
+    }
+}
+
+impl<C> WidgetSizingMode<C> for FlexBox
+where
+    C: WidgetInformationContext,
+{
+    fn sizing_mode(&self, _context: &C) -> SizingMode {
+        SizingMode::Dynamic
+    }
+}
+
+impl<C> Init<C> for FlexBox
+where
+    C: InitContext,
+{
+    fn on_init(&mut self, _context: &mut C) {}
+}
+
+impl<C> Deinit<C> for FlexBox where C: DeinitContext {}
+
+impl<C> Invalidate<C> for FlexBox
+where
+    C: InvalidateContext,
+{
+    fn on_reuse(&mut self, _old: &dyn std::any::Any, _context: &mut C) -> crate::types::DirtyFlags {
+        DirtyFlags::empty()
+    }
+
+    fn on_rebuild(&mut self, _context: &mut C) -> RebuildStatus {
+        RebuildStatus::NothingChanged
+    }
+}
+
+impl<C> Measure<C, f32> for FlexBox
+where
+    C: MeasureContext<f32>,
+{
+    fn intrinsic_content(&self, context: &mut C) -> measure::Intrinsic<f32>
+    where
+        C: ManageIntrinsic<f32, WidgetId>,
+    {
+        Content::intrinsic_fn(|| {
+            let childrens_indices = context.childrens_identifiers_of(self.id);
+            if childrens_indices.is_empty() {
+                return measure::Intrinsic::default();
+            }
+
+            let between_children_spacing = (childrens_indices.len().saturating_sub(1)
+                * self.spacing.unwrap_or_default())
+                as f32;
+
+            let mut min_intrinsic = FlexExtent::<f32> {
+                main: between_children_spacing,
+                cross: 0.0,
+            };
+
+            let mut max_intrinsic = FlexExtent::<f32> {
+                main: between_children_spacing,
+                cross: 0.0,
+            };
+
+            for child_widget_id in &childrens_indices {
+                let child_intrinsic = context
+                    .widget_intrinsic(child_widget_id)
+                    .expect("A child must exist in a FlexContainer!");
+
+                let child_min_intrinsic = child_intrinsic.min.to_flex(&self.direction());
+                min_intrinsic.main += child_min_intrinsic.main;
+                min_intrinsic.cross = min_intrinsic.cross.max(child_min_intrinsic.cross);
+
+                let child_max_intrinsic = child_intrinsic.max.to_flex(&self.direction());
+                max_intrinsic.main += child_max_intrinsic.main;
+                max_intrinsic.cross = max_intrinsic.cross.max(child_max_intrinsic.cross);
+            }
+
+            measure::Intrinsic::new(
+                min_intrinsic.to_normal(&self.direction()),
+                max_intrinsic.to_normal(&self.direction()),
+            )
+        })
+        .spacing(self.padding.unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .spacing(self.margin.unwrap_or_default())
+        .intrinsic()
+    }
+
+    fn measure_content(&self, context: &mut C, constraints: Constraints<Extent<f32>>) -> Extent<f32>
+    where
+        C: ManageMeasures<f32, WidgetId>,
+    {
+        Content::measure_fn(|constraints| {
+            let mut fixed_children = vec![];
+            let mut dynamic_children = vec![];
+
+            let childrens_indices = context.childrens_identifiers_of(self.id);
+
+            for child_widget_id in &childrens_indices {
+                let intrinsic = context
+                    .widget_intrinsic(child_widget_id)
+                    .expect("A child widget must exist in a FlexContainer!");
+
+                match context
+                    .widget_sizing_mode(child_widget_id)
+                    .expect("A child widget must exist in a FlexContainer!")
+                {
+                    SizingMode::Fixed => fixed_children.push((child_widget_id, intrinsic)),
+                    SizingMode::Dynamic => dynamic_children.push((child_widget_id, intrinsic)),
+                }
+            }
+
+            let flex_constraints = Constraints {
+                min: constraints.min.to_flex(&self.direction()),
+                max: constraints.max.to_flex(&self.direction()),
+            };
+
+            let mut used_extent = <FlexExtent<f32>>::default();
+            let between_children_spacing = (childrens_indices.len().saturating_sub(1)
+                * self.spacing.unwrap_or_default())
+                as f32;
+            used_extent.main += between_children_spacing;
+
+            for (child_widget_id, child_intrinsic) in fixed_children {
+                let child_constraints = Constraints::new_soft(
+                    FlexExtent {
+                        main: child_intrinsic.max.by_direction(&self.direction()),
+                        cross: child_intrinsic
+                            .max
+                            .by_direction(&self.direction().orthogonalize())
+                            .min(flex_constraints.max.cross),
+                    }
+                    .to_normal(&self.direction()),
+                );
+
+                let child_used = context
+                    .measure_widget(child_widget_id, child_constraints)
+                    .expect("A child must exist and be measured in a FlexContainer!")
+                    .to_flex(&self.direction());
+
+                used_extent.main += child_used.main;
+                used_extent.cross = used_extent.cross.max(child_used.cross);
+            }
+
+            let mut remainder = flex_constraints.max.main - used_extent.main;
+            let mut freezed_childs = vec![];
+            let mut base_fair_share = 0.0;
+
+            'outer: while !dynamic_children.is_empty() {
+                let fair_share = remainder / dynamic_children.len() as f32;
+
+                for i in 0..dynamic_children.len() {
+                    let (child, child_intrinsic) = dynamic_children[i];
+
+                    let child_min_main = child_intrinsic.min.by_direction(&self.direction());
+                    let child_max_main = child_intrinsic.max.by_direction(&self.direction());
+
+                    if fair_share > child_max_main {
+                        dynamic_children.remove(i);
+
+                        freezed_childs.push((
+                            child,
+                            FlexExtent {
+                                main: child_max_main,
+                                cross: flex_constraints.max.cross,
+                            },
+                        ));
+
+                        remainder -= child_max_main;
+                        continue 'outer;
+                    } else if fair_share < child_min_main {
+                        dynamic_children.remove(i);
+
+                        freezed_childs.push((
+                            child,
+                            FlexExtent {
+                                main: child_min_main,
+                                cross: flex_constraints.max.cross,
+                            },
+                        ));
+
+                        remainder = (remainder - child_min_main).max(0.0);
+                        continue 'outer;
+                    }
+                }
+
+                base_fair_share = fair_share;
+                break;
+            }
+
+            for (child_widget_id, fair_share_extent) in freezed_childs {
+                let child_constraints =
+                    Constraints::new_soft(fair_share_extent.to_normal(&self.direction()));
+
+                let child_used = context
+                    .measure_widget(child_widget_id, child_constraints)
+                    .expect("A child widget must exist and be measured in a FlexContainer!")
+                    .to_flex(&self.direction());
+
+                used_extent.main += child_used.main;
+                used_extent.cross = used_extent.cross.max(child_used.cross);
+            }
+
+            for (child_widget_id, _) in dynamic_children {
+                let child_constraints = Constraints::new_soft(
+                    FlexExtent {
+                        main: base_fair_share,
+                        cross: flex_constraints.max.cross,
+                    }
+                    .to_normal(&self.direction()),
+                );
+
+                let child_used = context
+                    .measure_widget(child_widget_id, child_constraints)
+                    .expect("A child widget must exist and be measured in a FlexContainer!")
+                    .to_flex(&self.direction());
+
+                used_extent.main += child_used.main;
+                used_extent.cross = used_extent.cross.max(child_used.cross);
+            }
+
+            let mut used_extent = (used_extent.to_normal(&self.direction()))
+                .clamp_with(constraints.min, constraints.max);
+
+            if self.expand.unwrap_or(false) {
+                match self.direction() {
+                    Direction::Horizontal => used_extent.width = constraints.max.width,
+                    Direction::Vertical => used_extent.height = constraints.max.height,
+                }
+            }
+
+            used_extent
+        })
+        .spacing(self.padding.unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .spacing(self.margin.unwrap_or_default())
+        .measure(constraints)
+    }
+}
+
+impl<C> Layout<C, f32> for FlexBox
+where
+    C: LayoutContext<f32>,
+{
+    fn on_layout(
+        &mut self,
+        context: &mut C,
+        local_coord: Point<f32>,
+        provided_extent: Extent<f32>,
+    ) {
+        Content::layout_fn(|local_coord: Point<f32>, provided_extent: Extent<f32>| {
+            for ((_index, child_widget_id), offset) in
+                self.compute_children_offsets(context, provided_extent)
+            {
+                context.layout_widget(&child_widget_id, local_coord + offset.into());
+            }
+        })
+        .spacing(self.padding.unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .spacing(self.margin.unwrap_or_default())
+        .layout(local_coord, provided_extent);
+    }
+}
+
+impl<C> Draw<C, f32> for FlexBox
+where
+    C: DrawContext<f32>,
+{
+    fn draw_content(
+        &self,
+        context: &C,
+        offset: &Offset<f32>,
+        provided_extent: Extent<f32>,
+        drawer: &mut Drawer,
+    ) {
+        Content::draw_fn(
+            |offset: &Offset<f32>, provided_extent: Extent<f32>, drawer: &mut Drawer| {
+                for ((_index, child_widget_id), local_offset) in
+                    self.compute_children_offsets(context, provided_extent)
+                {
+                    context.draw_widget(&child_widget_id, &(local_offset + *offset), drawer);
+                }
+
+                if context.get_debug_options().show_layout_bounds {
+                    let plane =
+                        FBPlane::new(Offset::<f32>::default(), provided_extent, self.direction());
+                    let shift = match self.direction() {
+                        Direction::Horizontal => Offset::new(plane.main.start, plane.cross.start),
+                        Direction::Vertical => Offset::new(plane.cross.start, plane.main.start),
+                    };
+
+                    draw_debug_bounds(
+                        drawer.surface.canvas(),
+                        *offset + shift,
+                        FlexExtent {
+                            main: plane.main.extent,
+                            cross: plane.cross.extent,
+                        }
+                        .to_normal(&self.direction()),
+                    );
+                }
+            },
+        )
+        .spacing(self.padding.unwrap_or_default())
+        .background(self.background_color.clone().unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .spacing(self.margin.unwrap_or_default())
+        .draw(offset, provided_extent, drawer);
+    }
+}
+
+impl<C> EventHitTest<C, f32> for FlexBox
+where
+    C: EventContext<f32>,
+{
+    fn on_hit_test(
+        &self,
+        context: &C,
+        local_coords: Point<f32>,
+        provided_extent: Extent<f32>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        Content::hit_test_fn(
+            |local_coords: Point<f32>, provided_extent: Extent<f32>, router: &mut EventRouter| {
+                let mut hit_result = HitTestResult::Missed;
+
+                for ((index, child_widget_id), offset) in
+                    self.compute_children_offsets(context, provided_extent)
+                {
+                    hit_result = context
+                        .hit_test_widget(&child_widget_id, local_coords - offset.into(), router)
+                        .expect(
+                            "A child widget must exist and be able to hit test in a FlexContainer!",
+                        );
+
+                    match &hit_result {
+                        HitTestResult::Missed => (),
+                        HitTestResult::Hit => {
+                            router.set_next_index(self.id, index);
+                            break;
+                        }
+                        HitTestResult::Failed => break,
+                    }
+                }
+
+                hit_result
+            },
+        )
+        .spacing(self.padding.unwrap_or_default())
+        .border(self.border.clone().unwrap_or_default())
+        .spacing(self.margin.unwrap_or_default())
+        .hit_test(self.id, local_coords, provided_extent, router)
+    }
+}
+
+impl<C> EventHandling<C, f32> for FlexBox
+where
+    C: EventContext<f32>,
+{
+    fn handle_events(
+        &mut self,
+        context: &mut C,
+        _pending_events: Vec<PendingEvent>,
+        next_child: usize,
+        router: &EventRouter,
+    ) {
+        if let Some(child_widget_id) = context.childrens_identifiers_of(self.id).get(next_child) {
+            context.route_events_to_widget(child_widget_id, router);
+        }
+    }
+}
+
+/// FB stands for FlexBox.
+///
+/// A helper type that abstracts away the difference between horizontal
+/// and vertical layout, allowing the container logic to operate on a
+/// single *main axis* and a single *cross axis*.
+///
+/// This prevents code duplication — layout math can be written once
+/// for a generic axis, and converted back into X/Y coordinates on
+/// demand.
+struct FBPlane<T>
+where
+    T: Default + Copy,
+{
+    main: AxisSegment<T>,
+    cross: AxisSegment<T>,
+
+    direction: Direction,
+}
+
+impl<T> FBPlane<T>
+where
+    T: Default + Copy,
+{
+    /// Creates a new [`FBPlane`] from an offset and container extent, mapping
+    /// corresponding main/cross axis values depending on [`Direction`].
+    fn new<O, R>(offset: O, extent: R, direction: Direction) -> Self
+    where
+        O: Into<Offset<T>>,
+        R: Into<Extent<T>>,
+    {
+        let mut offset = offset.into();
+        let mut extent = extent.into();
+
+        if let Direction::Vertical = direction {
+            (offset.x, offset.y) = (offset.y, offset.x);
+            (extent.width, extent.height) = (extent.height, extent.width);
+        }
+
+        Self {
+            main: AxisSegment::new(offset.x, extent.width),
+            cross: AxisSegment::new(offset.y, extent.height),
+            direction,
+        }
+    }
+
+    /// Uses the provided cut length to increase offset and decrease
+    /// extent of main axis.
+    fn cut_front(&mut self, cut_len: T)
+    where
+        T: Add<Output = T> + Sub<Output = T> + AddAssign + SubAssign + PartialOrd,
+    {
+        let new_start = self.main.start + cut_len;
+        if new_start >= self.main.start {
+            self.main.start = new_start;
+        } // INFO: otherwise a number wraps around and better do nothing, because we don't know
+          // which is the number type. In case of signed number (like i32), need to use formula
+          // `start += cut_len + new_start`, but in case of unsigned number (like u32), the formula
+          // changes to `start += cut_len - new_start`.
+
+        if self.main.extent < cut_len {
+            self.main.extent -= self.main.extent;
+        } else {
+            self.main.extent -= cut_len;
+        }
+    }
+
+    /// Converts the plane’s main/cross extents back into a standard
+    /// [`Extent2D`] in X/Y coordinates.
+    #[allow(unused)]
+    fn as_extent(&self) -> Extent<T> {
+        let (mut width, mut height) = (self.main.extent, self.cross.extent);
+
+        if let Direction::Vertical = self.direction {
+            (width, height) = (height, width);
+        }
+
+        Extent::new(width, height)
+    }
+
+    /// Converts the plane’s main/cross offsets back into a standard
+    /// [`Offset`] in X/Y coordinates.
+    fn as_offset(&self) -> Offset<T> {
+        let (mut x, mut y) = (self.main.start, self.cross.start);
+
+        if let Direction::Vertical = self.direction {
+            (x, y) = (y, x);
+        }
+
+        Offset::new(x, y)
+    }
+}
+
+/// Think of `AxisSegment` as a simple ruler laid down on a line.
+///
+/// Instead of worrying about whether we are talking about X (left-to-right)
+/// or Y (top-to-bottom), we just care about two things: where the ruler
+/// starts and how long it is.
+///
+/// This is super helpful for layout containers that have direction of arranging children.
+/// By turning 2D coordinates into these simple segments, we can apply
+/// the same logic to both the "main" direction and the "cross" direction
+/// without getting confused.
+struct AxisSegment<T>
+where
+    T: Default + Copy,
+{
+    /// Where the segment begins on the axis.
+    start: T,
+    /// How far the segment reaches from the start.
+    extent: T,
+}
+
+impl<T> AxisSegment<T>
+where
+    T: Default + Copy,
+{
+    fn new(start: T, extent: T) -> Self {
+        Self { start, extent }
+    }
+}

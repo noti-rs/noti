@@ -1,0 +1,206 @@
+use std::ops::{Div, Mul};
+
+use crate::{
+    decorator::{
+        DecoratorType, DrawDecorator, EventHitTestDecorator, LayoutDecorator, MeasureDecorator,
+    },
+    events::{EventRouter, HitTestResult},
+    stage::{
+        draw::Drawer,
+        measure::{Constraints, Intrinsic},
+    },
+    types::{Extent, Point, WidgetId},
+};
+
+pub(crate) struct BoxSizeDecorator<N, T> {
+    pub(super) width: Option<T>,
+    pub(super) height: Option<T>,
+    pub(super) ratio: Option<f32>,
+    pub(super) next: N,
+}
+
+impl<N, T> BoxSizeDecorator<N, T>
+where
+    T: DecoratorType + Div<f32, Output = T> + Mul<f32, Output = T>,
+{
+    fn update_extent(&self, extent: Extent<T>) -> Extent<T> {
+        let mut new_extent = extent;
+
+        if let Some(width) = self.width {
+            new_extent.width = width;
+
+            if self.height.is_none() {
+                if let Some(ratio) = self.ratio {
+                    let height = width / ratio;
+
+                    new_extent.height = height;
+                }
+            }
+        }
+
+        if let Some(height) = self.height {
+            new_extent.height = height;
+
+            if self.width.is_none() {
+                if let Some(ratio) = self.ratio {
+                    let width = height * ratio;
+
+                    new_extent.width = width;
+                }
+            }
+        }
+
+        new_extent
+    }
+}
+
+impl<N, T> MeasureDecorator<T> for BoxSizeDecorator<N, T>
+where
+    N: MeasureDecorator<T>,
+    T: DecoratorType + Div<f32, Output = T> + Mul<f32, Output = T>,
+{
+    fn intrinsic(&mut self) -> Intrinsic<T> {
+        let mut intrinsic = self.next.intrinsic();
+
+        if let Some(width) = self.width {
+            intrinsic.min.width = width;
+            intrinsic.max.width = width;
+
+            if self.height.is_none() {
+                if let Some(ratio) = self.ratio {
+                    intrinsic.min.height = width / ratio;
+                    intrinsic.max.height = width / ratio;
+                }
+            }
+        }
+
+        if let Some(height) = self.height {
+            intrinsic.min.height = height;
+            intrinsic.max.height = height;
+
+            if self.width.is_none() {
+                if let Some(ratio) = self.ratio {
+                    intrinsic.min.width = height * ratio;
+                    intrinsic.max.width = height * ratio;
+                }
+            }
+        }
+
+        intrinsic
+    }
+
+    fn measure(&mut self, constraints: Constraints<Extent<T>>) -> Extent<T> {
+        let mut new_constraints = constraints;
+
+        if let Some(width) = self.width {
+            new_constraints.min.width = width;
+            new_constraints.max.width = width;
+
+            if self.height.is_none() {
+                if let Some(ratio) = self.ratio {
+                    new_constraints.min.height = width / ratio;
+                    new_constraints.max.height = width / ratio;
+                }
+            }
+        }
+
+        if let Some(height) = self.height {
+            new_constraints.min.height = height;
+            new_constraints.max.height = height;
+
+            if self.width.is_none() {
+                if let Some(ratio) = self.ratio {
+                    new_constraints.min.width = height * ratio;
+                    new_constraints.max.width = height * ratio;
+                }
+            }
+        }
+
+        if self.width.is_none() && self.height.is_none() {
+            if let Some(ratio) = self.ratio {
+                let mut proportional_width = new_constraints.max.width;
+                let mut proportional_height = proportional_width / ratio;
+
+                if proportional_height > new_constraints.max.height {
+                    proportional_height = new_constraints.max.height;
+                    proportional_width = proportional_height * ratio;
+                }
+
+                let fixed_extent = Extent::new(proportional_width, proportional_height);
+                new_constraints.min = fixed_extent;
+                new_constraints.max = fixed_extent;
+            }
+        }
+
+        self.next
+            .measure(new_constraints)
+            .clamp_with(constraints.min, constraints.max)
+    }
+}
+
+impl<N, T> LayoutDecorator<T> for BoxSizeDecorator<N, T>
+where
+    N: LayoutDecorator<T>,
+    T: DecoratorType + Div<f32, Output = T> + Mul<f32, Output = T>,
+{
+    fn layout(&mut self, local_coord: Point<T>, provided_extent: Extent<T>) {
+        let new_extent = self.update_extent(provided_extent);
+
+        self.next.layout(local_coord, new_extent);
+    }
+}
+
+impl<N, T> DrawDecorator<T> for BoxSizeDecorator<N, T>
+where
+    N: DrawDecorator<T>,
+    T: DecoratorType + Div<f32, Output = T> + Mul<f32, Output = T> + Into<f32>,
+{
+    fn draw(
+        &self,
+        offset: &crate::types::Offset<T>,
+        provided_extent: Extent<T>,
+        drawer: &mut Drawer,
+    ) {
+        let new_extent = self.update_extent(provided_extent);
+
+        if new_extent.is_collapsed() {
+            return;
+        }
+
+        let canvas = drawer.surface.canvas();
+        canvas.save();
+        canvas.clip_rect(
+            skia_safe::Rect::from_xywh(
+                offset.x.into(),
+                offset.y.into(),
+                new_extent.width.into(),
+                new_extent.height.into(),
+            ),
+            skia_safe::ClipOp::Intersect,
+            true,
+        );
+
+        self.next.draw(offset, new_extent, drawer);
+
+        drawer.surface.canvas().restore();
+    }
+}
+
+impl<N, T> EventHitTestDecorator<T> for BoxSizeDecorator<N, T>
+where
+    N: EventHitTestDecorator<T>,
+    T: DecoratorType + Div<f32, Output = T> + Mul<f32, Output = T>,
+{
+    fn on_hit_test(
+        &self,
+        widget_id: WidgetId,
+        local_coords: Point<T>,
+        provided_extent: Extent<T>,
+        router: &mut EventRouter,
+    ) -> HitTestResult {
+        let new_extent = self.update_extent(provided_extent);
+
+        self.next
+            .hit_test(widget_id, local_coords, new_extent, router)
+    }
+}

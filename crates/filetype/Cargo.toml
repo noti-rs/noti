@@ -6,8 +6,7 @@ edition.workspace = true
 
 [dependencies]
 shared.workspace = true
-render.workspace = true
-config.workspace = true
+widgets.workspace = true
 
 anyhow.workspace = true
 log.workspace = true

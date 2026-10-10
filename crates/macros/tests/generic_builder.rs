@@ -37,7 +37,7 @@ struct Test {
     #[gbuilder(aliases(field4), default)]
     field5: usize,
     field2: String,
-    #[gbuilder(hidden, default)]
+    #[gbuilder(hidden)]
     field3: Option<u32>,
 }
 

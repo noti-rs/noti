@@ -6,8 +6,8 @@ use syn::{
 
 use crate::{
     general::{
-        field_name, wrap_by_option, AttributeInfo, DefaultAssignment, DeriveInfo, ExpectIdent,
-        Structure,
+        field_name, is_option, wrap_by_option, AttributeInfo, DefaultAssignment, DeriveInfo,
+        ExpectIdent, Structure,
     },
     propagate_err,
 };
@@ -138,8 +138,10 @@ impl Structure {
                         qself: None,
                         path: use_gbuilder.clone(),
                     })
-                } else {
+                } else if !is_option(&field.ty) {
                     wrap_by_option(field.ty.clone())
+                } else {
+                    field.ty.clone()
                 }
             });
             fields.to_tokens(tokens)
@@ -351,7 +353,27 @@ impl Structure {
                     line = quote! { #line.try_build() }
                 };
 
-                if let Some(default_assignment) = attribute_info
+                if is_option(&field.ty) {
+                    if let Some(default_assignment) = attribute_info
+                        .fields_info
+                        .get(&field_name)
+                        .and_then(|field_attribute| field_attribute.default.as_ref())
+                    {
+                        match default_assignment {
+                            DefaultAssignment::Expression(expr) => {
+                                line = quote! { #line.or_else(|| #expr) }
+                            }
+                            DefaultAssignment::FunctionCall(function_path) => {
+                                line = quote! { #line.or_else(#function_path) }
+                            }
+                            DefaultAssignment::DefaultCall => {
+                                line = quote! { #line.or_else(|| Some(Default::default())) }
+                            }
+                        }
+                    } else if is_associated_gbuilder {
+                        line = quote! { #line.ok() }
+                    }
+                } else if let Some(default_assignment) = attribute_info
                     .fields_info
                     .get(&field_name)
                     .and_then(|field_attribute| field_attribute.default.as_ref())

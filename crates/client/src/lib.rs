@@ -3,25 +3,56 @@ use log::debug;
 use std::collections::HashMap;
 use zbus::zvariant::Value;
 
+/// Represents the optional "hints" data associated with a notification,
+/// as defined by the [freedesktop notification specification](https://specifications.freedesktop.org/notification-spec/latest/ar01s09.html).
+///
+/// Hints provide additional context for the notification server, such as
+/// urgency, sound behavior, and how the notification should be displayed.
 pub struct HintsData {
+    /// The urgency level of the notification as a string (`"low"`, `"normal"`, `"critical"`).
     pub urgency: Option<String>,
+
+    /// The notification category (e.g., `"email.arrived"`, `"device.added"`).
     pub category: Option<String>,
+
+    /// The `Desktop Entry` ID of the sending application.
     pub desktop_entry: Option<String>,
+
+    /// Path to an image to display with the notification.
     pub image_path: Option<String>,
+
+    /// Whether the notification should remain until explicitly dismissed.
     pub resident: Option<bool>,
+
+    /// Path to a sound file to play when showing the notification.
     pub sound_file: Option<String>,
+
+    /// Named sound to play (from the sound theme).
     pub sound_name: Option<String>,
+
+    /// If `true`, suppresses any sound from playing.
     pub suppress_sound: Option<bool>,
+
+    /// If `true`, marks the notification as transient (not persistent).
     pub transient: Option<bool>,
+
+    /// If `true`, display action buttons with icons if supported.
     pub action_icons: Option<bool>,
+
+    /// Custom scheduling hint (non-standard, application-specific).
     pub schedule: Option<String>,
 }
 
+/// A wrapper around [`dbus::client::Client`] tailored specifically for the `noti` application.
+///
+/// This provides a simplified, application-specific interface for interacting with D-Bus,
+/// abstracting away generic client details.
 pub struct NotiClient<'a> {
     dbus_client: dbus::client::Client<'a>,
 }
 
 impl NotiClient<'_> {
+    /// Initializes a `noti` client with a connection to a D-Bus notification server.
     pub async fn init() -> anyhow::Result<Self> {
         let client = dbus::client::Client::init().await?;
         Ok(Self {
@@ -29,6 +60,11 @@ impl NotiClient<'_> {
         })
     }
 
+    /// Sends a notification to the D-Bus notification server for display.
+    ///
+    /// The server will handle the notification according to the freedesktop
+    /// notification specification, showing it on the screen and processing any
+    /// hints or actions associated with it.
     #[allow(clippy::too_many_arguments)]
     pub async fn send_notification(
         &self,
@@ -77,6 +113,10 @@ impl NotiClient<'_> {
         Ok(notification_id)
     }
 
+    /// Requests information about the notification server from the D-Bus notification server.
+    ///
+    /// This retrieves metadata such as the server’s name, supported capabilities,
+    /// and limits, according to the freedesktop notification specification.
     pub async fn get_server_info(&self) -> anyhow::Result<()> {
         debug!("Client: Trying to request server information");
         let server_info = self.dbus_client.get_server_information().await?;
@@ -91,6 +131,10 @@ impl NotiClient<'_> {
     }
 }
 
+/// Parses user-provided actions into valid entries for the D-Bus notification server.
+///
+/// Ensures that the actions conform to the freedesktop notification specification,
+/// allowing them to be displayed and triggered correctly by the server.
 fn build_actions(actions: &[String]) -> anyhow::Result<Vec<&str>> {
     let mut new_actions = Vec::with_capacity(actions.len() * 2);
 
@@ -109,6 +153,10 @@ fn build_actions(actions: &[String]) -> anyhow::Result<Vec<&str>> {
     Ok(new_actions)
 }
 
+/// Parses user-provided hints into valid entries for the D-Bus notification server.
+///
+/// Validates and formats hints according to the freedesktop notification specification,
+/// ensuring that the server can interpret and act on them correctly.
 fn build_hints<'a>(
     hints: &'a [String],
     hints_data: HintsData,
@@ -148,6 +196,10 @@ fn build_hints<'a>(
     Ok(hints_map)
 }
 
+/// Parses a hint’s type and value, converting it into a [`Value`] compatible with D-Bus.
+///
+/// This simplifies the code by ensuring that all hints are correctly typed and
+/// formatted for the D-Bus notification server, avoiding manual conversions.
 fn parse_hint_value<'a>(hint_type: &'_ str, hint_value: &'a str) -> anyhow::Result<Value<'a>> {
     Ok(match hint_type {
         "int" => Value::I32(hint_value.parse()?),

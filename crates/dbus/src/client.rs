@@ -2,6 +2,9 @@ use log::debug;
 use std::collections::HashMap;
 use zbus::{proxy, zvariant::Value, Connection};
 
+/// Proxy for the D-Bus notification endpoint.
+///
+/// All functions follow [the Freedesktop notification specification](https://specifications.freedesktop.org/notification-spec/latest/).
 #[proxy(
     default_service = "org.freedesktop.Notifications",
     default_path = "/org/freedesktop/Notifications"
@@ -23,11 +26,15 @@ pub trait Notifications {
     async fn get_server_information(&self) -> anyhow::Result<(String, String, String, String)>;
 }
 
+/// Represents a client connected to a D-Bus notification server via a specified endpoint.
 pub struct Client<'a> {
     proxy: NotificationsProxy<'a>,
 }
 
 impl Client<'_> {
+    /// Connects to a D-Bus notification server.
+    ///
+    /// Initialization may fail if no D-Bus notification server is available.
     pub async fn init() -> anyhow::Result<Self> {
         debug!("D-Bus Client: Initializing");
         let connection = Connection::session().await?;
@@ -37,6 +44,7 @@ impl Client<'_> {
         Ok(Self { proxy })
     }
 
+    /// Sends a notification to a D-Bus notification server.
     #[allow(clippy::too_many_arguments)]
     pub async fn notify(
         &self,
@@ -68,6 +76,7 @@ impl Client<'_> {
         Ok(reply)
     }
 
+    /// Requests information about the server from a D-Bus notification server.
     pub async fn get_server_information(&self) -> anyhow::Result<(String, String, String, String)> {
         debug!("D-Bus Client: Trying to get server information");
         let reply = self.proxy.get_server_information().await?;

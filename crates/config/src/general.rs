@@ -11,78 +11,66 @@ public! {
     #[derive(ConfigProperty, Debug)]
     #[cfg_prop(name(TomlGeneralConfig), derive(Debug, Default, Deserialize, Clone))]
     struct GeneralConfig {
-        font: Font,
-
-        #[cfg_prop(default(300))]
-        width: u16,
-        #[cfg_prop(default(150))]
-        height: u16,
-
         anchor: Anchor,
         offset: (u8, u8),
         #[cfg_prop(default(10))]
         gap: u8,
+
+        #[cfg_prop(use_type(DebugTomlConfig), mergeable)]
+        debug: DebugConfig,
 
         sorting: Sorting,
 
         #[cfg_prop(default(0))]
         limit: u8,
 
-        idle_threshold: IdleThreshold,
+        #[cfg_prop(default(TimeDuration::default_idle_threshold()))]
+        idle_threshold: TimeDuration,
+
+        #[cfg_prop(default(TimeDuration::default_sound_cooldown()))]
+        sound_cooldown: TimeDuration,
     }
 }
 
-public! {
-    #[derive(Debug, Deserialize, Clone)]
-    #[serde(from = "String")]
-    struct IdleThreshold {
-        duration: u32,
+#[derive(Debug, Deserialize, Clone)]
+#[serde(from = "String")]
+pub struct TimeDuration(u32);
+
+impl TimeDuration {
+    fn default_idle_threshold() -> Self {
+        Self(
+            humantime::parse_duration("5 min")
+                .expect("The default duration must be valid")
+                .as_millis() as u32,
+        )
+    }
+
+    fn default_sound_cooldown() -> Self {
+        Self(
+            humantime::parse_duration("300ms")
+                .expect("The default sound cooldown duration must be valid")
+                .as_millis() as u32,
+        )
     }
 }
 
-impl From<String> for IdleThreshold {
+impl From<String> for TimeDuration {
     fn from(duration_str: String) -> Self {
         if duration_str.to_lowercase() == "none" {
-            return Self { duration: 0 };
+            return Self(0);
         }
 
         humantime::parse_duration(&duration_str)
-            .map(|duration| Self {
-                duration: duration.as_millis() as u32,
-            })
-            .unwrap_or_default()
+            .map(|duration| Self(duration.as_millis() as u32))
+            .unwrap_or_else(|_| Self(0))
     }
 }
 
-impl Default for IdleThreshold {
-    fn default() -> Self {
-        IdleThreshold {
-            duration: humantime::parse_duration("5 min")
-                .expect("The default duration must be valid")
-                .as_millis() as u32,
-        }
-    }
-}
+impl std::ops::Deref for TimeDuration {
+    type Target = u32;
 
-public! {
-    #[derive(Debug, Deserialize, Clone)]
-    #[serde(from = "String")]
-    struct Font {
-        name: String,
-    }
-}
-
-impl From<String> for Font {
-    fn from(name: String) -> Self {
-        Font { name }
-    }
-}
-
-impl Default for Font {
-    fn default() -> Self {
-        Font {
-            name: "Noto Sans".to_string(),
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -145,5 +133,19 @@ impl From<String> for Anchor {
                 Used: {other}"
             ),
         }
+    }
+}
+
+public! {
+    #[derive(ConfigProperty, Debug)]
+    #[cfg_prop(name(DebugTomlConfig), derive(Debug, Default, Deserialize, Clone))]
+    struct DebugConfig {
+        /// Shows bounds of each UI component. There's two outlines:
+        /// + Dashed Magenta — provided extent for UI component, may be bigger than actual content
+        /// + Solid Green — actual extent of UI component
+        ///
+        /// Dashed Magenta and Solid Green may matches at some or all sides. And for this Solid
+        /// Green is slightly transparent to show the Dashed Magenta below it.
+        show_layout_bounds: bool,
     }
 }
